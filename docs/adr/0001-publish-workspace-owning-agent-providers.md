@@ -27,8 +27,7 @@ Create the public repository `allagentsdev/promptfoo-integrations` as a Bun work
 
 The initial public package is `@allagents/promptfoo-provider`. It exports:
 
-- `WorkspaceProvider` — the recommended workspace-owning provider;
-- `WorkspaceProvider as Provider` — the stable short alias used by Promptfoo package references; and
+- `Provider` — the recommended workspace-owning provider and default export; and
 - `CopilotSdkProvider` — the lower-level Copilot SDK provider for callers that already own a workspace.
 
 The repository may later publish:
@@ -40,10 +39,10 @@ Shared workspace implementation begins as a private workspace package. Its runti
 
 ### Public provider references
 
-The package exports descriptive class names, the workspace provider as `Provider`, and the workspace provider as the default:
+The package exports two provider classes and makes `Provider` the default:
 
 ```ts
-export class WorkspaceProvider {
+export class Provider {
   // implementation
 }
 
@@ -51,8 +50,7 @@ export class CopilotSdkProvider {
   // implementation
 }
 
-export { WorkspaceProvider as Provider };
-export default WorkspaceProvider;
+export default Provider;
 ```
 
 The workspace-owning provider is:
@@ -69,7 +67,7 @@ providers:
   - id: package:@allagents/promptfoo-provider:CopilotSdkProvider
 ```
 
-Named exports keep TypeScript, stack traces, and generated declarations descriptive. The default is not the documented Promptfoo convention because explicit named exports are stable across ESM/CommonJS interop.
+Explicit named exports are stable across ESM/CommonJS interop. The default is available to ordinary JavaScript consumers but is not the documented Promptfoo convention because Promptfoo package references require the export suffix.
 
 The wrapper configuration is closed. A representative complete configuration is:
 
@@ -104,7 +102,7 @@ providers:
 
 ### Workspace provider
 
-The public `WorkspaceProvider` owns one complete provider call:
+The public `Provider` owns one complete provider call:
 
 1. validate a workspace specification containing credential-free Git and OCI source requests;
 2. resolve each mutable request once per provider instance to an immutable Git commit or OCI manifest digest;
@@ -344,7 +342,7 @@ Rejected for the initial scope. A network service, durable queue, tenancy, recov
 
 ### Publish separate workspace and Copilot provider packages
 
-Rejected initially. One package can expose the workspace provider as `Provider` and direct Copilot as `CopilotSdkProvider`, while keeping `@github/copilot-sdk` optional. This removes a package, release stream, and self-peer dependency without widening the delegate contract.
+Rejected initially. One package can expose the workspace-owning `Provider` and direct `CopilotSdkProvider`, while keeping `@github/copilot-sdk` optional. This removes a package, release stream, and self-peer dependency without widening the delegate contract.
 
 ### Use a separate repository for extensions
 

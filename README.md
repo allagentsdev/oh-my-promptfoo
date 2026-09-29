@@ -4,7 +4,7 @@ Public Promptfoo providers, extensions, assertions, and workspace integrations f
 
 The first planned package, `@allagents/promptfoo-provider`, exports:
 
-- `Provider` / `WorkspaceProvider`, which owns a workspace and delegates execution to a supported coding-agent provider; and
+- `Provider`, which owns a workspace and delegates execution to a supported coding-agent provider; and
 - `CopilotSdkProvider`, a lower-level provider for callers that already manage their workspace.
 
 ## Architecture

@@ -11,7 +11,7 @@ status: proposed
 
 Publish `@allagents/promptfoo-provider` from `allagentsdev/promptfoo-integrations`. The package exports:
 
-- `Provider` / `WorkspaceProvider`, a workspace-owning provider that delegates to Promptfoo's Codex and Claude providers or the package's Copilot provider;
+- `Provider`, a workspace-owning provider that delegates to Promptfoo's Codex and Claude providers or the package's Copilot provider;
 - `CopilotSdkProvider`, a lower-level provider that executes the public GitHub Copilot SDK in an existing working directory.
 
 The workspace provider must accept exact Git and OCI workspace sources, create one private checkout per Promptfoo call, preserve native delegate results, capture bounded immutable evidence, and clean up on success, failure, timeout, and cancellation.
@@ -37,7 +37,7 @@ package:@allagents/promptfoo-provider:Provider
 package:@allagents/promptfoo-provider:CopilotSdkProvider
 ```
 
-`WorkspaceProvider` is also exported as `Provider` and `default`. `CopilotSdkProvider` is a named export.
+`Provider` is both a named export and the default export. `CopilotSdkProvider` is a named export.
 
 ### Supported delegates
 
@@ -53,10 +53,10 @@ The external config remains a closed discriminated union. Internally, each suppo
 
 ### Public provider configuration
 
-`WorkspaceProvider` accepts one closed, versioned configuration:
+`Provider` accepts one closed, versioned configuration:
 
 ```ts
-interface WorkspaceProviderConfig {
+interface ProviderConfig {
   delegate: CodexDelegate | ClaudeDelegate | CopilotDelegate;
   workspace: WorkspaceSpec;
   evidence?: Partial<EvidenceLimits>;
@@ -347,7 +347,7 @@ Arrays and `truncation.reasons` are lexically sorted, paths use normalized `/` s
 │   │   └── package.json
 │   └── provider/
 │       ├── src/
-│       │   ├── workspace-provider.ts
+│       │   ├── provider.ts
 │       │   ├── config.ts
 │       │   ├── metadata.ts
 │       │   ├── delegate-runner.ts
@@ -498,7 +498,7 @@ Registry credentials come from `ALLAGENTS_ORAS_AUTH_FILE`. The materializer copi
 
 Implement `seed-pool.ts` and `checkout.ts`:
 
-- each `WorkspaceProvider` instance owns one seed pool, one request-resolution map, and all paths created beneath its private runtime root;
+- each `Provider` instance owns one seed pool, one request-resolution map, and all paths created beneath its private runtime root;
 - concurrent calls for one canonical request share one resolution promise;
 - the first successful commit/digest is pinned for that request until provider cleanup, even if the remote ref or tag moves;
 - requests that resolve to one manifest share one seed preparation promise;
@@ -606,7 +606,7 @@ The provider must:
 - redact configured secrets from output, errors, metadata, stderr, and spans; and
 - return structured cleanup state on success and failure.
 
-Export `CopilotSdkProvider` as a named package export. `Provider` and the default export remain reserved for `WorkspaceProvider`. Build only from public SDK contracts and the self-contained invariants above.
+Export `CopilotSdkProvider` as a named package export. `Provider` remains the named and default workspace-owning export. Build only from public SDK contracts and the self-contained invariants above.
 
 ### Verification
 
@@ -618,7 +618,7 @@ Export `CopilotSdkProvider` as a named package export. `Provider` and the defaul
 
 ### Changes
 
-Implement `WorkspaceProvider`, the process-isolated `delegate-runner`, and the three delegate adapters in `provider`.
+Implement `Provider`, the process-isolated `delegate-runner`, and the three delegate adapters in `provider`.
 
 Constructor responsibilities:
 
@@ -659,7 +659,7 @@ Delegate adapters implement one internal interface that validates authored confi
 - every adapter rejects provider-specific paths, session persistence, and environment inheritance that would weaken the workspace contract; and
 - every adapter preserves delegate output, error, usage, raw response, cache metadata, labels, and tracing context, returning only after native cleanup settles.
 
-Export `WorkspaceProvider`, `WorkspaceProvider as Provider`, `CopilotSdkProvider`, and `WorkspaceProvider` as the default.
+Export named `Provider` and `CopilotSdkProvider`, with `Provider` also exported as the default.
 
 ### Verification
 
@@ -696,7 +696,7 @@ evaluateOptions:
   cache: false
 ```
 
-Add a compatibility matrix for each supported Promptfoo minor. A clean temporary project installs the packed tarball without the optional Copilot peer, runs `promptfoo validate`, imports `default`, `Provider`, `WorkspaceProvider`, and `CopilotSdkProvider`, verifies alias identity, and confirms Copilot calls return the actionable missing-peer error. Keep fake delegate adapters internal to contract tests; the packed public interface has no generic test delegate.
+Add a compatibility matrix for each supported Promptfoo minor. A clean temporary project installs the packed tarball without the optional Copilot peer, runs `promptfoo validate`, imports `default`, `Provider`, and `CopilotSdkProvider`, verifies the default is `Provider`, and confirms Copilot calls return the actionable missing-peer error. Keep fake delegate adapters internal to contract tests; the packed public interface has no generic test delegate.
 
 ### Verification
 
@@ -732,7 +732,7 @@ The first assertion PR includes a stock-Promptfoo example using `package:` direc
 
 1. Confirm npm scope ownership and trusted-publisher configuration.
 2. Publish a release candidate under a `next` dist-tag.
-3. In smoke project A, install only the provider package; verify `Provider`, `WorkspaceProvider`, default, and `CopilotSdkProvider` export identity plus actionable missing-peer behavior.
+3. In smoke project A, install only the provider package; import `Provider`, default, and `CopilotSdkProvider`, verify the default is `Provider`, and confirm actionable missing-peer behavior.
 4. In smoke project B, install the provider package and exact `@github/copilot-sdk` peer; run direct `CopilotSdkProvider` and composed `copilot-sdk` smoke cases.
 5. Run packed and registry-installed compatibility suites.
 6. Publish stable `1.0.0` with provenance.
@@ -772,7 +772,7 @@ The release candidate additionally runs:
 
 - The provider package is public and installable from npm with provenance.
 - Stock Promptfoo loads `Provider` and `CopilotSdkProvider` from the package through their documented named exports.
-- `WorkspaceProvider` calls Promptfoo's original Codex and Claude providers and the package-local Copilot provider through closed delegate adapters.
+- `Provider` calls Promptfoo's original Codex and Claude providers and the package-local Copilot provider through closed delegate adapters.
 - Git and OCI inputs produce immutable provenance and private per-call checkouts.
 - Concurrent calls share no writable filesystem objects; mutation through one checkout cannot change its seed or sibling checkouts.
 - Evidence remains available after cleanup and is safe for deferred grading.
