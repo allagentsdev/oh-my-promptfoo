@@ -14,3 +14,5 @@ The first planned package, `@allagents/promptfoo-provider`, exports:
 - [Implementation plan](docs/plans/2026-09-29-promptfoo-agent-integrations.md)
 
 The repository currently contains the proposed design and implementation plan. Runtime packages will be added in follow-up pull requests.
+
+Implementation is blocked on a Promptfoo release that guarantees all-provider cleanup after every evaluation outcome; Promptfoo 0.122.0 is explicitly unsupported for retained assertion workspaces.

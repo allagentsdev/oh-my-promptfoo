@@ -6,7 +6,7 @@ A Promptfoo provider that invokes a coding agent and returns its output, usage, 
 
 ## Workspace provider
 
-The public provider that owns one evaluation call from workspace checkout through delegated agent execution, evidence capture, and cleanup. It delegates model execution through a supported delegate adapter.
+The public provider that owns workspace acquisition, one delegated agent call, transient assertion access, change reporting, and evaluation-shutdown cleanup. It delegates model execution through a supported delegate adapter.
 
 ## Delegate
 
@@ -34,15 +34,15 @@ A verified materialization owned by one workspace provider instance. The provide
 
 ## Workspace checkout
 
-A writable copy of one workspace seed owned exclusively by one provider call. "Private" means exclusive lifecycle and no shared writable objects, not a security sandbox against a same-user process that deliberately traverses the host filesystem.
+A writable copy of one workspace seed owned exclusively by one provider call. It remains available to Promptfoo assertions through the response metadata path and is removed by the provider's evaluation-shutdown `cleanup()` hook. The package supports only Promptfoo releases that guarantee this hook after successful, failed, cancelled, and exceptional evaluations. "Private" means exclusive lifecycle and no shared writable objects, not a security sandbox against a same-user process that deliberately traverses the host filesystem.
 
-## Workspace evidence
+## File changes
 
-A bounded immutable record finalized after checkout disposal. Filesystem facts are captured after the delegate is quiescent and before cleanup; the cleanup outcome is added when the record is finalized.
+A bounded immutable record of paths added, modified, deleted, renamed, or left indeterminate relative to the immutable source baseline. It is convenience metadata for results and assertions, not a copy of file contents or a replacement for inspecting the live workspace.
 
 ## Provider response
 
-Promptfoo's native response from a delegate. The workspace provider preserves its output and usage and adds AllAgents workspace evidence under namespaced metadata.
+Promptfoo's native response from a delegate. The workspace provider preserves its output and usage and adds namespaced workspace provenance, the transient checkout path, and bounded file-change metadata.
 
 ## Integration
 
