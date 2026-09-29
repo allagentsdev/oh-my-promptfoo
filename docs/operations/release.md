@@ -6,4 +6,4 @@ Dispatch **Release** on `main` with `next`. It publishes `<stable manifest versi
 
 Dispatch with `latest` after the candidate passes. This first resolves and verifies the matching `next` candidate using registry consumer and E2E gates, then publishes the stable manifest version with provenance and repeats those gates against the exact stable version. The source package manifest is restored after publication. Failed E2E pipelines stop the workflow before publication; validation evidence is uploaded on success or failure.
 
-The private representative exact-pin gate in `docs/evidence/implementation.md` must pass before release. CargoWise source and working trees stay in the private WTG runner; only aggregate evidence belongs here. Live provider smokes run when organization model credentials are available.
+The private representative exact-pin gate referenced in `docs/evidence/implementation.md` must pass before release. Private source and working trees stay on the private target runner; evidence and dogfooding belong in `allagents-research`. Live provider smokes run when organization model credentials are available.
