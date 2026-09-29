@@ -4,8 +4,9 @@ Public Promptfoo providers and workspace integrations for coding agents.
 
 The first planned package, `@allagents/promptfoo-integration`, exports:
 
-- `Provider`, which owns a workspace, delegates one coding-agent call, captures bounded generated/deleted files and a unified diff, runs a trusted verifier while the workspace is still live, and returns success only after cleanup; and
-- `CopilotSdkProvider`, a lower-level provider for callers that already manage their working directory.
+- `Provider`, which acquires immutable workspace inputs, creates one private writable view per agent call, preserves the delegate's complete native response, exposes the live view to Promptfoo assertions, and optionally captures bounded changed files;
+- `CopilotSdkProvider`, a lower-level provider for callers that already manage their working directory; and
+- `allagents-promptfoo`, a small cache-maintenance CLI whose `cache prune` command removes unused immutable workspace seeds.
 
 ## Architecture
 
@@ -15,4 +16,18 @@ The first planned package, `@allagents/promptfoo-integration`, exports:
 
 The repository currently contains the proposed design and implementation plan. Runtime packages will be added in follow-up pull requests.
 
-The design uses stock Promptfoo package providers. `Provider` preserves the delegate's native output, usage, metadata, skills, and agent trace; captures agent-attributed files and a bounded diff at `metadata.fileChanges`; adds verifier rewards or evidence at `metadata.verifier`; and returns a successful result only after removing the private checkout. Assertions consume durable response data rather than a transient filesystem path. Cleanup failure remains an explicit provider error with ownership-marked stale recovery. No lifecycle extension, configuration doctor, runtime compiler, Promptfoo fork, or separate execution gateway blocks implementation.
+The design uses stock Promptfoo package providers and its existing assertion engine. `Provider` preserves native output, usage, metadata, `skillCalls`, and agent traces. JavaScript assertions inspect the final filesystem through `metadata.workspace.path`; `fileChanges: true` additionally returns bounded generated or modified contents, deleted paths, and a unified diff at `metadata.fileChanges`.
+
+Large repositories use one persistent immutable seed per resolved source manifest plus an automatically selected private reflink, overlay, or recursive-copy view. A thousand mostly unchanged views share the same cached repository blocks instead of copying the repository a thousand times. Writable symlinks and hardlinks are prohibited because they would share mutations between rows.
+
+Use stock Promptfoo directly:
+
+```bash
+promptfoo eval --config promptfooconfig.yaml
+```
+
+Promptfoo cleanup is best effort, so a provider root may remain until a later process safely recovers it. That is acceptable for copy-on-write views: the capacity problem is the persistent seed cache, not the number of mostly unchanged workspace directories. `allagents-promptfoo cache prune` and automatic garbage collection remove only unleased seeds under age and allocated-size policy; `cache prune --all` removes every unleased seed.
+
+GitHub-hosted Actions runners are disposable, so runner teardown removes stale workspaces and the local seed cache after each job. A seed survives into another hosted job only when the workflow explicitly restores the cache directory. Cache eviction and stale-root recovery matter primarily on local and self-hosted runners and before saving a hosted-runner cache.
+
+No Promptfoo lifecycle extension, eval wrapper, alternate grader, configuration doctor, runtime compiler, fork, or separate execution gateway blocks implementation.

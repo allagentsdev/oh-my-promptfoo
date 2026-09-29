@@ -6,23 +6,11 @@ A Promptfoo provider that invokes a coding agent and returns its output, usage, 
 
 ## Workspace provider
 
-The public provider that owns workspace acquisition, one delegated agent call, one post-agent verifier call, and checkout cleanup. It reads the workspace and verifier specifications from its own config and returns a successful response only after the private checkout has been removed. A cleanup failure is a provider error, and any unreleased path remains opaque and ownership-marked for recovery.
+The public `Provider` that resolves workspace inputs, acquires an immutable cached seed, creates one private writable view, invokes one delegate, optionally captures changed files, and publishes the live view for Promptfoo assertions. It retains successful views until best-effort provider cleanup instead of guessing when a row's assertions have finished.
 
 ## Delegate
 
 The agent provider selected by the workspace provider. The initial delegates are Promptfoo's Codex SDK provider, Promptfoo's Claude Agent SDK provider, and the package's Copilot SDK provider.
-
-## Verifier
-
-A trusted consumer-supplied executable that runs after the delegate has fully stopped and before its private checkout is removed. It inspects the final workspace, may consider the prompt and delegate response, and emits bounded rewards, JSON evidence, or both. It does not directly decide Promptfoo pass/fail.
-
-## Verifier result
-
-The durable, workspace-independent output returned at `providerResponse.metadata.verifier`. It contains bounded rewards or evidence and may identify a separate verifier trace. Promptfoo assertions consume this result after the checkout no longer exists.
-
-## File changes
-
-The bounded agent-attributed result returned at `providerResponse.metadata.fileChanges`. The provider captures exact generated or modified after-bytes, deleted paths, and an optional unified diff after the delegate stops but before verifier code runs. Assertions consume this durable result after the checkout no longer exists.
 
 ## Source request
 
@@ -40,34 +28,62 @@ A source request paired with the immutable identity selected during preparation:
 
 The complete declaration of source requests and their destinations for an agent run. It contains no credentials or arbitrary commands and is normalized by destination for identity.
 
+## Seed cache
+
+The package-owned, content-addressed store of immutable workspace seeds keyed by resolved manifest digest. It is shared across providers and evaluations and lives outside provider runtime roots. Successful workspace cleanup releases leases but does not discard reusable seeds.
+
 ## Workspace seed
 
-A verified materialization owned by one workspace provider instance. The provider treats it as immutable, verifies its integrity before cloning, and never shares writable filesystem objects with checkouts.
+One verified immutable materialization in the seed cache. It is never exposed as an agent's writable directory. Many private writable views may share its unchanged data blocks.
+
+## Seed lease
+
+A package-owned record that prevents cache garbage collection while a workspace view depends on a seed. Lease creation, release, and eviction are serialized per manifest digest. A dead owner does not make a seed immediately evictable: stale-root recovery must tear down the dependent view or mount before releasing its lease.
+
+## Checkout adapter
+
+The private mechanism that turns an immutable seed into an isolated writable view. Implementations use verified reflink/clone primitives, an overlay with a read-only lower layer and private upper/work directories, or recursive copy. Plain writable symlinks, hardlinks, and writable bind mounts are not checkout adapters because they share mutable filesystem objects.
 
 ## Workspace checkout
 
-A writable copy of one workspace seed owned exclusively by one provider call. The delegate mutates it and the verifier inspects it. A successful provider response means removal succeeded; cleanup failure returns an error and leaves any unreleased root opaque and ownership-marked for recovery. “Private” means exclusive lifecycle and no shared writable objects, not a security sandbox against a same-user process that deliberately traverses the host filesystem.
+A writable view of one seed owned exclusively by one provider call. The delegate mutates it and Promptfoo assertions may inspect it through `metadata.workspace.path`. “Private” means exclusive lifecycle and no shared writable objects, not a security sandbox against a same-user process that deliberately traverses the host filesystem.
+
+## Provider runtime root
+
+A contained, ownership-marked directory for one workspace-provider instance. It contains private views, adapter state, a live process identity, and package-owned recovery records. Each workspace record exists before its lease, inode tree, or mount. `Provider.cleanup()` detaches a view before releasing its lease; failed detachment retains both for later recovery. The shared seed cache is never part of the root.
+
+## Cache garbage collection
+
+The independent process that removes unleased immutable seeds according to age and allocated-size policy. One cache-wide admission lock serializes the size snapshot, LRU eviction, capacity decision, and publication across different digests; per-digest locks protect entries and leases. The collector rechecks package ownership, containment, and absence of every lease record before atomically moving an entry to package-owned trash. Workspace cleanup never doubles as cache eviction.
+
+## Cache CLI
+
+The `allagents-promptfoo cache prune` command. It applies normal age/size policy, while `cache prune --all` removes every unleased seed. It does not run Promptfoo, inspect result files, or delete provider runtime roots.
+
+## Workspace metadata
+
+The generic `providerResponse.metadata.workspace` block containing schema version, absolute checkout path, manifest digest, resolved sources, and `cleanup: "best-effort-evaluation"`. The path is live through normal assertions but may remain after the evaluation if Promptfoo skips provider cleanup; it becomes invalid after provider cleanup, stale-root recovery, or host teardown.
+
+## File changes
+
+The optional bounded agent-attributed result at `providerResponse.metadata.fileChanges`. When enabled, the provider captures exact generated or modified after-bytes, deleted paths, and an optional unified diff after the delegate has fully stopped. The result is durable evaluation data; it does not extend checkout lifetime.
 
 ## Workspace provenance
 
-The immutable manifest digest and resolved Git commits or OCI digests that identify the checkout's inputs. It is durable metadata and contains no local filesystem path.
+The manifest digest and resolved Git commits or OCI digests that identify a checkout's immutable inputs. It is durable metadata and contains no local filesystem path.
 
 ## Provider response
 
-Promptfoo's complete JSON-safe native response from a delegate. The workspace provider preserves its fields and native metadata at their original locations, then adds `metadata.fileChanges`, `metadata.verifier`, and an AllAgents-specific provenance block. In particular, normalized `metadata.skillCalls` remains top-level.
+Promptfoo's complete JSON-safe native response from a delegate. The workspace provider preserves fields and native metadata at their original locations, then adds `metadata.workspace` and optional `metadata.fileChanges`. Normalized `metadata.skillCalls` remains top-level.
 
 ## Agent trace
 
-The Promptfoo row trace containing only delegated agent activity. It carries normalized tool spans used by `trajectory:*` assertions and must not contain verifier commands, tools, or judge calls.
-
-## Verifier trace
-
-A separate optional trace for verifier activity. Its identifier may appear in `metadata.verifier.traceId`; it does not contribute to agent trajectory assertions or delegate token usage.
+The Promptfoo row trace containing delegated agent activity. It carries normalized tool spans used by `trajectory:*` assertions and preserves incoming W3C trace identity across the delegate subprocess boundary.
 
 ## Integration
 
-A versioned Promptfoo-facing package maintained in this repository. The first package is `@allagents/promptfoo-integration`; it contains the workspace-owning provider and lower-level Copilot SDK provider. Later integrations may include assertions only when a concrete consumer requires them.
+A versioned Promptfoo-facing package maintained in this repository. The first package is `@allagents/promptfoo-integration`; it contains the workspace-owning provider, lower-level Copilot SDK provider, and seed-cache maintenance CLI.
 
 ## Assertion
 
-A deterministic or model-graded Promptfoo check that contributes to the evaluation score and pass/fail result. Assertions may inspect the unchanged delegate output, durable file changes, or verifier result. Providers and verifiers do not replace Promptfoo's assertion engine.
+A deterministic or model-graded Promptfoo check that contributes to the evaluation score and pass/fail result. Assertions may inspect unchanged delegate output, the live workspace, optional durable file changes, skills, or the agent trajectory. The integration does not introduce a second grading engine.

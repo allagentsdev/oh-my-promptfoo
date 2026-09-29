@@ -9,37 +9,42 @@ status: proposed
 
 ## Goal
 
-Publish `@allagents/promptfoo-integration` from `allagentsdev/promptfoo-integrations`. The package exports:
+Publish `@allagents/promptfoo-integration` from `allagentsdev/promptfoo-integrations`. The package provides:
 
-- `Provider`, a workspace-owning provider that delegates to Promptfoo's Codex and Claude providers or the package's Copilot provider, captures bounded agent file changes, runs a trusted verifier before cleanup, and returns durable results; and
-- `CopilotSdkProvider`, a lower-level provider that executes the public GitHub Copilot SDK in an existing working directory.
+- `Provider`, a workspace-owning provider that delegates to Promptfoo's Codex and Claude providers or the package's Copilot provider, retains each private workspace through assertions, and optionally returns bounded file changes;
+- `CopilotSdkProvider`, a lower-level provider that executes the public GitHub Copilot SDK in an existing working directory; and
+- `allagents-promptfoo cache prune`, a cache-maintenance command that removes unused immutable workspace seeds.
 
-The workspace provider must accept exact Git and OCI workspace sources, create one private checkout per Promptfoo call, preserve the complete JSON-safe native delegate response, capture bounded agent-attributed changed-file contents, run one configured verifier after the delegate has fully stopped, return changes at `metadata.fileChanges` and rewards or evidence at `metadata.verifier`, and return a successful response only after checkout removal succeeds.
+The workspace provider must accept exact Git and OCI inputs, reuse one persistent immutable seed per resolved manifest across providers and evaluations, create one private copy-on-write view per call, preserve the complete JSON-safe native delegate response, expose the live workspace at `metadata.workspace.path`, optionally capture durable changed-file contents at `metadata.fileChanges`, and rely on Promptfoo's best-effort provider cleanup without hiding that limitation.
 
 ADR 0001 is authoritative for package boundaries and terminology. `CONTEXT.md` defines the domain language used below.
 
 ## Non-goals
 
-- A network execution service, queue, database, or remote artifact API.
+- A network execution service, queue, database, or remote artifact interface.
 - Reimplementing Promptfoo's Codex or Claude providers.
-- A Promptfoo lifecycle extension or post-assertion live checkout.
+- A Promptfoo eval wrapper, lifecycle extension, or pre-return grading abstraction.
+- Guaranteed workspace deletion after every evaluation path.
 - A configuration doctor or Promptfoo authoring compiler.
-- Unbounded file capture, a durable artifact store, or a filesystem path consumed after provider return.
+- Per-row cleanup before assertions finish.
+- Writable workspace sharing through symlinks or hardlinks.
+- Unbounded file capture or a durable artifact store.
 - Arbitrary delegate providers in the first release.
-- Making provider-returned rewards automatically replace Promptfoo assertions.
-- Keeping verifier implementation secret from a malicious same-user agent without OS isolation.
+- Making optional file changes replace direct workspace inspection.
+- Hostile same-user isolation without a container, VM, or separate OS identity.
 - A public workspace-core package before a second external consumer exists.
 
 ## Locked contracts
 
-### Provider references
+### Provider and CLI references
 
 ```text
 package:@allagents/promptfoo-integration:Provider
 package:@allagents/promptfoo-integration:CopilotSdkProvider
+allagents-promptfoo cache prune [--all]
 ```
 
-`Provider` is both a named export and the default export. `CopilotSdkProvider` is a named export. The initial package has no subpath export and no executable.
+`Provider` is both a named export and default export. `CopilotSdkProvider` is named. The package root is the only module export. The package manifest exposes one `allagents-promptfoo` executable with only cache-maintenance commands. Evaluation continues to use stock `promptfoo eval`.
 
 ### Supported delegates
 
@@ -49,27 +54,16 @@ anthropic:claude-agent-sdk
 copilot-sdk
 ```
 
-The workspace provider rejects itself, unknown delegate IDs, delegates without registered adapters, and any nested delegate `working_dir`.
-
-The external config remains a closed discriminated union. Internally, each supported ID maps to one `DelegateAdapter` that validates its allowed config, binds the owned checkout at final precedence, loads the provider, guarantees cache bypass, and declares cleanup behavior. There is no generic fallback to `loadApiProvider`.
+The wrapper rejects itself, unknown IDs, adapters not in the closed registry, and any authored delegate `working_dir`.
 
 ### Public provider configuration
-
-`Provider` accepts one closed, versioned configuration:
 
 ```ts
 interface ProviderConfig {
   delegate: CodexDelegate | ClaudeDelegate | CopilotDelegate;
   workspace: WorkspaceSpec;
-  verifier: VerifierConfig;
+  fileChanges?: boolean;
   timeoutMs?: number;
-}
-
-interface VerifierConfig {
-  command: string;
-  args?: string[];
-  timeoutMs?: number;
-  env?: Record<string, string>;
 }
 
 interface DelegateBase {
@@ -144,9 +138,11 @@ interface CopilotSdkProviderConfig {
 }
 ```
 
-All public config objects reject unknown keys. Before public validation, each provider constructor extracts Promptfoo's loader-injected `basePath` into an internal envelope; users cannot set or override it through prompt config.
+All public objects reject unknown keys. Before public validation, constructors extract Promptfoo's loader-provided `basePath` into an internal envelope; users cannot set it through config.
 
-The initial release deliberately omits native-provider fields that enable extra directories, session reuse, settings/plugin discovery, executable overrides, arbitrary CLI/MCP passthroughs, process-environment inheritance, or function-valued hooks. Prompt-level config may override only fields under `delegate.config`. Workspace, verifier, timeouts, environments, and delegate identity are constructor-only. The wrapper merges the allowed prompt override into constructor config, rejects reserved fields in either layer, validates the result, and injects the checkout path and `bustCache: true` last.
+Prompt-level config may override only fields under `delegate.config`. Workspace, file-change capture, timeout, environment, and delegate identity are constructor-only. The wrapper rejects reserved fields at every authored layer, validates the merged allowlist, and injects the absolute workspace path plus `bustCache: true` last.
+
+`fileChanges` defaults to `false`. `true` enables the fixed bounded capture contract; it does not change workspace lifetime or cleanup.
 
 ```yaml
 providers:
@@ -170,27 +166,21 @@ providers:
             repository: https://github.com/example/project.git
             ref: main
             destination: project
-      verifier:
-        command: ./verifiers/score
-        args: [--format, promptfoo]
-        timeoutMs: 120000
-        env:
-          JUDGE_API_KEY: "{{env.JUDGE_API_KEY}}"
+      fileChanges: true
       timeoutMs: 900000
 ```
 
-A relative verifier command resolves from trusted `basePath`. The resolved target must be an executable regular file, must not be a symlink, and must remain outside the package-owned runtime root. The provider invokes it directly without a shell. Arguments are literal strings. The verifier runs with the checkout as its current working directory; no workspace path is needed in config or protocol.
+### Runtime channels
 
-`timeoutMs` bounds the complete provider call. `verifier.timeoutMs` additionally bounds verification and cannot extend the remaining call deadline. Cancellation is honored before acquisition, during source preparation, during delegate execution, between delegate and verifier, during verification, and during cleanup.
-
-Source credentials and executable paths are runtime inputs, resolved from provider `options.env` before `process.env`:
+Source and storage inputs are resolved from provider `options.env` before `process.env`:
 
 - `ALLAGENTS_GIT_USERNAME` and `ALLAGENTS_GIT_TOKEN`;
 - `ALLAGENTS_ORAS_PATH`;
-- `ALLAGENTS_ORAS_AUTH_FILE`; and
-- optional `ALLAGENTS_WORKSPACE_ROOT`.
+- `ALLAGENTS_ORAS_AUTH_FILE`;
+- optional `ALLAGENTS_WORKSPACE_ROOT`; and
+- optional `ALLAGENTS_CACHE_ROOT`.
 
-These names are reserved and rejected in `delegate.env`, `verifier.env`, and every prompt-level delegate field. `ALLAGENTS_ORAS_AUTH_FILE` points to a Docker-compatible registry auth file; the materializer copies it to a private mode-`0600` file for each acquisition. Defaults and hard maxima for source and protocol limits are exported constants and documented in the package README.
+These names are reserved and rejected in delegate configuration. Workspace and cache roots must be distinct, package-owned, and containment-validated. Users cannot make cleanup or cache pruning operate on an arbitrary unmarked directory.
 
 ### Workspace sources
 
@@ -226,46 +216,35 @@ type OciSource = {
 );
 ```
 
-Destinations are relative, normalized, non-empty, non-overlapping, and cannot traverse or resolve outside the seed root. Configuration contains no credentials or arbitrary source-acquisition commands.
+Destinations are relative, normalized, non-empty, non-overlapping, and cannot traverse or resolve outside the seed root. Configuration contains no credentials or arbitrary acquisition commands. Git initially accepts `https://` and `file://`, rejecting SSH, Git, and credential-bearing URLs.
 
-The initial Git adapter accepts `https://` and `file://` repositories. It rejects SSH, Git, and credential-bearing URLs; SSH authentication and submodules require a later contract.
+### Native response and workspace metadata
 
-### Delegate response preservation
+The delegate child returns the complete JSON-safe Promptfoo `ProviderResponse`. The wrapper validates serialized bytes and JSON safety, then round-trips every field and native metadata key. Functions, symbols, circular values, unsupported binary values, and oversized responses fail explicitly rather than disappearing.
 
-The delegate child returns the complete JSON-safe Promptfoo `ProviderResponse` in its terminal protocol frame. The wrapper must not project a smaller hand-authored response shape. It validates serialized bytes and JSON safety, then round-trips every field and every native metadata key unchanged.
-
-Supported adapters normalize provider-specific values into Promptfoo's public response types before serialization. Functions, symbols, circular data, unsupported binary values, and an oversized response fail explicitly; they are never silently omitted or stringified. Known Promptfoo binary response fields use their documented JSON-safe encoding.
-
-After verification, the parent creates a fresh metadata object:
+The parent adds generic metadata keys without nesting native metadata:
 
 ```ts
-const metadata = {
-  ...delegateResponse.metadata,
-  fileChanges,
-  verifier: verifierMetadata,
-  allagents: {
-    schemaVersion: 1,
-    delegate: { id: configuredDelegateId },
-    workspace: workspaceProvenance,
-  },
-};
+interface WorkspaceMetadata {
+  schemaVersion: 1;
+  path: string;
+  manifestDigest: `sha256:${string}`;
+  sources: ResolvedSource[];
+  cleanup: "best-effort-evaluation";
+}
+
+interface IntegratedMetadata extends Record<string, unknown> {
+  // Native keys, including skillCalls, remain at this level.
+  workspace: WorkspaceMetadata;
+  fileChanges?: FileChanges;
+}
 ```
 
-A delegate response that already owns `metadata.fileChanges`, `metadata.verifier`, or `metadata.allagents` fails with an explicit compatibility error. Native metadata is not nested. In particular, `metadata.skillCalls` remains top-level so Promptfoo's `skill-used` and `not-skill-used` assertions see the same data through `Provider` as through the direct delegate.
+A delegate response already owning `metadata.workspace` or `metadata.fileChanges` fails before capture or response publication. `metadata.skillCalls` remains top-level for Promptfoo's `skill-used` assertions.
 
-The compatibility contract covers:
+`workspace.path` is absolute and remains available to transforms and assertions. Promptfoo may skip provider cleanup; persisted results may therefore contain either a still-present transient path or a stale path removed by cleanup, later recovery, or host teardown. No consumer may treat it as a durable artifact reference.
 
-- output and error;
-- token usage and cost;
-- raw response, labels, log probabilities, audio, guardrail data, and other JSON-safe public response fields;
-- every native metadata key, including `skillCalls`; and
-- W3C trace identity and agent tool spans.
-
-Copilot advertises `skill-used` support only after public SDK events can be mapped to Promptfoo's normalized `skillCalls` without inferring from assistant prose.
-
-### File-change result
-
-Capture runs after the delegate process group is gone and before the verifier starts. This makes `metadata.fileChanges` agent-attributed even when the verifier installs dependencies, runs formatters or tests, invokes another agent, or otherwise mutates the checkout.
+### Optional file-change result
 
 ```ts
 type FileChanges =
@@ -315,116 +294,84 @@ interface CapturedFile {
 }
 ```
 
-This is the bounded Promptfoo equivalent of Agent Eval's `generatedFiles` and `deletedFiles`: changed after-bytes are exact and binary-safe, deleted paths remain explicit, and an optional unified diff makes bounded text additions, modifications, and deletions directly inspectable. Symlink content is the link target bytes and is never dereferenced. Renames are represented as delete plus generate rather than inferred by similarity.
+Changed after-bytes are base64 and binary-safe. Symlink entries encode target bytes without dereferencing. Deleted paths are explicit. Renames are delete plus generate. The optional unified diff is bounded convenience data for text changes.
 
-All paths are normalized workspace-relative paths and sorted lexically. Fixed exported limits bound collection time, candidates, returned files, bytes per file, total captured bytes, diff bytes, subprocess output, omitted paths, and serialized metadata. A limit returns deterministic partial data with `status: "truncated"`; an operational failure returns no partial data and `status: "failed"`. Capture failure alone does not suppress a valid delegate response or verifier run; overall cancellation still skips verification and proceeds to cleanup.
+Fixed internal defaults are 90 seconds, 10,000 candidates, 2,000 returned files, 256 KiB per file, 4 MiB total captured bytes, 1 MiB unified diff text, 4 MiB subprocess output, 1,000 omitted paths, and 8 MiB serialized metadata. Limits are safety bounds, not completeness promises.
 
-The verifier receives the same `FileChanges` object in its request and may use it with the live workspace. It may add task-specific diff explanations under `evidence`, but it cannot replace the canonical pre-verifier capture. Promptfoo assertions consume `context.providerResponse.metadata.fileChanges` after cleanup and never read a retained file path.
+### Best-effort workspace cleanup
 
-### Verifier protocol and result metadata
+`Provider.cleanup()` closes the provider to new calls, aborts and awaits active call process groups, then runs one dependency-ordered teardown chain per workspace:
 
-The parent starts verification only after the delegate's native cleanup has settled and its complete process group is gone. The verifier gets a new minimal child environment composed from essential platform variables and explicit `verifier.env`; it never inherits `delegate.env`, acquisition credentials, `SSH_AUTH_SOCK`, or ambient process secrets.
+1. read and validate that workspace's recovery record;
+2. detach the adapter view, including a required overlay unmount;
+3. only after detachment succeeds, remove its private paths and release its seed lease; and
+4. mark the recovery record released.
 
-The parent writes one bounded JSON document to verifier stdin:
+Teardown is all-settled across independent workspace chains, not across dependent steps inside one chain. A failed detach keeps that workspace's recovery record and seed lease for later recovery. Independent staging paths are removed, and the provider root is removed only when no unreleased record remains. `cleanup()` returns an aggregate error after attempting every chain.
 
-```ts
-type JsonPrimitive = string | number | boolean | null;
-type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue };
+Promptfoo does not currently guarantee this hook on every path. A Node evaluation or some CLI failures may leave ownership-marked roots and leases until process exit. Later provider construction reaps only valid package-owned roots whose recorded process identity is no longer alive. It refuses live, unmarked, malformed, escaping, or unknown-mount paths. Same-process abandoned roots remain live until the process exits.
 
-interface VerifierRequest {
-  schemaVersion: 1;
-  prompt: PromptWire;
-  response: JsonSafeProviderResponse;
-  context: {
-    vars: Record<string, JsonValue>;
-    testMetadata?: Record<string, JsonValue>;
-    evaluationId?: string;
-    testId?: string;
-    rowIndex?: number;
-    promptIndex?: number;
-    repeatIndex?: number;
-  };
-  fileChanges: FileChanges;
-  workspace: WorkspaceProvenance;
-}
+This is an explicit tradeoff, not a hidden guarantee. A thousand mostly unchanged copy-on-write workspaces are acceptable because they share seed blocks. Changed blocks, installed dependencies, recursive-copy fallback, and overlay mounts still consume resources, so stale-root recovery remains required on long-lived machines.
 
-interface WorkspaceProvenance {
-  manifestDigest: `sha256:${string}`;
-  sources: ResolvedSource[];
-}
+GitHub-hosted Actions runner disposal is the final cleanup backstop and prevents cross-job stale state. A seed survives into another hosted job only when the workflow explicitly restores the cache directory. Workspace recovery and cache pruning matter primarily on local and self-hosted runners and before saving a hosted-runner cache.
 
-type ResolvedSource =
-  | {
-      type: "git";
-      repository: string;
-      requestedRef: string;
-      commit: string;
-      destination: string;
-    }
-  | {
-      type: "oci";
-      repository: string;
-      requested: { digest: `sha256:${string}` } | { tag: string };
-      digest: `sha256:${string}`;
-      destination: string;
-      mediaTypes: string[];
-    };
-```
+### Persistent seed-cache contract
 
-The verifier reads the workspace from its current working directory. No workspace path, seed path, verifier path, acquisition credential, or delegate credential enters the request. Prompt and response content are untrusted inputs even though the verifier executable is trusted.
+The content-addressed seed cache is package-owned and outside every provider runtime root. It defaults to the platform cache directory; `ALLAGENTS_CACHE_ROOT` may select another contained root. Entries are keyed by the resolved manifest digest and contain immutable content plus mutable package-owned state. Workspace cleanup never deletes an entry merely because its current views finished.
 
-Stdout is reserved for exactly one JSON document:
+Cross-process per-digest mutation locks serialize preparation, lease publication, lease release, and entry mutation. Creating a view records a lease containing provider-root identity and a process identity resistant to PID reuse. A dead owner does not make a seed evictable: later provider construction must recover and unmount the dependent workspace before releasing its lease. Eviction validates the ownership marker and containment, rechecks that no lease record remains, and atomically renames the entry to package-owned trash before deletion.
+
+The 50 GiB allocated-size ceiling is cache-wide. A separate cache-wide admission lock serializes the usage snapshot, LRU selection, candidate eviction, capacity decision, and atomic publication of every newly staged seed. Operations needing both lock scopes always acquire the admission lock first and then per-digest locks in sorted digest order. Preparation may hold one per-digest lock while staging, but releases it before entering admission and rechecks the entry after reacquiring locks in canonical order. This prevents both cross-digest over-admission and lock cycles.
+
+Initial automatic policy also includes a 30-day unused-age limit. Before publishing a new seed, admission evicts unleased least-recently-used entries until the measured staged entry fits or returns a bounded capacity error. Provider construction and `Provider.cleanup()` run opportunistic collection; failure is a bounded warning and does not replace an evaluation result.
+
+`allagents-promptfoo cache prune` applies the default policy and returns nonzero on failure. `cache prune --all` removes every unleased entry. Both report entries and allocated bytes removed and retained. Neither follows cache symlinks, removes a leased entry, inspects Promptfoo output, or touches provider runtime roots.
+
+### Checkout adapter interface
+
+Checkout mechanics remain behind one small internal interface:
 
 ```ts
-interface VerifierOutput {
-  schemaVersion: 1;
-  rewards?: Record<string, number>;
-  evidence?: JsonValue;
-}
-
-interface VerifierMetadata extends VerifierOutput {
-  durationMs: number;
-  traceId?: string;
+interface CheckoutAdapter {
+  probe(seed: string, runtimeRoot: string): Promise<ProbeResult>;
+  create(seed: string, checkout: string): Promise<WorkspaceLease>;
+  release(lease: WorkspaceLease): Promise<void>;
+  recover(record: RecoveryRecord): Promise<void>;
 }
 ```
 
-At least one of `rewards` or `evidence` is required. Reward keys are non-empty stable identifiers and values are finite numbers in `[0, 1]`. Evidence is arbitrary JSON within the fixed serialized-byte bound. Unknown keys, duplicate JSON documents, trailing protocol text, non-finite numbers, invalid UTF-8, and output overflow fail verification. Human diagnostics belong on bounded stderr.
+There are three real adapters:
 
-The package fixes and exports hard limits for verifier request bytes, stdout bytes, stderr bytes, result bytes, shutdown grace, and maximum configured timeout. Limits are not row-configurable in the first release. The protocol is versioned independently from the package version.
+1. reflink/clone using verified filesystem CoW primitives;
+2. overlay using an immutable lower layer and private upper/work directories; and
+3. recursive copy as correctness fallback.
 
-The parent adds the successful result at `response.metadata.verifier`, not `metadata.allagents.verifier`. AllAgents-specific provenance remains at `metadata.allagents`. Promptfoo assertions use the generic path:
+Startup probes perform a throwaway clone/view, mutate it, and prove seed and sibling bytes remain unchanged. Adapter selection is automatic from successful probes, not platform-name assumptions. Failed probes clean all state before falling through.
 
-```js
-const verifier = context.providerResponse?.metadata?.verifier;
-```
+A plain symlink, writable bind mount, or writable hardlink never satisfies this interface. Those mechanisms expose shared inodes and violate row isolation.
 
-A reward of zero is a valid verifier result. Launch errors, timeout, cancellation, malformed output, overflow, and cleanup errors are provider infrastructure failures and never become zero rewards. A valid delegate response containing a provider-level error still runs verification unless the overall call was cancelled; this allows grading partial workspace work.
-
-The verifier may call deterministic tools, an LLM, or another agent. Its model usage is not merged into the delegate's `tokenUsage` or cost. It may include bounded usage information in evidence if the consumer needs it.
+Reflink and overlay allocation should approach one seed plus changed blocks even with a thousand mostly unchanged views. Recursive copy may allocate the full multi-gigabyte seed per row. The selected adapter stays implementation metadata and does not alter provider configuration.
 
 ### Tracing and assertion compatibility
 
-The delegate child receives the incoming `traceparent` and `tracestate` and exports spans using explicit allowlisted OpenTelemetry configuration. Its normalized tool spans must retain Promptfoo's expected attributes so these assertions behave the same through the wrapper as against the direct provider:
+The delegate child receives incoming `traceparent` and `tracestate` and exports normalized agent spans through explicit OpenTelemetry configuration. The wrapper preserves trace identity and tool attributes required by:
 
 - `trajectory:tool-used`;
 - `trajectory:tool-args-match`;
 - `trajectory:tool-sequence`; and
 - `trajectory:step-count`.
 
-The verifier receives no agent trace context. The provider starts a separate verifier root trace when tracing is enabled and records its trace ID in `metadata.verifier.traceId`. Verifier commands, model calls, and tools must not enter the agent trajectory or satisfy trajectory assertions.
-
-Promptfoo's ordinary output assertions consume the unchanged delegate output. JavaScript assertions can map verifier rewards to pass/fail and score. Assertion transforms can project verifier evidence into a native `llm-rubric`. The integration does not invent a parallel assertion engine or automatically treat rewards as the row score.
+Normal output assertions consume unchanged delegate output. JavaScript assertions can inspect `context.providerResponse.metadata.workspace.path`; file-change-aware assertions use `metadata.fileChanges` when enabled. There is no second assertion engine.
 
 ### Runtime requirements
 
 - Node.js 22.22.0 or newer.
-- Linux and macOS only in the initial release; package metadata rejects Windows because reliable process-tree termination depends on POSIX process groups.
-- Bun 1.4 for repository development and publishing workflows.
-- The `promptfoo` peer range begins at the first version that passes direct-versus-wrapped response, assertion, and tracing compatibility tests. Promptfoo 0.122.0 is a candidate baseline.
-- The package declares `@github/copilot-sdk: "1.0.6"` as an optional peer dependency and exact development dependency. Selecting Copilot without installing the peer returns an actionable error; upgrades require protocol and live-smoke validation.
-- OCI materialization uses a runtime-supplied ORAS 1.x executable in the first release.
-- File capture has fixed internal defaults of 90 seconds, 10,000 candidate paths, 2,000 returned files, 256 KiB per file, 4 MiB total captured bytes, 1 MiB unified diff text, 4 MiB subprocess output, 1,000 omitted paths, and 8 MiB serialized metadata. These are safety bounds rather than completeness promises.
-- Workspace-backed delegates always receive `bustCache: true`, and a delegate response marked `cached` fails closed. Global Promptfoo caching may remain enabled; `evaluateOptions.cache: false` is optional cache-write hygiene.
+- Linux and macOS; each checkout adapter is enabled only by a successful capability probe.
+- Bun 1.4 for repository development and publishing.
+- `promptfoo` peer lower bound is the first version passing package, response, assertion, tracing, cache, and cleanup compatibility tests.
+- `@github/copilot-sdk: "1.0.6"` is an optional peer and exact development dependency.
+- OCI materialization uses a runtime-supplied ORAS 1.x executable.
+- Workspace delegates receive `bustCache: true`; `cached: true` fails closed.
 
 ## Target repository layout
 
@@ -440,9 +387,15 @@ Promptfoo's ordinary output assertions consume the unchanged delegate output. Ja
 │   ├── workspace-core/
 │   │   ├── src/
 │   │   │   ├── config.ts
-│   │   │   ├── seed-pool.ts
+│   │   │   ├── seed-cache.ts
+│   │   │   ├── cache-gc.ts
+│   │   │   ├── cache-lock.ts
 │   │   │   ├── checkout.ts
 │   │   │   ├── file-changes.ts
+│   │   │   ├── adapters/
+│   │   │   │   ├── reflink.ts
+│   │   │   │   ├── overlay.ts
+│   │   │   │   └── copy.ts
 │   │   │   ├── sources/git.ts
 │   │   │   └── sources/oci.ts
 │   │   └── package.json
@@ -451,9 +404,8 @@ Promptfoo's ordinary output assertions consume the unchanged delegate output. Ja
 │       │   ├── provider.ts
 │       │   ├── config.ts
 │       │   ├── metadata.ts
-│       │   ├── verifier.ts
-│       │   ├── verifier-protocol.ts
 │       │   ├── delegate-runner.ts
+│       │   ├── cli.ts
 │       │   ├── delegates/
 │       │   │   ├── adapter.ts
 │       │   │   ├── codex.ts
@@ -481,383 +433,289 @@ Promptfoo's ordinary output assertions consume the unchanged delegate output. Ja
 └── bun.lock
 ```
 
-`packages/workspace-core` has `"private": true`. Build output for `promptfoo-integration` bundles its runtime and declarations; it is never a published dependency.
+`packages/workspace-core` is private. Its runtime and declarations are bundled into the public package.
 
 ## Phase 0: Repository and package foundation
 
 ### Changes
 
-1. Create a Bun workspace root with private workspace-core and public promptfoo-integration package directories.
-2. Configure the public package with the first Promptfoo release that passes the compatibility matrix as its peer lower bound and `@github/copilot-sdk` as an optional peer plus exact development dependency.
-3. Pin Bun in `packageManager` and Node in `engines`.
-4. Configure strict TypeScript, Biome, Bun tests, and dual ESM/CommonJS builds. Bundle workspace core while externalizing both peers.
-5. Add Changesets for package versions and release notes.
-6. Add root commands for build, typecheck, lint, test, and pack checking.
-7. Add GitHub Actions for validation, packed-package smoke tests, and trusted npm publishing with provenance.
-8. Add dependency update automation for Promptfoo, Copilot SDK, TypeScript, and build dependencies.
-9. Confirm maintainers control the `@allagents` npm scope before enabling publication.
+1. Create private workspace-core and public promptfoo-integration packages.
+2. Configure Promptfoo as a peer and Copilot SDK as optional peer plus exact development dependency.
+3. Pin Bun and Node; configure strict TypeScript, Biome, Bun tests, dual ESM/CommonJS builds, and the cache-maintenance bin.
+4. Bundle workspace core while externalizing both peers.
+5. Add Changesets, build/typecheck/lint/test/pack commands, validation CI, packed-package smoke tests, trusted publishing, and dependency update automation.
+6. Confirm maintainers control the `@allagents` npm scope.
 
 ### Verification
 
-- A clean checkout installs with `bun install --frozen-lockfile`.
-- All root commands pass with empty package implementations.
-- `npm pack --dry-run` includes only declarations, runtime files, license, package metadata, and README.
-- A clean npm smoke project installs and executes the tarball. Its manifest and emitted imports contain no private workspace package dependency; `promptfoo` and `@github/copilot-sdk` remain external peers.
-- The manifest exposes only the package root and has no `bin`, lifecycle, or doctor surface.
+- Clean install and all root commands pass.
+- Packed tarball contains runtime, declarations, license, package metadata, README, and one executable only.
+- Temporary npm, pnpm, and Bun consumers load both provider exports and invoke `allagents-promptfoo --help`.
+- No private workspace package appears in emitted imports or the public manifest.
 
-## Phase 1: Workspace configuration and containment
+## Phase 1: Configuration and containment
 
 ### Changes
 
-Implement `workspace-core/src/config.ts` with the exact closed schemas above for `WorkspaceSpec`, `GitSource`, `OciSource`, source limits, and runtime inputs.
+Implement the exact closed schemas and runtime-channel validation.
 
-Validation must reject:
+Reject absolute, empty, dot-segment, drive-letter, UNC, duplicate, overlapping, or escaping destinations; unsupported repository schemes; credential-bearing URLs; malformed OCI digests; unknown keys; excessive sources; excessive limits; overlapping workspace/cache roots; and reserved runtime variables in delegate config.
 
-- empty or absolute destinations;
-- `.` or `..` path segments;
-- Windows drive or UNC paths;
-- duplicate or ancestor/descendant destination overlap;
-- repository schemes other than initial Git `https://` and `file://`;
-- malformed OCI digests;
-- unknown fields;
-- credentials embedded in repository URLs; and
-- source counts or configured limits above hard package maxima.
-
-Use two-stage keys. First, canonical request JSON single-flights resolution of each Git ref or OCI tag. The first successful resolution is pinned for that provider instance. Second, SHA-256 over UTF-8 RFC 8785 canonical JSON containing schema version, materializer versions, and resolved sources sorted by normalized destination becomes the seed key.
-
-Runtime input resolution records only whether a channel was present, never its value. It rejects an unwritable workspace root, non-executable ORAS path, credential values embedded in config, and source limits above exported hard maxima.
+Canonical request JSON single-flights mutable ref/tag resolution. SHA-256 over RFC 8785 canonical resolved-source JSON becomes the seed key.
 
 ### Verification
 
-- Table-driven tests cover POSIX and Windows path forms, Unicode normalization, overlap in both declaration orders, URL user-info, malformed digests, unknown fields, and stable canonicalization.
-- Configuration tests prove prompt-level overrides cannot replace workspace, verifier, environment, deadline, delegate identity, working directory, or cache behavior.
+- Table tests cover POSIX/Windows forms, Unicode normalization, overlap order, URL user-info, malformed digests, unknown fields, and canonicalization.
+- Prompt overrides cannot replace workspace, fileChanges, timeout, environment, delegate identity, working directory, or cache behavior.
+- Unmarked, symlinked, nested, or overlapping configured roots fail before acquisition.
 
-## Phase 2: Git source materialization
+## Phase 2: Git materialization
 
 ### Changes
 
-Implement `sources/git.ts` using direct process spawning without a shell.
+Implement Git acquisition without a shell:
 
-For each Git source:
-
-1. create a private staging directory;
-2. create a subprocess-only credential helper from fixed runtime channels;
-3. clone or fetch with interactive prompts disabled and helper environment scoped to that process;
-4. resolve the requested ref to a commit object;
-5. check out the detached commit into the declared destination;
-6. remove helper, environment, remotes, temporary refs, and acquisition-only state;
-7. reject submodules rather than acquiring undeclared sources;
-8. verify the real path and every parent remain within staging;
-9. record requested repository/ref and resolved commit; and
-10. atomically publish only after the complete workspace passes validation.
-
-Do not put credentials in command arguments, repository URLs, manifests, logs, errors, verifier requests, or metadata.
+1. private staging and subprocess-only askpass helper;
+2. noninteractive clone/fetch;
+3. resolve requested ref to an immutable commit;
+4. detached checkout at destination;
+5. remove helper, remotes, temporary refs, and acquisition state;
+6. reject submodules;
+7. validate realpath containment; and
+8. atomically publish only the complete workspace seed.
 
 ### Verification
 
-- A mutable branch resolves once and records its commit.
-- Two sources with different destinations compose into one seed.
-- Invalid refs, submodules, symlink escapes, cancellation, and acquisition failure publish no seed.
-- Success, failure, and cancellation prove the credential environment reaches only Git and temporary state is deleted.
-- Delegate and verifier children receive none of the source credential names or values.
-- A fixture repository cannot mutate the source repository through the seed.
+- Mutable refs resolve once and record commits.
+- Invalid refs, submodules, symlink escapes, cancellation, and failure publish no seed.
+- Credentials reach only Git and are absent from metadata, errors, logs, traces, and delegates.
+- Source repositories cannot be mutated through the seed.
 
-## Phase 3: OCI source materialization
+## Phase 3: OCI materialization
 
 ### Changes
 
-Implement `sources/oci.ts` behind an `OciMaterializer` interface. The initial adapter invokes the runtime-supplied ORAS 1.x executable with literal arguments and no shell.
+Implement an `OciMaterializer` adapter invoking ORAS 1.x without a shell. Resolve tags to digests, pull digest-qualified references, accept bounded uncompressed regular-file layers with validated relative titles, and reject archives, compression, special files, escaping links, duplicate titles, and size overflow.
 
-For each OCI source:
-
-1. require `repository@sha256:<digest>` as the effective fetch identity;
-2. fetch and verify the manifest descriptor and selected digest;
-3. accept only uncompressed regular-file layers with valid relative `org.opencontainers.image.title` values;
-4. reject archives, compressed layers, duplicate or overlapping titles, and unsupported media types;
-5. reject before pull when descriptor sizes exceed configured limits;
-6. pull into a private empty directory with timeout and cancellation;
-7. verify actual files and bytes do not exceed descriptors or limits;
-8. reject device files, FIFOs, sockets, escaping symlinks, hardlinks outside the tree, and absolute paths;
-9. copy validated payloads to declared destinations;
-10. remove registry configuration and acquisition state; and
-11. record repository, digest, media types, descriptor sizes, and materializer version.
-
-Registry credentials come from `ALLAGENTS_ORAS_AUTH_FILE`. Copy that file with mode `0600`, pass the copy only to ORAS, and delete it in `finally`.
+Copy registry auth to a private mode-`0600` file for each acquisition and delete it in `finally`.
 
 ### Verification
 
-- A disposable local OCI registry serves a pinned uncompressed file artifact.
-- A valid artifact materializes the expected tree and manifest digest.
-- Digest mismatch, compressed/archive layouts, malicious titles, size overflow, timeout, cancellation, and authentication failure publish no seed.
-- Overflow rejection occurs before payload download and staging never exceeds the configured maximum.
-- Registry configuration is deleted and credentials reach neither metadata nor delegate/verifier environments.
+- Disposable registry fixture serves a valid pinned artifact.
+- Digest mismatch, malicious titles, unsupported layouts, overflow, timeout, cancellation, and authentication failure publish no seed.
+- Overflow rejects before payload download.
+- Registry credentials reach neither delegate nor result.
 
-## Phase 4: Seed pool and private checkouts
+## Phase 4: Persistent seed cache
 
 ### Changes
 
-Implement `seed-pool.ts` and `checkout.ts`:
+Implement the shared immutable cache and lease-aware garbage collection.
 
-- each `Provider` instance owns one seed pool and request-resolution map beneath a package-owned leased runtime root;
-- concurrent calls for one canonical request share one resolution promise;
-- the first successful commit/digest is pinned for that request for the provider instance;
-- requests resolving to one manifest share one seed preparation promise;
-- failed resolution or preparation entries are removed so later calls may retry;
-- completed seeds remain immutable for their retained lifetime;
-- each call receives a unique contained checkout;
-- checkout creation uses a verified reflink/copy-on-write clone when available and recursive copy otherwise;
-- writable hardlinks are prohibited;
-- checkout removal is idempotent and always attempted before `callApi()` settles;
-- provider cleanup aborts active calls, waits for their process groups, then removes shared staging and seeds with all-settled semantics; and
-- provider construction reaps only versioned ownership-marked roots whose lease is no longer live.
-
-Source-acquisition abort and per-call abort remain separate so cancelling one row cannot corrupt a seed in use by another row.
+- Resolve the default platform cache path and validate optional `ALLAGENTS_CACHE_ROOT`.
+- Key entries by resolved manifest digest and verify package ownership, schema, content integrity, and containment.
+- Serialize preparation and lease changes through stale-safe per-digest locks.
+- Stage complete seeds before cache admission and measure allocated bytes.
+- Serialize the cache-wide size snapshot, LRU selection, eviction, capacity decision, and atomic publication through one admission lock.
+- Enforce canonical lock ordering: admission lock first, then per-digest locks sorted by digest; release a preparation lock before admission and recheck after reacquisition.
+- Single-flight equivalent preparation across processes and atomically publish complete seeds.
+- Evict failed preparation state for retry.
+- Keep content read-only and never expose it to delegates.
+- Create a live seed lease only after a pending workspace recovery record exists.
+- Enforce 50 GiB allocated size and 30 days unused age; evict unleased LRU entries only.
+- Implement `cache prune` and `cache prune --all` with bounded reporting and explicit nonzero failure.
+- Make lease release and trash deletion idempotent and containment-checked.
 
 ### Verification
 
-- Twenty concurrent checkouts share one seed preparation and receive distinct writable roots.
-- Concurrent calls while a ref moves share the first resolution; a new provider instance resolves the new target.
-- Mutation in one checkout changes neither seed nor sibling checkout.
-- Partial copies, cancellation, verifier failure, and process errors attempt immediate checkout removal; an injected removal failure produces a provider error and retains only an opaque ownership-marked path for recovery.
-- Ownership markers and live leases prevent cleanup or stale recovery from deleting unowned or live paths.
-- A successful `callApi()` returns only after its checkout is gone.
+- The same resolved manifest reuses one seed across concurrent processes, provider instances, and sequential evaluations.
+- Every lease record blocks age, size, default-prune, and `--all` eviction.
+- Dead-owner lease records continue to block pruning until workspace recovery releases them; concurrent acquire-versus-prune cannot delete an acquired seed.
+- LRU size eviction, 30-day age eviction, capacity exhaustion, corrupt ownership, symlink attacks, interrupted trash deletion, and retry are deterministic.
+- Concurrent publication of different digests cannot jointly exceed the cache-wide ceiling.
+- Admission-versus-prune and cross-digest eviction obey canonical lock order without deadlock.
+- Workspace cleanup releases leases without deleting the seed.
+- A later evaluation uses the cached seed without reacquisition.
+- `cache prune` never starts Promptfoo or touches provider runtime roots.
+- GitHub-hosted tests make no cross-job persistence assumption unless the cache root is explicitly restored.
 
-## Phase 5: Agent-attributed file changes
+## Phase 5: Checkout adapters and runtime roots
 
 ### Changes
 
-Implement `workspace-core/src/file-changes.ts` and establish baselines while each checkout is still clean.
+Implement the three checkout adapters and ownership-marked provider roots.
 
-For Git sources:
-
-1. create a package-owned private index loaded from the immutable source commit;
-2. refresh and verify the clean baseline without touching the checkout's real index;
-3. freeze baseline ignore rules before agent execution;
-4. disable replacement objects, ambient Git config, external diff, filesystem monitors, untracked caches, and optional locks for every collector command;
-5. discover tracked changes against the explicit immutable commit and untracked additions after the delegate stops;
-6. preserve agent commits and staging as ordinary changes relative to that baseline; and
-7. never invoke `git add`, update a ref, change a remote, or write the checkout's real index.
-
-OCI sources reuse the verified seed inventory. A separate bounded contained walk finds agent additions outside declared source destinations. Candidate reads use no-follow file descriptors and stable pre/post metadata checks. Files and symlink targets are encoded from exact bytes; the unified text diff is optional convenience data. Candidate and output ordering is deterministic.
-
-Capture runs before verifier launch. A complete result includes every changed path within the workspace contract. Limits return `truncated` with stable codes and bounded omitted paths. An internal timeout or operational failure returns `failed` with a stable bounded message and no partial capture; overall cancellation aborts the row instead. A non-cancellation capture failure does not prevent the verifier from inspecting the still-live checkout.
+- Give every view a unique ID and private writable state.
+- Require reflink and overlay adapters to pass write-isolation probes before selection.
+- Keep recursive copy as the correctness fallback.
+- Reject symlink, writable bind, and hardlink sharing.
+- Reserve the workspace ID and contained adapter paths, then atomically publish a pending recovery record before creating a lease, inode tree, or mount.
+- Require each adapter to persist enough teardown state before every irreversible resource-creation step and transition the record to active only after the view is complete.
+- Make view release, unmount, root removal, and stale recovery idempotent and containment-checked.
+- Reap only roots whose package marker is valid and whose process identity is no longer alive.
+- Recover and detach an abandoned view before releasing its seed lease.
 
 ### Verification
 
-- Tests cover added, modified, deleted, renamed, binary, executable, symlink, ignored, and outside-source files.
-- Agent commits, staging, replacement refs, and `.gitignore` edits cannot redefine or hide the immutable baseline.
-- Generated bytes round-trip exactly through base64; binary files are never UTF-8 decoded.
-- The unified diff covers bounded text additions, modifications, and deletions and becomes explicitly truncated at its limit.
-- Candidate, file, total-byte, diff, subprocess, omitted-path, metadata, timeout, cancellation, and unstable-read limits produce deterministic status and codes.
-- The collector leaves the checkout's real index, refs, remotes, source repositories, and seed unchanged.
-- Verifier-created files and modifications never appear because capture completed before verifier launch.
-- A synthetic large-repository test proves application memory and serialized output remain within published bounds.
+- One thousand concurrent mostly unchanged views share one seed and expose distinct paths.
+- Mutating any file, metadata bit, symlink, or Git state in one view changes neither seed nor sibling.
+- Reflink tests compare physical allocation and inode independence.
+- Overlay tests prove private upper/work directories, correct unmount ordering, and no sibling visibility.
+- Recursive-copy tests document full allocation cost.
+- A 2 GiB sparse/fixture seed scale test records allocated blocks for the seed plus one thousand views and enforces adapter-specific ceilings.
+- Capability probe failure cleans state and selects the next safe adapter.
+- Live, unmarked, escaping, symlinked, incompatible, and unknown-mount roots are never reaped.
+- Dead-owner recovery handles PID reuse, unmounts overlay views before lease release, and never exposes a lower-layer deletion race.
+- Process death at every boundary from pending-record publication through active-view transition leaves a recoverable record and no unknown mount.
+- A failed detach retains both recovery record and seed lease; other workspace teardown chains still complete.
 
-## Phase 6: Copilot SDK provider
+## Phase 6: Optional file changes
 
 ### Changes
 
-Implement the public-SDK-based provider under `packages/promptfoo-integration/src/copilot/`.
+When enabled, establish immutable baselines while the view is clean and capture after delegate cleanup.
 
-Keep provider and SDK runner responsibilities separate.
+Git sources use package-owned private indexes and explicit commits with replacement objects, ambient config, external diff, filesystem monitors, untracked caches, and optional locks disabled. Never write the checkout's real index, refs, or remotes. Freeze baseline ignore rules before execution. OCI sources reuse verified inventories. A bounded contained walk finds additions outside source destinations.
 
-**Provider process**
-
-- validate closed public config and trusted loader `basePath`;
-- resolve the effective working directory before spawning;
-- construct a versioned request containing only required SDK inputs;
-- spawn the runner with piped stdio and a minimal allowlisted environment;
-- own timeout, cancellation, process-tree termination, protocol parsing, redaction, and OpenTelemetry spans;
-- accept one terminal response; and
-- return Promptfoo-native output, error, token usage, and bounded metadata.
-
-**Runner process**
-
-- validate the complete request before importing `@github/copilot-sdk`;
-- create `CopilotClient` with its TCP runtime and validated working directory;
-- create one session with model, reasoning, provider-routing, and permissions;
-- delegate execution to shared `runCopilotSession` code used by standalone and composed modes;
-- normalize SDK events into bounded protocol frames and Promptfoo-compatible metadata/spans;
-- extract final assistant text and usage without exposing credentials;
-- disconnect the session, call client `stop`, and call `forceStop` when normal cleanup fails; and
-- emit one final or error frame after cleanup completes.
-
-**Protocol and security**
-
-- version every frame;
-- reserve stdout for protocol and bound stderr separately;
-- keep API keys in request memory and redact them from frames, logs, errors, metadata, and spans;
-- default to native Copilot routing when no custom provider is configured;
-- require a complete custom-provider tuple;
-- start from read-only permissions and require explicit unrestricted-tool opt-in; and
-- test SDK upgrades before changing the pinned version.
+Open candidates without following symlinks; require stable pre/post metadata; encode exact bytes; generate one bounded unified diff; normalize and sort paths; and emit complete, truncated, or failed status.
 
 ### Verification
 
-- Fake-runner tests cover success, SDK error, malformed protocol, timeout, cancellation, signal escalation, large output, and redaction.
-- A packed-package smoke project installs the optional peer and loads `CopilotSdkProvider` through stock Promptfoo.
-- Event mapping proves usage and tool spans are bounded and correctly attributed.
-- `skill-used` remains documented unsupported until a public SDK event provides reliable normalized skill identity.
-- An opt-in credentialed public-SDK test is available but not required for forked pull requests.
+- Add, modify, delete, rename, binary, executable, symlink, ignored, committed, staged, replacement-ref, and outside-source cases.
+- Exact binary round-trip through base64.
+- Unified diff includes bounded text adds/modifications/deletions.
+- Every time/path/file/byte/diff/subprocess/omitted/metadata limit produces deterministic status.
+- Disabled capture performs no baseline work and omits `metadata.fileChanges`.
+- Collector changes neither the real checkout Git state nor any seed/sibling.
 
-## Phase 7: Delegate protocol and compatibility
+## Phase 7: Copilot SDK provider
 
 ### Changes
 
-Implement the process-isolated `delegate-runner` and closed Codex, Claude, and Copilot adapters.
+Implement the public-SDK-based provider with separate parent and runner responsibilities.
 
-Protocol v1 reserves stdout for newline-delimited frames with `{ version: 1, requestId, type, payload }`. The parent sends one `call` and optional idempotent `abort`. The child constructs its own `AbortController`, rejects unknown or duplicate frames, and emits exactly one terminal `response` or `fatal` after native cleanup. Exported constants bound frame bytes, complete response bytes, stderr bytes, and shutdown grace.
+The parent validates config and working directory, spawns a minimal-environment process group, owns timeout/cancellation/termination/protocol/redaction/tracing, and returns Promptfoo-native response fields.
 
-The runner receives trusted `basePath` separately from public config and supplies it to `loadApiProvider` for peer/SDK resolution even though the checkout is elsewhere. Before serialization, the parent folds allowed prompt-level `delegate.config` into the validated effective constructor config and clears `PromptWire.config`. Prompt functions, live provider objects, and process-local context fields never cross the boundary.
-
-Adapters must preserve the entire JSON-safe native response. Codex and Claude use Promptfoo's public `loadApiProvider`; Copilot invokes shared `runCopilotSession` inside the existing runner without nesting process groups. Every adapter uses a minimal environment, binds the owned checkout, forces `bustCache: true`, rejects cached responses, and returns only after cleanup settles.
+The runner validates before dynamic import, creates one client/session, normalizes SDK events, extracts final text and usage, disconnects, stops or force-stops the client, and emits one terminal frame after cleanup.
 
 ### Verification
 
-- Contract tests run one fake coding task through all three adapters.
-- Attempts to set paths, extra directories, sessions, environment inheritance, cache controls, unknown keys, or acquisition credentials are rejected.
-- Every delegate receives the checkout and cache bypass at final precedence and receives no seed, sibling, verifier, or acquisition path.
-- Timeout and cancellation prove the runner and descendants are gone before control returns.
-- Protocol tests cover early abort, malformed/oversized frames, duplicate terminal frames, bounded stderr, redaction, JSON safety, response-size bounds, and forced process-group escalation.
-- Function-backed prompts and live provider objects do not cross serialization; allowed prompt-level model overrides still reach the delegate constructor.
-- Direct-versus-wrapped response fixtures compare every standard response field and native metadata key, not only output.
+- Fake runner covers success, SDK error, malformed protocol, timeout, cancellation, escalation, large output, and redaction.
+- Packed project loads direct Copilot with the exact optional peer.
+- Missing peer is actionable.
+- Skill support remains disabled until public SDK events provide reliable normalized identity.
 
-## Phase 8: Verifier runner
+## Phase 8: Delegate protocol and compatibility
 
 ### Changes
 
-Implement `verifier.ts` and `verifier-protocol.ts`:
+Implement the closed Codex, Claude, and Copilot adapters and versioned JSON-lines runner protocol.
 
-1. resolve `verifier.command` from trusted `basePath` and verify executable regular-file identity before workspace acquisition;
-2. reject commands under package-owned runtime roots and symlink targets;
-3. wait until the delegate process group is gone;
-4. spawn a new verifier process group directly, without a shell, in the checkout current directory;
-5. construct a minimal environment from essential platform variables and explicit `verifier.env` only;
-6. send one bounded `VerifierRequest`, including the canonical pre-verifier `fileChanges`, on stdin and close stdin;
-7. capture bounded stdout and stderr independently;
-8. forward cancellation and enforce the lesser of verifier timeout and remaining provider deadline;
-9. terminate the complete verifier process group before reading the final workspace-independent result;
-10. parse exactly one `VerifierOutput`, validate rewards and evidence, and add measured duration and optional separate trace ID; and
-11. return infrastructure errors distinctly from valid zero rewards.
+The parent sends one call and optional abort. The child rejects unknown/duplicate frames and emits one terminal response after native cleanup. Bound frames, complete response, stderr, and shutdown grace.
 
-Verifier logic may mutate the checkout while running because no later consumer receives that filesystem. Only returned rewards and evidence survive cleanup.
+Resolve native providers from trusted `basePath`; send only JSON-safe prompt/context fields; use minimal environment; bind workspace and cache bypass at final precedence; and preserve every JSON-safe response field and native metadata key.
 
 ### Verification
 
-- Executable fixtures cover rewards only, evidence only, both, and a valid zero reward.
-- Invalid versions, unknown keys, missing result fields, non-finite/out-of-range rewards, invalid UTF-8, extra documents, trailing text, overflow, timeout, cancellation, and premature exit fail explicitly.
-- A verifier that forks a noncooperative child is fully terminated before the provider proceeds.
-- The verifier receives the checkout as cwd and the exact bounded prompt, response, row context, immutable provenance, and pre-verifier file changes.
-- Verifier configuration and credentials never reach delegate input, environment, metadata, errors, or agent trace.
-- Delegate credentials and acquisition channels never reach the verifier environment.
-- A verifier trace has a different trace ID and its tool-like spans cannot appear in the agent trace.
+- Same fake task through all adapters.
+- Reserved paths, sessions, environment inheritance, cache controls, acquisition channels, and unknown keys rejected.
+- Function-backed prompts and live provider objects do not cross serialization.
+- Timeout/cancellation leave no runner descendants.
+- Direct-versus-wrapped fixtures compare output, errors, usage/cost, raw/public fields, metadata, `skillCalls`, and tracing identity.
 
-## Phase 9: Workspace provider integration
+## Phase 9: Workspace provider integration and cleanup
 
 ### Changes
-
-Implement `Provider` as the single owner of acquisition, delegation, verification, and row checkout cleanup.
 
 Constructor responsibilities:
 
-- validate exact provider, workspace, delegate, and verifier config;
-- extract and realpath trusted `basePath` before public validation;
-- resolve and validate the verifier executable before any workspace path exists;
-- initialize one owned workspace seed pool;
-- resolve only fixed runtime input channels;
-- reject nested self-delegation and unsupported adapters; and
-- reject reserved path, session, environment, acquisition, verifier, tracing, and cache-control fields at every authored layer.
+- validate exact config and trusted base path;
+- resolve fixed runtime channels;
+- create one ownership-marked provider runtime root;
+- connect to the shared seed cache and initialize checkout adapter selection;
+- reject recursive/unsupported delegates and reserved fields;
+- reap safely abandoned provider roots; and
+- run opportunistic cache garbage collection without turning cleanup warnings into evaluation failures.
 
 For each `callApi`:
 
-1. honor an already-aborted signal;
-2. acquire an immutable seed, create a unique checkout, and establish its change baseline;
-3. construct and run the delegate under the remaining overall deadline;
-4. await native delegate cleanup and quiesce its process group;
-5. reject cached, malformed, oversized, or non-JSON-safe responses;
-6. reject native `metadata.fileChanges`, `metadata.verifier`, or `metadata.allagents` collisions before capture or verifier side effects;
-7. capture bounded file changes before launching any verifier code;
-8. if a valid response exists and the call is not cancelled, run the verifier with the live checkout and captured changes;
-9. preserve the complete delegate response, spread native metadata unchanged, and add `metadata.fileChanges`, `metadata.verifier`, and `metadata.allagents` provenance;
-10. stop the verifier process group and remove the checkout in `finally`; and
-11. return only after row-local cleanup succeeds.
+1. honor pre-abort;
+2. resolve and validate the immutable seed entry without creating a view;
+3. reserve an opaque workspace ID and contained adapter paths, then atomically publish a pending recovery record;
+4. acquire the seed lease and create the private view, persisting teardown state before each irreversible adapter step;
+5. transition the recovery record to active and optionally establish a change baseline;
+6. run and quiesce the delegate;
+7. validate the complete response and reject reserved metadata collisions;
+8. optionally capture file changes;
+9. add `metadata.workspace` and optional `metadata.fileChanges` while preserving native metadata; and
+10. return without releasing the published view.
 
-If a valid delegate response contains an error, verification still runs. If execution fails before a valid response, verification does not run. If verification fails, the call returns a bounded provider error after checkout cleanup. If checkout cleanup itself fails after bounded retries, the call returns a cleanup error, exposes no path, and leaves the root ownership-marked for stale recovery rather than claiming successful removal.
+On pre-publication failure, run the recorded teardown chain immediately; release the seed lease only after adapter detachment succeeds, otherwise retain the pending record and lease for later recovery. On success, `Provider.cleanup()` owns normal release. No delayed timer or later provider call guesses when assertions have finished. If Promptfoo skips cleanup, later process recovery owns the abandoned root and its seed leases.
 
 ### Verification
 
-- Codex, Claude, and Copilot contract tests execute the same verifier fixture against the same workspace task.
-- With Promptfoo caching enabled, identical rows execute independently, mutate distinct workspaces, invoke capture and verifier twice, and never return `cached: true`.
-- Two concurrent calls share no writable objects and return isolated file changes.
-- A successful return, delegate error response, truncated/failed capture, verifier zero reward, verifier crash, timeout, cancellation, and cleanup failure each follow the specified state transition.
-- Valid delegate error responses still produce file changes and verifier results for partial work; transport failures launch neither collector nor verifier.
-- No response contains a workspace or artifact-directory path.
-- Native `metadata.skillCalls` remains top-level, while native `metadata.fileChanges`, `metadata.verifier`, and `metadata.allagents` collisions fail before collector or verifier launch.
-- Changed files appear exactly at `context.providerResponse.metadata.fileChanges`; verifier rewards appear at `context.providerResponse.metadata.verifier.rewards`.
-- Verifier mutations cannot alter the already-captured file changes.
-- Every successful result leaves no per-call checkout. An injected removal failure returns an explicit provider error and a later invocation safely reaps only its abandoned ownership-marked root.
+- JavaScript assertions read and modify known files through each returned workspace path.
+- Parallel rows receive isolated paths and mutations.
+- Workspace exists for passing, failing, asynchronous, model-graded, and trajectory assertions.
+- Every response reports `cleanup: "best-effort-evaluation"`.
+- Provider cleanup removes every successfully detached private view and retains any failed record with its lease.
+- Cleanup never deletes the reusable seed.
+- A Node evaluation that skips cleanup leaves a marked root; a later process releases it and its leases.
+- Live same-process roots are never reaped.
+- Failure before or during view creation is recovered from the pending record; no lease or mount can exist without teardown intent.
+- A failed overlay unmount keeps its seed lease while independent views still clean up.
+- Sequential provider instances reuse the same resolved seed.
+- Native skill metadata stays top-level; reserved collisions fail before publication.
+- Optional file changes are absent when disabled and durable when enabled.
 
-## Phase 10: Promptfoo assertion and tracing compatibility
+## Phase 10: Examples and Promptfoo compatibility
 
 ### Changes
-
-Build a direct-versus-wrapped compatibility matrix for each supported Promptfoo minor. Use deterministic fixture providers plus live provider smoke tests where credentials are available.
-
-The matrix must exercise:
-
-- `contains`, `regex`, `is-json`, and one provider-specific JavaScript assertion against unchanged output and metadata;
-- token usage and cost accounting;
-- `skill-used` and `not-skill-used` for delegates that emit normalized `metadata.skillCalls`;
-- `trajectory:tool-used`, `trajectory:tool-args-match`, `trajectory:tool-sequence`, and `trajectory:step-count` against an OTLP test collector;
-- a JavaScript assertion mapping `metadata.verifier.rewards.correctness` to score and pass/fail;
-- an assertion transform projecting `metadata.verifier.evidence` into a native `llm-rubric`;
-- a JavaScript assertion verifying changed bytes or the unified diff through `metadata.fileChanges`; and
-- verifier commands and judge spans that resemble agent activity but remain absent from the agent trajectory.
 
 Add executable examples for:
 
 - direct Copilot with an existing directory;
-- Codex with a Git workspace, generated-file assertion, and deterministic verifier;
-- Claude with a Git workspace and verifier evidence consumed by `llm-rubric`;
-- Copilot with composed Git and OCI sources;
-- verifier-owned agentic judging; and
-- parallel rows proving isolated checkout, file capture, and verifier execution.
+- Codex with a Git workspace and JavaScript filesystem assertion;
+- Claude with optional file-change assertion;
+- Copilot with Git and OCI sources;
+- one thousand parallel rows using copy-on-write views; and
+- cache pruning on a long-lived self-hosted runner.
 
-All verifier executables live beside the Promptfoo config, outside materialized checkouts, and use local deterministic fixtures by default. No example imports repository source directly or contains live credentials.
+Every workspace example runs stock Promptfoo:
+
+```bash
+promptfoo eval --config promptfooconfig.yaml
+```
+
+Build a matrix for every supported Promptfoo minor covering package exports, workspace assertions, optional file changes, skills, trajectory assertions, provider cleanup, and skipped-cleanup recovery.
 
 ### Verification
 
-- Clean temporary npm, pnpm, and Bun projects install the packed tarball without the Copilot peer, import default, `Provider`, and `CopilotSdkProvider`, verify default identity, and receive an actionable missing-peer error for Copilot.
-- Direct and wrapped providers return equivalent outputs, JSON-safe response fields, usage, native metadata, skills, and agent trajectories.
-- Ordinary output assertions pass without a verifier-specific transform.
-- Verifier-aware examples reference `context.providerResponse?.metadata?.verifier`, never an AllAgents namespace.
-- File-change-aware examples reference `context.providerResponse?.metadata?.fileChanges` and decode exact bytes without a filesystem path.
-- Verifier tool activity cannot produce a false-positive `trajectory:*` result.
-- The compatibility matrix fails on package loading, response drift, metadata nesting, trace loss, cleanup-before-verification, or checkout survival after return.
+- Examples import only packed/public package interfaces and contain no credentials.
+- npm, pnpm, and Bun temporary projects resolve the consumer's Promptfoo peer correctly.
+- Ordinary `contains`, `regex`, `is-json`, JavaScript, `llm-rubric`, `skill-used`, and `trajectory:*` assertions retain direct-provider behavior.
+- Multi-gigabyte scale example shows the selected adapter, allocated disk for one thousand views, best-effort view cleanup, and retained seed-cache size.
+- GitHub-hosted example relies on runner disposal unless it explicitly saves the cache directory.
+- Self-hosted example runs `allagents-promptfoo cache prune` before cache reporting or backup.
 
 ## Phase 11: Release
 
 ### Changes
 
-1. Confirm npm scope ownership and trusted-publisher configuration.
-2. Publish a release candidate under a `next` dist-tag.
-3. In smoke project A, install only the integration package; import all public exports and confirm actionable Copilot missing-peer behavior.
-4. In smoke project B, install the package and exact Copilot peer; run direct and composed Copilot cases.
-5. Run packed and registry-installed compatibility suites.
-6. Publish stable `1.0.0` with provenance.
-7. Announce the supported Promptfoo range, Node version, ORAS requirement, optional Copilot peer, config schema, file-change and verifier wire contracts, bounds, and assertion compatibility.
-8. Update downstream consumers to install the package rather than copy provider implementations.
+1. Confirm npm scope and trusted publisher.
+2. Publish release candidate under `next`.
+3. Test packed and registry-installed projects with and without Copilot peer.
+4. Exercise normal and skipped provider-cleanup paths.
+5. Publish stable `1.0.0` with provenance.
+6. Announce supported Promptfoo range, Node/Bun versions, ORAS requirement, checkout adapters, recursive-copy cost, optional file-change bounds, best-effort workspace cleanup, persistent seed-cache policy, and `cache prune`.
 
 ### Verification
 
-- npm displays provenance.
-- `npm view` shows expected repository, license, exports, engines, peers, and dist-tags.
-- Fresh smoke projects prove no-peer and exact-peer installation paths.
-- The tarball contains no lifecycle subpath, CLI, doctor, config shim, fixtures, credentials, source maps with private paths, or private repository references.
+- npm provenance and manifest metadata are correct.
+- Tarball contains public runtime, declarations, and cache executable only; no eval wrapper, lifecycle/doctor files, fixtures, credentials, or private paths.
+- Fresh consumers prove both provider exports and cache CLI.
 
 ## Required quality gates
-
-Every implementation pull request runs narrow package tests for changed behavior. Before first public release, run once from a clean checkout:
 
 ```bash
 bun install --frozen-lockfile
@@ -868,29 +726,29 @@ bun run build
 bun run pack:check
 ```
 
-The release candidate additionally runs:
+Release-candidate gates additionally cover:
 
-- packed-package stock-Promptfoo provider and export compatibility;
-- direct-versus-wrapped response, output assertion, skill, and trajectory parity;
-- concurrent workspace and verifier isolation E2E;
-- bounded file-change E2E proving exact binary capture, agent attribution before verifier mutation, explicit truncation/failure, and unchanged real Git indexes;
-- verifier-before-cleanup E2E across success, zero reward, delegate error response, verifier error, timeout, and cancellation;
-- Git provenance E2E;
-- OCI digest/authentication E2E against a disposable registry;
-- Copilot protocol and cancellation E2E with a fake runner, including forced outer-runner death; and
-- credentialed live-provider smoke tests when organization secrets are available.
+- stock-Promptfoo package and assertion compatibility;
+- normal and skipped provider-cleanup behavior;
+- stale-root and seed-lease recovery after forced process death;
+- thousand-view copy-on-write isolation, 2 GiB allocated-space ceilings, and cross-evaluation seed reuse;
+- age/size/default/all cache pruning under concurrent leases;
+- optional file-change exactness and bounds;
+- Git provenance and OCI authentication against disposable fixtures;
+- Copilot protocol/cancellation with fake runner; and
+- credentialed provider smokes when organization secrets are available.
 
 ## Completion criteria
 
-- The package is public and installable from npm with provenance.
-- Stock Promptfoo loads `Provider` and `CopilotSdkProvider` through documented named exports.
-- `Provider` calls Promptfoo's original Codex and Claude providers and the package-local Copilot runtime through closed adapters.
-- Git and OCI inputs produce immutable provenance and private per-call checkouts.
-- Concurrent calls share no writable filesystem objects.
-- Each delegate is fully stopped before its verifier starts; each verifier is fully stopped before cleanup; and every successful response is returned only after checkout removal succeeds.
-- The complete JSON-safe native delegate response survives wrapping; ordinary output, usage, provider-specific, skill, and trajectory assertions behave as documented.
-- Bounded generated/deleted files and a unified diff survive result serialization at `metadata.fileChanges`; verifier rewards and evidence survive at `metadata.verifier`; Promptfoo assertions decide score and pass/fail.
-- Agent and verifier traces are separate, and verifier activity can alter neither captured agent file changes nor trajectory assertions.
-- No response exposes a workspace path, artifact-directory path, or verifier implementation path.
-- Source, delegate, and verifier credentials remain isolated from one another and absent from results, logs, errors, and traces.
-- No lifecycle extension, configuration doctor, Promptfoo authoring compiler, network gateway, or custom assertion engine is introduced.
+- Stock Promptfoo loads both provider exports from the published package without an eval wrapper.
+- Git and OCI inputs produce immutable provenance and one persistent cached seed per resolved manifest.
+- One thousand private reflink/overlay views share immutable blocks without sharing writable state; recursive copy remains a correct documented fallback.
+- Workspace paths remain available through Promptfoo assertions.
+- Best-effort provider cleanup and safe later stale-root recovery are explicit and verified.
+- Workspace cleanup removes private views and releases leases without deleting reusable seeds.
+- Automatic and explicit cache pruning remove only unleased entries under the locked age/size policy.
+- GitHub-hosted runners require no cross-job cleanup unless the cache directory is explicitly persisted.
+- Optional generated/deleted files and unified diff survive serialization when enabled and are absent when disabled.
+- Complete native response, skill metadata, and agent trajectories survive wrapping.
+- Credentials remain isolated and absent from results, logs, errors, and traces.
+- No eval wrapper, lifecycle extension, pre-return grader, configuration doctor, authoring compiler, or remote gateway is introduced.
