@@ -81,7 +81,7 @@ providers:
           OPENAI_API_KEY: "{{env.OPENAI_API_KEY}}"
       workspace:
         sources:
-          - kind: git
+          - type: git
             repository: https://github.com/example/project.git
             ref: main
             destination: project
@@ -137,12 +137,12 @@ A workspace specification contains one discriminated `sources` collection rather
 ```yaml
 workspace:
   sources:
-    - kind: git
+    - type: git
       repository: https://github.com/example/project.git
       ref: main
       destination: project
 
-    - kind: oci
+    - type: oci
       repository: registry.example.com/eval-assets/skills
       digest: sha256:0123456789abcdef...
       destination: .agents/skills
@@ -204,14 +204,14 @@ interface AllAgentsProviderMetadata {
 
 type ResolvedSource =
   | {
-      kind: "git";
+      type: "git";
       repository: string;
       requestedRef: string;
       commit: string;
       destination: string;
     }
   | {
-      kind: "oci";
+      type: "oci";
       repository: string;
       requested: { digest: `sha256:${string}` } | { tag: string };
       digest: `sha256:${string}`;
@@ -221,7 +221,7 @@ type ResolvedSource =
 
 interface EvidenceEntry {
   path: string;
-  kind: "file" | "symlink";
+  type: "file" | "symlink";
   mode: number;
   size: number;
   sha256?: `sha256:${string}`;
@@ -230,7 +230,7 @@ interface EvidenceEntry {
 
 interface DeletedEntry {
   path: string;
-  kind: "file" | "symlink" | "directory";
+  type: "file" | "symlink" | "directory";
 }
 
 interface SkippedEntry {

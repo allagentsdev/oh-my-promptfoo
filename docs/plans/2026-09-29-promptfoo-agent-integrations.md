@@ -153,7 +153,7 @@ providers:
           maxExtractedBytes: 536870912
           timeoutMs: 120000
         sources:
-          - kind: git
+          - type: git
             repository: https://github.com/example/project.git
             ref: main
             destination: project
@@ -203,14 +203,14 @@ interface SourceLimits {
 }
 
 interface GitSource {
-  kind: "git";
+  type: "git";
   repository: string;
   ref: string;
   destination: string;
 }
 
 type OciSource = {
-  kind: "oci";
+  type: "oci";
   repository: string;
   destination: string;
 } & (
@@ -243,14 +243,14 @@ interface AllAgentsProviderMetadata {
 
 type ResolvedSource =
   | {
-      kind: "git";
+      type: "git";
       repository: string;
       requestedRef: string;
       commit: string;
       destination: string;
     }
   | {
-      kind: "oci";
+      type: "oci";
       repository: string;
       requested: { digest: `sha256:${string}` } | { tag: string };
       digest: `sha256:${string}`;
@@ -282,7 +282,7 @@ interface WorkspaceChanges {
 
 interface EvidenceEntry {
   path: string;
-  kind: "file" | "symlink";
+  type: "file" | "symlink";
   mode: number;
   size: number;
   sha256?: `sha256:${string}`;
@@ -291,7 +291,7 @@ interface EvidenceEntry {
 
 interface DeletedEntry {
   path: string;
-  kind: "file" | "symlink" | "directory";
+  type: "file" | "symlink" | "directory";
 }
 
 interface SkippedEntry {
