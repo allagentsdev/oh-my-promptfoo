@@ -69,6 +69,8 @@ allagents-promptfoo cache prune --all
 
 Both commands report removed/retained entries and allocated bytes and return nonzero on failure. They do not run evaluations or delete runtime roots. Unmarked and symlinked configured roots are refused. `ALLAGENTS_CACHE_ROOT` and `ALLAGENTS_WORKSPACE_ROOT` must be separate. Acquisition channels are `ALLAGENTS_GIT_USERNAME`, `ALLAGENTS_GIT_TOKEN`, `ALLAGENTS_ORAS_PATH`, and `ALLAGENTS_ORAS_AUTH_FILE`. Provider loader `options.env` takes precedence over process environment. None of these six channels reaches delegates.
 
+Package maintainers use the tag-pinned [npm release procedure](docs/releasing.md).
+
 Writable views try verified reflink, provider-visible OverlayFS, then disk-admitted full copy. Copy allocates a full source per retained row; insufficient capacity fails before copying. Large-repository writable rollout requires verified copy-on-write on the target runner. A successful small copy fallback does not clear that gate. Linux administrators can install the narrowly scoped helper using the repository's `scripts/workspace-helper.py` and its installation documentation. The provider invokes only that fixed root-owned helper, never arbitrary sudo commands.
 
 For hosted cache reuse, save only the published `published` subtree and verification metadata. Restore it into a fresh marked cache; never restore leases, protected checkouts, staging, locks, trash, or runtime roots. Local/self-hosted caches retain live mutable state and must recover abandoned roots before releasing leases. Hosted runner disposal is the final cleanup backstop.

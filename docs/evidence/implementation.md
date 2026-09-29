@@ -14,7 +14,7 @@ The contract is ADR 0001 and the phased plan merged from PR #1. All production m
 | 7–8: providers/protocol | Workspace Provider and direct CopilotSdkProvider; closed Codex/Claude/Copilot adapters, bounded JSONL transport, process-group cancellation, native response and trace preservation. Protocol and tracing tests pass. |
 | 9: lifecycle | Workspace remains live through filesystem, async and model-graded assertions. Native errors skip assertions; real CLI cleanup and later Node process recovery pass through the packed package. |
 | 10: compatibility | Independently npm-installed stock Promptfoo 0.122.0 on Node 22.22.1 loads both named exports. Codex, Claude and Copilot fixtures pass all recorded stock assertions, labeled source selection, absent filters and direct Copilot. Credentialed dogfooding is recorded in the private `allagents-research` repository. |
-| 11: release | Built tarball and trusted-publishing workflow are implemented; `next` uses a distinct prerelease and registry consumer/E2E gates run after publication. npm publication and registry-installed release-candidate/stable checks remain the explicit user-authorized final step; no npm token is present. |
+| 11: release | Built tarball and tag-pinned, retry-safe trusted-publishing workflow are implemented. Changesets prepares later stable versions; `vX.Y.Z-rc.N` publishes `next` and `vX.Y.Z` publishes `latest` only after a matching candidate passes registry consumer/E2E checks. Published versions are verified again from the registry. npm publication and registry-installed release-candidate/stable checks remain the final credential-dependent step; the local machine is not npm-authenticated. |
 
 ## Reproduce
 
