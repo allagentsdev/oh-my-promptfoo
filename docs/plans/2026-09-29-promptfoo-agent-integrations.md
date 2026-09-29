@@ -350,6 +350,8 @@ A plain symlink, writable bind mount, or writable hardlink never satisfies this 
 
 Reflink and overlay allocation should approach one seed plus changed blocks even with a thousand mostly unchanged views. Recursive copy may allocate the full multi-gigabyte seed per row. The selected adapter stays implementation metadata and does not alter provider configuration.
 
+On the actual WTG.AI.Prompts `wtg-use-linux-x64` runner, neither reflinks nor unprivileged OverlayFS mounts work. OverlayFS succeeds under `sudo` in a private mount namespace, but views mounted there are not visible to the parent provider process. The benchmark below proves the filesystem's potential, **not** that this adapter is deployable. CargoWise-scale writable rollout requires either a separately designed, narrowly privileged mount lifecycle whose views are visible to the provider and delegate, or a verified alternative CoW backing filesystem. Do not silently invoke `sudo` from the provider or count an isolated-namespace probe as a passing adapter.
+
 ### Tracing and assertion compatibility
 
 The delegate child receives incoming `traceparent` and `tracestate` and exports normalized agent spans through explicit OpenTelemetry configuration. The wrapper preserves trace identity and tool attributes required by:
@@ -482,6 +484,10 @@ Implement Git acquisition without a shell:
 7. validate realpath containment; and
 8. atomically publish only the complete workspace seed.
 
+The **consumer**, not the generic provider, owns source resolution. WTG.AI.Prompts evals already reference workspace YAML (for example, `workspace: ../.templates/eval-workspace-2026.yaml`); the template names `repos[].repo`, `repos[].commit`, and an environment-expanded `path`. A consumer adapter can read those pins and produce the provider's existing Git-source descriptors without adding AgentV YAML, its `hooks`, or release-specific fields to the provider interface. A template containing only a remote Git URL and commit does **not** remove the need for acquisition: without a release/image resolver it uses the provider's ordinary authenticated Git source.
+
+To use release artifacts rather than remote Git, keep `repo + commit` → snapshot chunk / OCI image lookup in the consumer, following [ai-evals' repository resolver](https://github.com/WiseTechGlobal/ai-evals/blob/d42496bc03c57bc640cd768cfc7ea90b46ed2158/apps/aievals/src/environment/repository-resolver.ts). WTG.AI.Prompts already maps pinned commits through `CargoWise.manifest.txt` to yearly `.git` release assets; the consumer may stage one as a local Git repository and pass a verified `file://` URL plus immutable commit, or pass an OCI image by digest if it has an image resolver. The provider prepares and validates its own immutable seed; the existing shared checkout symlinks remain read-only and cannot serve as private writable views. Do not implement a second release resolver inside the provider.
+
 ### Verification
 
 - Mutable refs resolve once and record commits.
@@ -546,7 +552,7 @@ Implement the three checkout adapters and ownership-marked provider roots.
 - Give every view a unique ID and private writable state.
 - Require reflink and overlay adapters to pass write-isolation probes before selection.
 - Keep recursive copy as a correctness fallback when its full per-row allocation is acceptable.
-- Require reflink or overlay on the target runner before deploying CargoWise-scale writable evaluations; if both probes fail, check filesystem placement and mount privileges, then block that rollout rather than silently copying every row. For explicitly read-only workloads, revise ADR 0001 and the public schema to add an opt-in whole-workspace read-only mode with cooperative write protection and private row scratch, following [ai-evals' read-only contract](https://github.com/WiseTechGlobal/ai-evals/blob/d42496bc03c57bc640cd768cfc7ea90b46ed2158/docs/adr/0006-use-test-scoped-workspaces-for-coding-agent-evaluations.md#read-only-workspaces). Never switch a writable evaluation to read-only automatically.
+- Require a working copy-on-write adapter visible to the provider and delegate on the target runner before deploying CargoWise-scale writable evaluations; if unprivileged probes fail, check filesystem placement and mount privileges, then block that rollout rather than silently copying every row. A privileged mount-namespace probe alone does not clear the gate. For explicitly read-only workloads, revise ADR 0001 and the public schema to add an opt-in whole-workspace read-only mode with cooperative write protection and private row scratch, following [ai-evals' read-only contract](https://github.com/WiseTechGlobal/ai-evals/blob/d42496bc03c57bc640cd768cfc7ea90b46ed2158/docs/adr/0006-use-test-scoped-workspaces-for-coding-agent-evaluations.md#read-only-workspaces). Never switch a writable evaluation to read-only automatically.
 - Reject symlink, writable bind, and hardlink sharing.
 - Reserve the workspace ID and contained adapter paths, then atomically publish a pending recovery record before creating a lease, inode tree, or mount.
 - Require each adapter to persist enough teardown state before every irreversible resource-creation step and transition the record to active only after the view is complete.
@@ -562,13 +568,15 @@ Implement the three checkout adapters and ownership-marked provider roots.
 - Overlay tests prove private upper/work directories, correct unmount ordering, and no sibling visibility.
 - Recursive-copy tests document full allocation cost.
 - A 2 GiB sparse/fixture seed scale test records allocated blocks for the seed plus one thousand views and enforces adapter-specific ceilings.
-- On the intended standard GitHub-hosted Ubuntu runner, materialize CargoWise commit `769187bbb4d2f2add3fe11131ce3aedc696145f0` from [ai-evals' representative proof](https://github.com/WiseTechGlobal/ai-evals/blob/d42496bc03c57bc640cd768cfc7ea90b46ed2158/docs/solutions/architecture-patterns/measuring-representative-workspace-costs.md): 245,828 files and 1,814,049,455 logical bytes. Prove that two concurrent writable views select reflink or overlay and share unchanged blocks while writes remain private. The existing sparse 2 GiB fixture does not replace this real-tree proof.
+- On WTG.AI.Prompts' actual `wtg-use-linux-x64` evaluation runner, materialize CargoWise commit `769187bbb4d2f2add3fe11131ce3aedc696145f0` from [ai-evals' representative proof](https://github.com/WiseTechGlobal/ai-evals/blob/d42496bc03c57bc640cd768cfc7ea90b46ed2158/docs/solutions/architecture-patterns/measuring-representative-workspace-costs.md): 245,828 files and 1,814,049,455 logical bytes. Prove that two concurrent writable views select a working copy-on-write adapter and share unchanged blocks while writes remain private. The existing sparse 2 GiB fixture does not replace this real-tree proof.
 - Report the selected adapter, seed acquisition time, per-view preparation time, allocated disk space, optional file-change baseline time, and cleanup time separately on that runner. The ai-evals timings were measured on an ext4 VPS, not GitHub Actions, and did not exercise overlay; they are not CI performance guarantees.
 - Capability probe failure cleans state and selects the next safe adapter.
 - Live, unmarked, escaping, symlinked, incompatible, and unknown-mount roots are never reaped.
 - Dead-owner recovery handles PID reuse, unmounts overlay views before lease release, and never exposes a lower-layer deletion race.
 - Process death at every boundary from pending-record publication through active-view transition leaves a recoverable record and no unknown mount.
 - A failed detach retains both recovery record and seed lease; other workspace teardown chains still complete.
+
+**Runner evidence (2026-09-29):** [WTG.AI.Prompts Actions run 36551124238](https://github.com/WiseTechGlobal/WTG.AI.Prompts/actions/runs/36551124238) used `wtg-use-linux-x64` (Ubuntu 24.04, ext-family filesystem, ~17.95 GB free), fetched and checked out the fixed 245,828-file / 1,814,049,455-logical-byte commit, and tested two concurrent views. Reflink returned `EOPNOTSUPP`; unprivileged OverlayFS mount returned “must be superuser”; privileged OverlayFS mounted inside an isolated namespace. Git fetch took 5,424 ms and checkout 206,687 ms. Two privileged OverlayFS views mounted in 6 ms and allocated 40,960 observed bytes; changing one file and running `git add` took 588 ms and allocated another 47,050,752 observed bytes. Seed and sibling file contents and Git status stayed unchanged; view unmount/removal took 1,359 ms. Free-space deltas are whole-filesystem observations, not exclusive accounting. The experiment ran all view operations inside the privileged namespace and did not exercise the future provider, so the writable rollout gate remains blocked. The current `snapshot/v1.1.0` CargoWise manifest does not include this older benchmark commit; release-backed acquisition should be tested separately with a mapped commit and cannot substitute for view isolation.
 
 ## Phase 6: Optional file changes
 
@@ -733,7 +741,7 @@ Release-candidate gates additionally cover:
 - normal and skipped provider-cleanup behavior;
 - stale-root and seed-lease recovery after forced process death;
 - thousand-view copy-on-write isolation, 2 GiB allocated-space ceilings, and cross-evaluation seed reuse;
-- On the target GitHub-hosted Ubuntu runner, the representative CargoWise-scale proof selects reflink or overlay, demonstrates private writes and shared unchanged blocks, and reports phase timings and allocated disk use; a recursive-copy result does not clear the large-repo rollout gate.
+- On WTG.AI.Prompts' target `wtg-use-linux-x64` runner, the representative CargoWise-scale proof selects a working copy-on-write adapter, demonstrates private writes and shared unchanged blocks, and reports phase timings and allocated disk use; a recursive-copy result does not clear the large-repo rollout gate.
 - age/size/default/all cache pruning under concurrent leases;
 - optional file-change exactness and bounds;
 - Git provenance and OCI authentication against disposable fixtures;
