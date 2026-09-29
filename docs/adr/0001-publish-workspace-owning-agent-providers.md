@@ -5,15 +5,15 @@
 
 ## Context
 
-AllAgents needs an open-source Promptfoo provider for the GitHub Copilot SDK. Coding-agent evaluations also need reproducible workspaces assembled from exact Git and OCI inputs, independent per-call write trees for writable rows, normal Promptfoo assertions that can inspect those trees, optional durable file-change evidence, cancellation, and bounded resource ownership.
+AllAgents needs an open-source Promptfoo provider for the GitHub Copilot SDK. Coding-agent evaluations also need reproducible private writable workspaces assembled from exact Git and OCI inputs, independently protected or writable source trees, normal Promptfoo assertions that can inspect those trees, optional durable file-change evidence, cancellation, and bounded resource ownership.
 
 Promptfoo already supplies capable `openai:codex-sdk` and `anthropic:claude-agent-sdk` providers. Reimplementing those integrations would duplicate model invocation, metadata, streaming, tracing, and provider-specific behavior. A separate execution gateway would add a network protocol, queue, durable state, and another evaluation boundary that local and CI jobs do not require.
 
 Promptfoo JavaScript assertions run after a provider returns and receive `context.providerResponse`. A provider can therefore return its workspace path and let ordinary assertions inspect the final filesystem. Cleaning up a row inside `callApi()` would make that impossible. A separate pre-return grading abstraction would duplicate Promptfoo assertions and introduce a second scoring model.
 
-Retaining each row's writable view or read-only checkout lease until Promptfoo finishes its transforms and assertions is simpler than inventing an earlier row boundary. Promptfoo 0.122.0 and current upstream do not guarantee provider cleanup on every path. The Node [`evaluate()` implementation](https://github.com/promptfoo/promptfoo/blob/0.122.0/src/evaluate.ts) returns without provider cleanup, and the CLI [`doEval` implementation](https://github.com/promptfoo/promptfoo/blob/0.122.0/src/node/doEval.ts) can return on a failed pass-rate threshold before its cleanup loop. The initial contract therefore accepts best-effort cleanup and safely recovers abandoned ownership-marked roots in a later process. It does not wrap `promptfoo eval` merely to guarantee workspace deletion.
+Retaining each row's private writable workspace and its source leases until Promptfoo finishes its transforms and assertions is simpler than inventing an earlier row boundary. Promptfoo 0.122.0 and current upstream do not guarantee provider cleanup on every path. The Node [`evaluate()` implementation](https://github.com/promptfoo/promptfoo/blob/0.122.0/src/evaluate.ts) returns without provider cleanup, and the CLI [`doEval` implementation](https://github.com/promptfoo/promptfoo/blob/0.122.0/src/node/doEval.ts) can return on a failed pass-rate threshold before its cleanup loop. The initial contract therefore accepts best-effort cleanup and safely recovers abandoned ownership-marked roots in a later process. It does not wrap `promptfoo eval` merely to guarantee workspace deletion.
 
-Retaining one physical copy of a multi-gigabyte repository per writable row would be unacceptable. The provider therefore separates a persistent, content-addressed immutable seed cache from private writable views. Safe copy-on-write adapters let a thousand mostly unchanged writable views share cached repository blocks while giving each writable row private state. A plain symlink or writable hardlink to a seed is not copy-on-write: writes would mutate every row, so either mechanism is prohibited for writable content.
+Retaining one physical copy of a multi-gigabyte repository per row would be unacceptable. The provider therefore separates a persistent, content-addressed immutable seed cache from private writable source views and protected read-only source checkouts. Safe copy-on-write adapters let a thousand mostly unchanged writable source views share cached repository blocks while giving each row private writable state. A plain symlink or writable hardlink to a seed is not copy-on-write: writes would mutate every row, so either mechanism is prohibited for writable source content.
 
 [Vercel Agent Eval](https://github.com/vercel-labs/agent-eval/blob/7e9aae4f7779f080af785ec88c17ef3c2ab3cebd/packages/agent-eval/src/lib/agents/shared.ts#L229-L276) returns generated file contents and deleted paths. AllAgents retains this capability as optional bounded metadata. Direct workspace inspection is the primary assertion path; file capture is durable evidence for reports and consumers that need results after cleanup.
 
@@ -108,7 +108,7 @@ One `Provider.callApi()` owns execution but deliberately does not own normal row
 1. validate the closed provider, workspace, and delegate configuration before creating a path;
 2. resolve mutable source requests to immutable identities and obtain an immutable seed entry;
 3. reserve an opaque workspace ID and contained adapter paths, then atomically publish a pending recovery record;
-4. acquire the seed lease and either create a private writable view or acquire a protected shared read-only checkout with a private row scratch area, persisting teardown state before every irreversible step;
+4. acquire the seed lease, create a private writable workspace root, and materialize each source as either a private writable view or a reference to a protected shared read-only checkout, persisting teardown state before every irreversible step;
 5. transition the recovery record to active and, when `fileChanges` is enabled, establish its package-owned baseline;
 6. merge allowed prompt-level delegate fields, inject the workspace path as final-precedence `working_dir`, and force a response-cache miss;
 7. run the delegate in a process group with a minimal environment and the caller's cancellation signal;
@@ -128,8 +128,8 @@ A valid delegate response containing an ordinary provider-level `error` still re
 `Provider.cleanup()` is the normal boundary for Promptfoo callers. It closes the provider, aborts and awaits active call process groups, and then runs one dependency-ordered teardown chain per workspace:
 
 1. validate the recovery record;
-2. detach a private view (including a required overlay unmount), or release that read-only row's private scratch without invalidating another row's shared checkout;
-3. only after detachment succeeds, remove row-owned paths and release its seed and shared-checkout leases; and
+2. detach each private writable source view (including a required overlay unmount), remove the row's references to protected read-only source checkouts, and remove the private workspace root;
+3. only after detachment succeeds, release its seed and shared-checkout leases; and
 4. mark the record released.
 
 Cleanup is all-settled across independent workspace chains, not across dependent steps inside one chain. A failed detach keeps that record and lease for later recovery. The provider removes independent staging paths, retains any shared checkout still leased by another row, removes the root only when no unreleased record remains, and returns an aggregate error after attempting every chain.
@@ -142,11 +142,11 @@ Every runtime root has a versioned ownership marker and live process identity. A
 
 Hard termination can leave overlay mounts or directories. Each checkout adapter must expose idempotent teardown and stale-recovery operations. Recovery refuses an unknown mount, unexpected ownership, or a path that fails containment checks.
 
-### Persistent immutable seed cache and private writable views
+### Persistent immutable seed cache and private writable workspaces
 
-The workspace module is deep: callers configure sources, while cache identity, acquisition locking, lease tracking, eviction, adapter selection, capability probing, block sharing, mount/copy mechanics, and teardown stay behind its interface.
+The workspace module is deep: callers configure sources and their access, while cache identity, acquisition locking, lease tracking, eviction, adapter selection, capability probing, block sharing, mount/copy mechanics, and teardown stay behind its interface. Every call has a private writable workspace root; source destinations inside it may have different access.
 
-Resolved source manifests address a package-owned seed cache outside provider runtime roots. The default uses the platform cache directory; `ALLAGENTS_CACHE_ROOT` selects another contained package-owned root for self-hosted runners or an explicit GitHub Actions cache. Providers and evaluations reuse one verified read-only seed for the same manifest digest. Cross-process per-digest locks single-flight preparation, and failed preparation never publishes an entry.
+Resolved source acquisition identities and destinations address a package-owned seed cache outside provider runtime roots. Per-source `permissions` is excluded from the seed digest, so provider configurations with read-only and writable access to the same inputs reuse one immutable seed. The default uses the platform cache directory; `ALLAGENTS_CACHE_ROOT` selects another contained package-owned root for self-hosted runners or an explicit GitHub Actions cache. Providers and evaluations reuse one verified read-only seed for the same manifest digest. Cross-process per-digest locks single-flight preparation, and failed preparation never publishes an entry.
 
 A separate cache-wide admission lock protects the 50 GiB allocated-size ceiling. Complete seeds are staged and measured before admission. The admission critical section covers the usage snapshot, LRU selection, candidate eviction, capacity decision, and atomic seed publication, so different digests cannot jointly over-admit. Operations needing both scopes always take the admission lock first and then per-digest locks in sorted digest order. Preparation releases its per-digest lock before admission and rechecks the entry after reacquiring locks in canonical order.
 
@@ -156,27 +156,27 @@ An unused seed has no lease record. Automatic garbage collection runs before add
 
 Lease creation, release, and eviction take the per-digest mutation lock under the canonical ordering when admission is also held. A dead process does not make a seed immediately evictable: later provider construction must recover and detach every dependent workspace before releasing its lease. The collector then revalidates package ownership, containment, and absence of every lease record before atomically renaming the entry into package-owned trash. It never evicts a leased seed, follows a cache symlink, or treats workspace cleanup as cache eviction.
 
-The checkout module has three internal adapters:
+Writable source views use three internal checkout adapters:
 
-1. **Reflink/clone adapter** — uses verified filesystem copy-on-write cloning such as Linux `FICLONE` or macOS `clonefile`; each workspace has private inodes while unchanged data blocks remain shared. It needs ordinary source-read and destination-write access, not mount privileges, but only works when the backing filesystem supports cloning these files; the target WTG runner returned `EOPNOTSUPP`.
-2. **Overlay adapter** — also provides copy-on-write, using the immutable seed as a read-only lower layer with one private upper and work directory per workspace; the merged mount is the only path sent to the agent. Its mount operation needs permission on the runner. Where unprivileged mounting is denied, a separately designed, narrowly privileged mount/unmount helper may create a view in the provider's mount namespace. The provider and delegate then access it as ordinary users; no unrestricted or implicit `sudo` invocation is part of the provider interface.
-3. **Recursive-copy adapter** — a full independent copy, **not** copy-on-write; portable when ordinary file reads and writes are permitted, but it may allocate the full workspace size per row. Admit each view only after a conservative full-copy estimate, headroom, currently retained views, concurrent admissions, and available disk are accounted for. Otherwise fail explicitly before that copy rather than exhaust the runner.
+1. **Reflink/clone adapter** — uses verified filesystem copy-on-write cloning such as Linux `FICLONE` or macOS `clonefile`; each writable source view has private inodes while unchanged data blocks remain shared. It needs ordinary source-read and destination-write access, not mount privileges, but only works when the backing filesystem supports cloning these files; the target WTG runner returned `EOPNOTSUPP`.
+2. **Overlay adapter** — also provides copy-on-write, using the source subtree in the immutable seed as a read-only lower layer with one private upper and work directory per writable source view; its merged mount occupies that source's destination inside the row's writable workspace. Its mount operation needs permission on the runner. Where unprivileged mounting is denied, a separately designed, narrowly privileged mount/unmount helper may create a view in the provider's mount namespace. The provider and delegate then access it as ordinary users; no unrestricted or implicit `sudo` invocation is part of the provider interface.
+3. **Recursive-copy adapter** — a full independent copy of the writable source, **not** copy-on-write; portable when ordinary file reads and writes are permitted, but it may allocate the full source size per row. Admit each view only after a conservative full-copy estimate, headroom, currently retained views, concurrent admissions, and available disk are accounted for. Otherwise fail explicitly before that copy rather than exhaust the runner.
 
 Selection tries reflink, then usable OverlayFS, then bounded recursive copy. Every adapter must pass a throwaway write-isolation probe; a privileged mount hidden in a private namespace does not count as usable. Failed probes clean their state and fall through. Unknown mount state or failed detach blocks teardown and seed eviction rather than continuing to copy. Package metadata and documentation report supported environments.
 
-Writable symlinks, bind mounts of a writable seed, and writable hardlinks are prohibited. Symlinks inside source content remain ordinary source entries and are validated for containment; they are not a checkout-sharing mechanism.
+Writable symlinks, bind mounts of a writable seed, and writable hardlinks are prohibited. Package-created links to protected read-only source checkouts may occupy private workspace destinations; links inside source content remain ordinary source entries and are validated for containment. A row can replace its own link without changing another row's workspace or the shared checkout.
 
-Copy-on-write allocation is approximately one seed plus each row's changed blocks, rather than one full repository per row. This is not a universal guarantee: reflink metadata, overlay upper layers, agent-generated dependencies, and recursive-copy fallback can still consume substantial disk. Concurrency and free-space behavior require a thousand-view scale test with a multi-gigabyte seed.
+Copy-on-write allocation is approximately one seed plus each writable row's changed blocks and any protected read-only prepared checkouts, rather than one full repository per row. This is not a universal guarantee: reflink metadata, overlay upper layers, agent-generated dependencies, and recursive-copy fallback can still consume substantial disk. Concurrency and free-space behavior require a thousand-view scale test with a multi-gigabyte seed.
 
 On WTG.AI.Prompts' [`wtg-use-linux-x64` runner](https://github.com/WiseTechGlobal/WTG.AI.Prompts/actions/runs/36551124238), reflinks and unprivileged OverlayFS mounts failed, but two CargoWise-sized OverlayFS views mounted under `sudo` in a private namespace shared unchanged data and isolated writes. A [separate direct-mount probe](https://github.com/WiseTechGlobal/WTG.AI.Prompts/actions/runs/36553859211) showed that an ordinary Node child could see and modify a `sudo`-mounted view in the job's namespace while the seed remained unchanged. These prove filesystem and process visibility, not a production privilege helper, crash recovery, actual provider integration, or thousand-view scale. CargoWise-scale writable rollout still requires a working adapter and those gates; recursive copy is not an acceptable silent replacement at that scale.
 
-### Explicit read-only workspaces
+### Explicit read-only sources in writable workspaces
 
-`workspace.permissions` accepts `read-only` or `all`; omission means `all` and preserves one private writable view per call. This field belongs to a provider configuration, not a prompt variable or a test-level workspace override. In stock Promptfoo, authors give the read-only and writable provider configurations distinct labels and select them through [`defaultTest.providers` and `tests[].providers`](https://www.promptfoo.dev/docs/configuration/test-cases/#filtering-tests-by-provider). Without a provider filter, a test runs against both configurations. Delegate-native sandbox or permission settings are separate and should be aligned, but cannot substitute for the workspace permission.
+Each `workspace.sources[]` entry accepts `permissions: read-only | all`; omission means `all` and preserves a private writable source view. There is no `workspace.permissions`: every `callApi()` receives a unique writable workspace path. Source permissions belong to a provider configuration, not prompt variables or test-level workspace overrides. In stock Promptfoo, authors can give source-read-only and source-writable provider configurations distinct labels and select them through [`defaultTest.providers` and `tests[].providers`](https://www.promptfoo.dev/docs/configuration/test-cases/#filtering-tests-by-provider). Without a provider filter, a test runs against both. Delegate-native sandbox settings apply to the whole working directory, not individual sources; read-only source rows still need a writable workspace setting if they write outside the source.
 
-Matching read-only rows without row-specific workspace setup may lease one package-owned, mode-protected prepared checkout **separate from the immutable seed**; each row has private package-owned scratch. Workspace-changing setup cannot use the shared checkout: the consumer must prepare it as part of the immutable source or select a private `all` view for that test. Protection is cooperative: another process with the same OS identity can defeat file modes, so this is not a security boundary for hostile agents. The provider treats an unexpected write as a violation, invalidates the prepared checkout rather than restoring it in place, and never exposes the seed for execution. Read-only row leases and scratch remain valid through Promptfoo assertions and are released by best-effort cleanup or stale recovery. A shared mutable checkout that is reset before the next call is rejected: Promptfoo has no guaranteed provider-visible per-row assertion-complete cleanup boundary, and concurrent rows could observe each other's writes.
+Matching read-only sources without source-changing setup may lease one package-owned, mode-protected prepared checkout **separate from the immutable seed**. Each row links that checkout at its configured destination inside its own writable workspace; other destinations and row scratch remain private. Setup that changes a source must be prepared into the immutable source before sharing or use a private `all` source view. Protection is cooperative: a process with the same OS identity can change modes or replace its own destination link, so this is not a security boundary for hostile agents. The provider treats an unexpected mutation of the shared checkout as a violation, invalidates it rather than restoring it in place, and never exposes the seed for execution. Source leases and row paths remain valid through Promptfoo assertions and are released by best-effort cleanup or stale recovery. A shared mutable checkout reset before the next call is rejected: Promptfoo has no guaranteed provider-visible per-row assertion-complete cleanup boundary, and concurrent rows could observe each other's writes.
 
-The prepared checkout is cache-owned and its allocated bytes count toward the cache ceiling. Pruning cannot remove it while any row lease is live, nor release a seed lease while the checkout depends on that seed's blocks. Matching read-only rows may report the same `metadata.workspace.path`; only their scratch and leases are private. Package-owned scratch is excluded from source file-change evidence.
+The prepared source checkout is cache-owned and its allocated bytes count toward the cache ceiling. Pruning cannot remove it while any row lease is live, nor release a seed lease while the checkout depends on that seed's blocks. `metadata.workspace.path` is always unique per row and writable; only matching read-only source content is shared. Package-owned control paths are excluded from source file-change evidence.
 
 ### Delegate contract and native response compatibility
 
@@ -305,6 +305,7 @@ workspace:
       repository: https://github.com/example/project.git
       ref: main
       destination: project
+      permissions: read-only
 
     - type: oci
       repository: registry.example.com/eval-assets/skills
@@ -312,11 +313,11 @@ workspace:
       destination: .agents/skills
 ```
 
-Every source request has a contained, non-overlapping destination. Git refs and OCI tags are requests; response metadata records resolved commits and manifest digests.
+Every source request has a contained, non-overlapping destination and an independent access mode; omitted `permissions` means `all`. Git refs and OCI tags are requests; response metadata records resolved commits and manifest digests.
 
-Workspace permissions are orthogonal to Git/OCI source selection: a release-backed commit still materializes a complete prepared checkout, and `read-only` controls whether matching rows may share it. `all` means writable; it does not mean unrestricted delegate permissions.
+Source permissions are orthogonal to Git/OCI acquisition: a release-backed commit still materializes the immutable seed, and `read-only` controls whether that particular source may use a shared protected checkout. `all` means a private writable source view; neither value is a delegate security policy.
 
-The consuming eval project owns its own workspace-YAML interpretation and `repo + commit` resolution to a GitHub release chunk or OCI image. The generic provider accepts only the resolved Git/OCI source descriptors and materializes its own immutable seed; it does not embed WTG-specific release manifests, AgentV hooks, or a second release resolver. A YAML template containing only a Git URL and commit still needs Git acquisition unless the consumer supplies a resolved local release-backed repository or image digest. Shared read-only checkout symlinks do not satisfy private writable views.
+The consuming eval project owns its own workspace-YAML interpretation and `repo + commit` resolution to a GitHub release chunk or OCI image. The generic provider accepts only the resolved Git/OCI source descriptors and materializes its own immutable seed; it does not embed WTG-specific release manifests, AgentV hooks, or a second release resolver. A YAML template containing only a Git URL and commit still needs Git acquisition unless the consumer supplies a resolved local release-backed repository or image digest. Links to shared read-only source checkouts do not satisfy private writable source views.
 
 The initial Git adapter accepts `https://` and `file://` repositories and rejects SSH URLs. HTTPS acquisition reads fixed `ALLAGENTS_GIT_USERNAME` and `ALLAGENTS_GIT_TOKEN` channels and scopes them only to Git. OCI acquisition reads `ALLAGENTS_ORAS_PATH` and `ALLAGENTS_ORAS_AUTH_FILE`, copies registry configuration to private temporary state for one acquisition, and deletes it in `finally`. `ALLAGENTS_WORKSPACE_ROOT` optionally selects the owned runtime parent; `ALLAGENTS_CACHE_ROOT` optionally selects the separate package-owned seed-cache root. All six names are reserved from delegates.
 
@@ -356,7 +357,7 @@ Provider configuration, workspace metadata, optional file-change results, manife
 
 - Direct Promptfoo and same-process Node evaluations can retain roots until process exit when Promptfoo skips provider cleanup.
 - Persistent seeds intentionally consume cache disk until age or allocated-size policy evicts them.
-- Recursive-copy fallback can allocate the full seed for every row; it requires workload-aware disk admission and an explicit failure when a large copy workload cannot fit.
+- Recursive-copy fallback can allocate each writable source's full size for every row; it requires workload-aware disk admission and an explicit failure when a large copy workload cannot fit.
 - Optional file capture adds traversal, hashing, encoding, result size, and latency.
 - A provider wrapper adds one stack layer when diagnosing delegated calls.
 - OCI users must provide a supported ORAS executable initially.
@@ -388,7 +389,7 @@ Rejected. Promptfoo may skip cleanup, but `Provider.cleanup()` still removes roo
 
 ### Use symlinks to the cached repository
 
-Rejected for writable workspace content. Writes through a symlink mutate the shared target; writable rows require private copy-on-write views or independent copies. Explicit read-only rows may instead share a protected prepared checkout, never a direct symlink to the immutable seed.
+Rejected for writable source content. Writes through a symlink mutate the shared target; writable sources require private copy-on-write views or independent copies. Explicit read-only sources may instead be linked into private writable workspaces from a protected prepared checkout, never directly from the immutable seed.
 
 ### Delete the seed cache after every evaluation
 
