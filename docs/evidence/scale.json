@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-09-29T17:25:50.964Z",
+  "fixtureLogicalBytes": 2147483648,
+  "views": 1000,
+  "adapter": "overlay",
+  "preparedMs": 152886.63484400001,
+  "meanViewMs": 152.886634844,
+  "baselineMs": 3.770623999997042,
+  "cleanupMs": 43220.340786999994,
+  "seedAllocatedBytes": 4096,
+  "runtimeAllocatedBytes": 4112384,
+  "seedRetainedAfterCleanup": 4096,
+  "privateWrite": true,
+  "distinctPaths": true
+}

@@ -1,0 +1,17 @@
+prompts: ["{{task}}"]
+providers:
+  - id: package:@allagents/promptfoo-integration:CopilotSdkProvider
+    config:
+      working_dir: "{{env.COPILOT_WORKING_DIR}}"
+      permissions:
+        filesystem: write
+        shell: deny
+        network: deny
+      env:
+        COPILOT_GITHUB_TOKEN: "{{env.COPILOT_GITHUB_TOKEN}}"
+tests:
+  - vars:
+      task: Explain the purpose of this repository.
+    assert:
+      - type: regex
+        value: .+

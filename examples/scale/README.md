@@ -1,0 +1,3 @@
+Install the public provider and Promptfoo 0.122.x in this directory. Set `ALLAGENTS_SCALE_REPOSITORY` to a credential-free HTTPS or local `file://` Git repository and `ALLAGENTS_SCALE_COMMIT` to an immutable commit, then run `promptfoo eval --config promptfooconfig.yaml --no-cache`. This evaluates 1,000 calls and retains every published workspace through assertions. Each call uses model tokens. Install the fixed Linux helper for OverlayFS or use a filesystem with verified reflink support.
+
+For the deterministic 2 GiB disk benchmark without model calls, run `bun scripts/benchmark-workspaces.ts` from this repository. It measures real adapter allocation, isolation and cleanup for 1,000 retained views; the committed aggregate evidence is in `docs/evidence/scale.json`.

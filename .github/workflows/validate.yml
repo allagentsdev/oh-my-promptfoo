@@ -1,0 +1,56 @@
+name: Validate
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  validate:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+      - run: bun install --frozen-lockfile
+      - run: bun run typecheck
+      - run: bun run lint
+      - run: bun test
+      - run: bun run build
+      - run: bun run pack:check
+      - run: bun run e2e
+  linux-acquisition:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+      - run: bun install --frozen-lockfile
+      - name: Install fixed privileged helper
+        run: |
+          sudo install -D -o root -g root -m 0755 scripts/workspace-helper.py /usr/local/libexec/allagents-workspace-helper
+      - name: Install pinned ORAS
+        run: |
+          mkdir -p "$RUNNER_TEMP/oras"
+          cd "$RUNNER_TEMP/oras"
+          curl -fsSLO https://github.com/oras-project/oras/releases/download/v1.3.0/oras_1.3.0_linux_amd64.tar.gz
+          curl -fsSLO https://github.com/oras-project/oras/releases/download/v1.3.0/oras_1.3.0_checksums.txt
+          sha256sum --check --ignore-missing oras_1.3.0_checksums.txt
+          tar -xzf oras_1.3.0_linux_amd64.tar.gz
+      - name: Exercise real HTTPS Git and disposable OCI registry
+        env:
+          ALLAGENTS_TEST_GIT_HTTPS: '1'
+          ALLAGENTS_TEST_PRIVILEGED_OVERLAY: '1'
+          ALLAGENTS_TEST_ORAS_PATH: ${{ runner.temp }}/oras/oras
+        run: bun test tests/sources.test.ts tests/sources-git-https.test.ts tests/sources-oci-registry.test.ts tests/workspace.test.ts
