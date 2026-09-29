@@ -83,7 +83,6 @@ interface CodexDelegate extends DelegateBase {
     web_search_mode?: "disabled" | "cached" | "live";
     collaboration_mode?: "coding" | "plan";
     approval_policy?: "never" | "on-request" | "on-failure" | "untrusted";
-    skip_git_repo_check?: boolean;
     output_schema?: Record<string, unknown>;
     enable_streaming?: boolean;
     deep_tracing?: boolean;
@@ -126,7 +125,14 @@ interface CopilotSdkProviderConfig {
   model?: string;
   reasoning_effort?: "low" | "medium" | "high";
   timeoutMs?: number;
-  provider?: string;
+  provider?: {
+    type?: "openai" | "azure" | "anthropic";
+    wireApi?: "completions" | "responses";
+    baseUrl: string;
+    apiKey?: string;
+    wireModel?: string;
+    azure?: { apiVersion?: string };
+  };
   permissions?: {
     filesystem?: "read" | "write";
     shell?: "deny" | "allow";
@@ -138,7 +144,9 @@ interface CopilotSdkProviderConfig {
 
 All public objects reject unknown keys. Before public validation, constructors extract Promptfoo's loader-provided `basePath` into an internal envelope; users cannot set it through config.
 
-Prompt-level config may override only fields under `delegate.config`. Workspace, file-change capture, timeout, environment, and delegate identity are constructor-only. The wrapper rejects reserved fields at every authored layer, validates the merged allowlist, and injects the absolute workspace path plus `bustCache: true` last.
+Copilot's pinned [SDK `ProviderConfig`](https://github.com/github/copilot-sdk/blob/v1.0.6/nodejs/src/types.ts#L2377-L2490) requires an endpoint object for a custom provider, not a provider-name string. This is a closed JSON-safe subset: the runner passes these fields to the SDK session, rejects URL-embedded credentials and unknown keys, and redacts `apiKey` from protocol errors, traces, and results. The SDK's function-valued token provider, arbitrary headers, and experimental named providers remain outside this configuration.
+
+Prompt-level config may override only fields under `delegate.config`. Workspace, file-change capture, timeout, environment, and delegate identity are constructor-only. The wrapper rejects reserved fields at every authored layer, validates the merged allowlist, and injects the absolute workspace path plus `bustCache: true` last. For Codex, it also forces `skip_git_repo_check: true`: the workspace root is not a Git repository even when it contains Git source destinations. This field is not author-configurable.
 
 `fileChanges` defaults to `false`. `true` enables the fixed bounded capture contract; it does not change workspace lifetime or cleanup.
 
@@ -262,7 +270,7 @@ tests:
       task: Fix the data transformation bug in CargoWise.
 ```
 
-Without `defaultTest.providers` or a test's own filter, Promptfoo runs the test against **both** provider configurations. The default filter selects a read-only **repository**, and the writable test overrides it. Both delegates can write to their own workspace outside `CargoWise`; the read-only source blocks ordinary writes inside `CargoWise`. Codex's native `sandbox_mode` applies to the whole working directory and cannot enforce a per-source restriction; it remains `workspace-write` here. Same-UID file modes are cooperative, not a hostile-agent security boundary. The consumer may resolve the Git pin to a release-backed source before provider execution; acquisition does not choose permissions.
+Without `defaultTest.providers` or a test's own filter, Promptfoo runs the test against **both** provider configurations. The default filter selects a read-only **repository**, and the writable test overrides it. Both delegates can write to their own workspace outside `CargoWise`; ordinary writes through the protected source link fail. The row can remove that link because its workspace root is writable; doing so leaves the destination absent, without copying or modifying the shared checkout. Codex's native `sandbox_mode` applies to the whole working directory and cannot enforce a per-source restriction; it remains `workspace-write` here. Same-UID file modes are cooperative, not a hostile-agent security boundary. The consumer may resolve the Git pin to a release-backed source before provider execution; acquisition does not choose permissions.
 
 ### Native response and workspace metadata
 
@@ -288,7 +296,7 @@ interface IntegratedMetadata extends Record<string, unknown> {
 
 A delegate response already owning `metadata.workspace` or `metadata.fileChanges` fails before capture or response publication. `metadata.skillCalls` remains top-level for Promptfoo's `skill-used` assertions.
 
-`workspace.path` is absolute, private, and writable for every row; it remains available to transforms and assertions. A read-only source destination may point to a shared protected checkout, but no rows share `workspace.path`. Promptfoo may skip provider cleanup; persisted results may therefore contain either a still-present transient path or a stale path removed by cleanup, later recovery, or host teardown. No consumer may treat it as a durable artifact reference.
+`workspace.path` is absolute, private, and writable for every row; it remains available to transforms and assertions. A read-only source destination may link to a shared protected checkout whose real path and Git top-level are outside the workspace; no rows share `workspace.path`. Assertions inspect only expected configured destinations and files, not agent-supplied arbitrary paths, and do not reject package-created source links merely because their real path is outside the root. Promptfoo may skip provider cleanup; persisted results may therefore contain either a still-present transient path or a stale path removed by cleanup, later recovery, or host teardown. No consumer may treat it as a durable artifact reference.
 
 ### Optional file-change result
 
@@ -359,19 +367,19 @@ Promptfoo does not currently guarantee this hook on every path. A Node evaluatio
 
 This is an explicit tradeoff, not a hidden guarantee. A thousand mostly unchanged copy-on-write workspaces are acceptable because they share seed blocks. Changed blocks, installed dependencies, recursive-copy fallback, and overlay mounts still consume resources, so stale-root recovery remains required on long-lived machines.
 
-GitHub-hosted Actions runner disposal is the final cleanup backstop and prevents cross-job stale state. A seed survives into another hosted job only when the workflow explicitly restores the cache directory. Workspace recovery and cache pruning matter primarily on local and self-hosted runners and before saving a hosted-runner cache.
+GitHub-hosted Actions runner disposal is the final cleanup backstop and prevents cross-job stale state. A workflow can reuse seeds only by saving and restoring the published immutable seed subtree with its verification metadata, not the entire cache root. The new runner validates those seeds, admits them under the cache-wide size ceiling before use, and creates fresh mutable state. Local and self-hosted runners keep their live cache and leases together; they must recover stale runtime roots before releasing leases and never restore a hosted snapshot over a live cache.
 
 ### Persistent seed-cache contract
 
-The content-addressed seed cache is package-owned and outside every provider runtime root. It defaults to the platform cache directory; `ALLAGENTS_CACHE_ROOT` may select another contained root. Entries are keyed by the resolved manifest digest and contain immutable content plus mutable package-owned state. Workspace cleanup never deletes an entry merely because its current views finished.
+The content-addressed seed cache is package-owned and outside every provider runtime root. It defaults to the platform cache directory; `ALLAGENTS_CACHE_ROOT` may select another contained root. Published immutable seeds and verification metadata occupy a separate subtree from package-owned mutable leases, protected checkouts, locks, staging, and trash. Entries are keyed by the resolved manifest digest. Workspace cleanup never deletes an entry merely because its current views finished.
 
 For a source with `permissions: read-only`, a package-owned, protected prepared checkout is separate from the immutable seed and may be shared by matching rows without setup that changes that source. Its allocated bytes count toward the same cache ceiling; live row leases block pruning, and a seed lease stays held whenever the prepared checkout still depends on seed blocks. Each row owns a private writable workspace with package-created links to protected checkouts at their declared destinations. Unexpected mutation invalidates a shared checkout rather than resetting it in place; no subsequent row receives it. Optional file-change capture traverses the private workspace without treating package-created destination links as new source content, excludes package-owned control paths, and separately detects shared-checkout mutation. Cooperative file modes do not protect against a deliberate same-UID process changing permissions or replacing its own link.
 
 Cross-process per-digest mutation locks serialize preparation, lease publication, lease release, and entry mutation. Creating a view records a lease containing provider-root identity and a process identity resistant to PID reuse. A dead owner does not make a seed evictable: later provider construction must recover and unmount the dependent workspace before releasing its lease. Eviction validates the ownership marker and containment, rechecks that no lease record remains, and atomically renames the entry to package-owned trash before deletion.
 
-The 50 GiB allocated-size ceiling is cache-wide. A separate cache-wide admission lock serializes the usage snapshot, LRU selection, candidate eviction, capacity decision, and atomic publication of every newly staged seed. Operations needing both lock scopes always acquire the admission lock first and then per-digest locks in sorted digest order. Preparation may hold one per-digest lock while staging, but releases it before entering admission and rechecks the entry after reacquiring locks in canonical order. This prevents both cross-digest over-admission and lock cycles.
+The 50 GiB allocated-size ceiling covers all package-owned cache data: published seeds, protected checkouts, staging, and trash awaiting deletion. The cache-wide admission lock is taken before starting either seed acquisition or protected-checkout preparation and held through publication or removal of incomplete output. The materializer reserves a bound on its full physical staging footprint before launching an external writer such as Git, or reserves room before each controlled write increment. It must enforce that bound on disk; measurement after an unconstrained subprocess exits is not sufficient. If the bound cannot be enforced or will not fit after evicting unleased LRU entries, acquisition fails before that write begins. Incomplete output is removed; failed removal remains charged. A completed candidate is measured and atomically published while admission is still held.
 
-Initial automatic policy also includes a 30-day unused-age limit. Before publishing a new seed, admission evicts unleased least-recently-used entries until the measured staged entry fits or returns a bounded capacity error. Provider construction and `Provider.cleanup()` run opportunistic collection; failure is a bounded warning and does not replace an evaluation result.
+This serializes cache acquisition across digests, including network I/O, rather than allowing independent staging to exhaust disk before admission. Per-digest locks still protect lease and entry mutation. When both are needed, take admission first and then per-digest locks in sorted order; never acquire admission while holding a digest lock. Lease-only operations take their digest lock without admission. Both lock types are stale-safe, acquisition has a bounded timeout, and interrupted preparation is recovered before another admission. Automatic collection also removes entries unused for 30 days. Provider construction and `Provider.cleanup()` collect opportunistically; a failure is a bounded warning and does not replace an evaluation result.
 
 `allagents-promptfoo cache prune` applies the default policy and returns nonzero on failure. `cache prune --all` removes every unleased entry. Both report entries and allocated bytes removed and retained. Neither follows cache symlinks, removes a leased entry, inspects Promptfoo output, or touches provider runtime roots.
 
@@ -535,6 +543,8 @@ Implement Git acquisition without a shell:
 7. validate realpath containment; and
 8. atomically publish only the complete workspace seed.
 
+Git writes into capacity-controlled staging. Reserve and enforce its physical footprint before launching Git, in addition to the configured download and extracted-content limits. If this cannot be enforced on the current filesystem, fail before acquisition rather than letting an unconstrained child fill the cache or host disk.
+
 The **consumer**, not the generic provider, owns source resolution. WTG.AI.Prompts evals already reference workspace YAML (for example, `workspace: ../.templates/eval-workspace-2026.yaml`); the template names `repos[].repo`, `repos[].commit`, and an environment-expanded `path`. A consumer adapter can read those pins and produce the provider's existing Git-source descriptors without adding AgentV YAML, its `hooks`, or release-specific fields to the provider interface. A template containing only a remote Git URL and commit does **not** remove the need for acquisition: without a release/image resolver it uses the provider's ordinary authenticated Git source.
 
 To use release artifacts rather than remote Git, keep `repo + commit` → snapshot chunk / OCI image lookup in the consumer, following [ai-evals' repository resolver](https://github.com/WiseTechGlobal/ai-evals/blob/d42496bc03c57bc640cd768cfc7ea90b46ed2158/apps/aievals/src/environment/repository-resolver.ts). WTG.AI.Prompts already maps pinned commits through `CargoWise.manifest.txt` to yearly `.git` release assets; the consumer may stage one as a local Git repository and pass a verified `file://` URL plus immutable commit, or pass an OCI image by digest if it has an image resolver. The provider prepares and validates its own immutable seed; the existing shared checkout symlinks remain read-only and cannot serve as private writable views. Do not implement a second release resolver inside the provider.
@@ -545,12 +555,15 @@ To use release artifacts rather than remote Git, keep `repo + commit` → snapsh
 - Invalid refs, submodules, symlink escapes, cancellation, and failure publish no seed.
 - Credentials reach only Git and are absent from metadata, errors, logs, traces, and delegates.
 - Source repositories cannot be mutated through the seed.
+- An external Git writer cannot exceed its reserved staging footprint; an unavailable physical write bound fails before launch, and cancellation or an over-limit write publishes no seed.
 
 ## Phase 3: OCI materialization
 
 ### Changes
 
-Implement an `OciMaterializer` adapter invoking ORAS 1.x without a shell. Resolve tags to digests, pull digest-qualified references, accept bounded uncompressed regular-file layers with validated relative titles, and reject archives, compression, special files, escaping links, duplicate titles, and size overflow.
+Implement an `OciMaterializer` adapter invoking ORAS 1.x without a shell. Resolve tags once to a digest. Fetch the manifest by digest with bounded stdout, check its digest and supported media type, and validate every file descriptor's digest, declared size, uncompressed regular-file media type, unique contained title, and aggregate declared bytes against `maxDownloadBytes` and `maxExtractedBytes` **before fetching any blob**. Reject archives, compression, special files, escaping links, and duplicate titles.
+
+For each accepted descriptor, run [`oras blob fetch --output -`](https://oras.land/docs/commands/oras_blob_fetch/) against its digest and stream stdout into contained staging files. Count actual bytes across the manifest and all blobs while reading, stop and terminate the process if a descriptor or aggregate limit is exceeded, and verify exact descriptor size and SHA-256 digest before accepting each file. Do not use unbounded `oras pull`: its manifest knowledge alone does not limit in-flight bytes from a malformed registry. Materialization also obeys the cache's physical staging reservation.
 
 Copy registry auth to a private mode-`0600` file for each acquisition and delete it in `finally`.
 
@@ -558,7 +571,7 @@ Copy registry auth to a private mode-`0600` file for each acquisition and delete
 
 - Disposable registry fixture serves a valid pinned artifact.
 - Digest mismatch, malicious titles, unsupported layouts, overflow, timeout, cancellation, and authentication failure publish no seed.
-- Overflow rejects before payload download.
+- Announced descriptor overflow rejects before any blob download; a lying registry that streams more than declared is stopped during download, publishes no seed, and leaves no reusable partial entry.
 - Registry credentials reach neither delegate nor result.
 
 ## Phase 4: Persistent seed cache
@@ -569,15 +582,16 @@ Implement the shared immutable cache and lease-aware garbage collection.
 
 - Resolve the default platform cache path and validate optional `ALLAGENTS_CACHE_ROOT`.
 - Key entries by resolved manifest digest and verify package ownership, schema, content integrity, and containment.
+- Keep the published immutable seed subtree separate from all mutable cache state. A fresh hosted runner may restore only that subtree, validate ownership, schema, content and allocated size before use, evict unleased excess, and initialize new leases and checkouts. A live shared cache must retain its original leases and cannot be overwritten by a restored snapshot.
 - Serialize preparation and lease changes through stale-safe per-digest locks.
-- Stage complete seeds before cache admission and measure allocated bytes.
-- Serialize the cache-wide size snapshot, LRU selection, eviction, capacity decision, and atomic publication through one admission lock.
-- Enforce canonical lock ordering: admission lock first, then per-digest locks sorted by digest; release a preparation lock before admission and recheck after reacquisition.
-- Single-flight equivalent preparation across processes and atomically publish complete seeds.
+- Take the cache-wide admission lock before staging either a seed or a protected checkout; hold it through capacity-controlled acquisition, final measurement, atomic publication, or removal of incomplete output.
+- Count published seeds, protected checkouts, incomplete staging, and trash against the same 50 GiB allocated-size ceiling. Enforce a full reserved physical-footprint bound before each Git subprocess or other external writer starts, and reserve capacity ahead of each controlled write increment. Reject an unbounded writer or a bound that cannot fit after eviction; count failed cleanup until it succeeds.
+- Enforce canonical lock ordering: admission first, then per-digest locks sorted by digest. Preparation is bounded and serializes distinct digests while holding admission; lease-only changes take their digest lock without admission.
+- Single-flight equivalent preparation across processes and atomically publish complete seeds or protected checkouts.
 - Evict failed preparation state for retry.
 - Keep immutable seed content read-only and never expose the seed itself to delegates.
 - Create a live seed lease only after a pending workspace recovery record exists.
-- Prepare a protected read-only checkout per matching source identity from the immutable seed; charge its allocated bytes to the cache ceiling, hold row leases through assertions, and preserve any seed lease needed by its backing blocks.
+- Prepare a protected read-only checkout per matching source identity from the immutable seed under the same capacity-controlled admission lock; hold row leases through assertions and preserve any seed lease needed by its backing blocks.
 - Enforce 50 GiB allocated size and 30 days unused age; evict unleased LRU entries only.
 - Implement `cache prune` and `cache prune --all` with bounded reporting and explicit nonzero failure.
 - Make lease release and trash deletion idempotent and containment-checked.
@@ -589,12 +603,12 @@ Implement the shared immutable cache and lease-aware garbage collection.
 - Every lease record blocks age, size, default-prune, and `--all` eviction.
 - Dead-owner lease records continue to block pruning until workspace recovery releases them; concurrent acquire-versus-prune cannot delete an acquired seed.
 - LRU size eviction, 30-day age eviction, capacity exhaustion, corrupt ownership, symlink attacks, interrupted trash deletion, and retry are deterministic.
-- Concurrent publication of different digests cannot jointly exceed the cache-wide ceiling.
-- Admission-versus-prune and cross-digest eviction obey canonical lock order without deadlock.
+- Concurrent seed and protected-checkout preparations, including different digests, cannot jointly exceed the ceiling through uncounted staging, trash, or publication; Git subprocess writes are demonstrably constrained to their reserved physical footprint rather than merely measured after exit.
+- Admission-versus-prune and cross-digest lease changes obey canonical lock order without deadlock; bounded acquisitions and interrupted staging recover safely.
 - Workspace cleanup releases leases without deleting the seed.
 - A later evaluation uses the cached seed without reacquisition.
 - `cache prune` never starts Promptfoo or touches provider runtime roots.
-- GitHub-hosted tests make no cross-job persistence assumption unless the cache root is explicitly restored.
+- On a fresh hosted runner, restore only published seeds and verification metadata after a job that skipped cleanup; a new provider accepts intact in-budget seeds, evicts excess, recreates local lease state, and can prune them after its own rows finish. Reject or reacquire a corrupt or incomplete seed. Restoring stale leases is prohibited; a live self-hosted cache still blocks prune until dependent roots are detached.
 
 ## Phase 5: Checkout adapters and runtime roots
 
@@ -621,7 +635,7 @@ Implement the three checkout adapters and ownership-marked provider roots.
 - Reflink tests compare physical allocation and inode independence.
 - Overlay tests prove provider/delegate-visible mounts, ordinary-user reads and private writes, private upper/work directories, controlled privileged setup, correct unmount ordering, and no sibling visibility; forced termination and failed unmount retain the recovery record and seed lease.
 - Recursive-copy tests document full allocation cost, select it when CoW probes fail and space permits, and reject under concurrent disk pressure before copying when the per-view reserve cannot fit.
-- Matching read-only source rows share only protected source contents, not `metadata.workspace.path`, writable root files, scratch, or leases; ordinary source-file/Git writes fail while workspace-root writes succeed. A changed shared checkout is invalidated and never reused; same-UID `chmod` is documented as outside the guardrail.
+- Matching read-only source rows share only protected source contents, not `metadata.workspace.path`, writable root files, scratch, or leases; ordinary source-file/Git writes fail while workspace-root writes succeed. Unlinking a row's source destination leaves it absent without copying or changing the shared checkout; a replacement is row-owned and visible to assertions as such. A changed shared checkout is invalidated and never reused; same-UID `chmod` is documented as outside the guardrail.
 - A 2 GiB sparse/fixture seed scale test records allocated blocks for the seed plus one thousand views and enforces adapter-specific ceilings.
 - On WTG.AI.Prompts' actual `wtg-use-linux-x64` evaluation runner, materialize CargoWise commit `769187bbb4d2f2add3fe11131ce3aedc696145f0` from [ai-evals' representative proof](https://github.com/WiseTechGlobal/ai-evals/blob/d42496bc03c57bc640cd768cfc7ea90b46ed2158/docs/solutions/architecture-patterns/measuring-representative-workspace-costs.md): 245,828 files and 1,814,049,455 logical bytes. Prove that two concurrent writable views select a working copy-on-write adapter and share unchanged blocks while writes remain private. The existing sparse 2 GiB fixture does not replace this real-tree proof.
 - Report the selected adapter, seed acquisition time, per-view preparation time, allocated disk space, optional file-change baseline time, and cleanup time separately on that runner. The ai-evals timings were measured on an ext4 VPS, not GitHub Actions, and did not exercise overlay; they are not CI performance guarantees.
@@ -670,6 +684,7 @@ The runner validates before dynamic import, creates one client/session, normaliz
 - Packed project loads direct Copilot with the exact optional peer.
 - Missing peer is actionable.
 - Skill support remains disabled until public SDK events provide reliable normalized identity.
+- A custom provider endpoint with `baseUrl` and `apiKey` reaches the pinned SDK as an object; an old string, missing endpoint, unknown fields, and leaked credentials fail the appropriate contract checks.
 
 ## Phase 8: Delegate protocol and compatibility
 
@@ -679,12 +694,13 @@ Implement the closed Codex, Claude, and Copilot adapters and versioned JSON-line
 
 The parent sends one call and optional abort. The child rejects unknown/duplicate frames and emits one terminal response after native cleanup. Bound frames, complete response, stderr, and shutdown grace.
 
-Resolve native providers from trusted `basePath`; send only JSON-safe prompt/context fields; use minimal environment; bind workspace and cache bypass at final precedence; and preserve every JSON-safe response field and native metadata key.
+Resolve native providers from trusted `basePath`; send only JSON-safe prompt/context fields; use minimal environment; bind workspace, cache bypass, and Codex's required Git-root bypass at final precedence; and preserve every JSON-safe response field and native metadata key.
 
 ### Verification
 
 - Same fake task through all adapters.
 - Reserved paths, sessions, environment inheritance, cache controls, acquisition channels, and unknown keys rejected.
+- Codex runs from a non-Git workspace root containing nested Git and OCI sources; its internal `skip_git_repo_check: true` cannot be overridden.
 - Function-backed prompts and live provider objects do not cross serialization.
 - Timeout/cancellation leave no runner descendants.
 - Direct-versus-wrapped fixtures compare output, errors, usage/cost, raw/public fields, metadata, `skillCalls`, and tracing identity.
@@ -721,9 +737,11 @@ On pre-publication failure, run the recorded teardown chain immediately; release
 ### Verification
 
 - JavaScript assertions read and modify known files through every returned private writable workspace path, including rows whose source repository is protected.
+- Codex examples run against a private workspace root without `.git`; nested source repositories remain accessible.
 - Parallel rows always receive isolated workspace paths and writable root files; matching read-only sources may share protected contents but not writable source views, row links, or leases.
-- Workspace exists for passing, failing, asynchronous, model-graded, and trajectory assertions.
-- Every response reports `cleanup: "best-effort-evaluation"`.
+- Workspace exists for passing and failing assertions, asynchronous and model-graded assertions, and trajectory assertions.
+- A valid delegate response with a top-level `error` fails the row without running assertions; the native error and diagnostic workspace metadata survive. Protocol failures before a valid response tear down recorded resources.
+- Every returned valid delegate response reports `cleanup: "best-effort-evaluation"`; errors before a valid response are not published with a workspace path.
 - Provider cleanup removes every successfully detached private workspace and releases its source leases, retaining any failed record with its lease.
 - Cleanup never deletes the reusable seed or a protected source checkout still leased by another row.
 - A Node evaluation that skips cleanup leaves a marked root; a later process releases it and its leases without reaping a live reader.
@@ -734,7 +752,7 @@ On pre-publication failure, run the recorded teardown chain immediately; release
 - Native skill metadata stays top-level; reserved collisions fail before publication.
 - Optional file changes are absent when disabled and durable when enabled.
 - Source-read-only provider labels and `defaultTest.providers` / `tests[].providers` run only the selected source policy; a missing filter demonstrably runs both, and prompt variables cannot elevate a source's `read-only` to `all`.
-- Assertions can inspect a protected source and write elsewhere in their private workspace; ordinary source writes fail, package control paths are excluded from optional file changes, and unexpected shared-content mutation invalidates reuse rather than triggering an in-place restore.
+- Assertions inspect configured source paths whose real path may be in the cache and can write elsewhere in their private workspace; ordinary source-file writes fail, package control paths are excluded from optional file changes, and unexpected shared-content mutation invalidates reuse rather than triggering an in-place restore.
 
 ## Phase 10: Examples and Promptfoo compatibility
 

@@ -30,7 +30,7 @@ The complete declaration of source requests, destinations, and source permission
 
 ## Seed cache
 
-The package-owned, content-addressed store of immutable workspace seeds and protected prepared source checkouts. Seeds are keyed by resolved manifest digest. The cache is shared across providers and evaluations and lives outside provider runtime roots. Successful workspace cleanup releases leases but does not discard reusable cache entries.
+The package-owned, content-addressed store outside provider runtime roots. Published immutable seeds and verification metadata are separate from mutable leases, protected prepared checkouts, locks, staging, and trash. Seeds are keyed by resolved acquisition identities and destinations, not source permissions. Hosted workflows may restore only published seeds into a fresh runner and must validate them before use; live shared caches keep their leases until dependent workspaces are detached. Successful workspace cleanup releases leases but keeps reusable seeds.
 
 ## Workspace seed
 
@@ -58,7 +58,7 @@ A contained, ownership-marked directory for one workspace-provider instance. It 
 
 ## Cache garbage collection
 
-The independent process that removes unleased cache entries according to age and allocated-size policy, releasing protected source checkouts before any seed they depend on. One cache-wide admission lock serializes the size snapshot, LRU eviction, capacity decision, and publication across different digests; per-digest locks protect entries and leases. The collector rechecks package ownership, containment, and absence of every lease record before atomically moving an entry to package-owned trash. Workspace cleanup never doubles as cache eviction.
+The process that removes unleased cache entries according to age and allocated-size policy, releasing protected source checkouts before any seed they depend on. One cache-wide admission lock serializes preparation, capacity checks, eviction, and publication, including staging and protected checkouts. Per-digest locks protect entries and leases, with admission always taken first when both are needed. The collector checks package ownership, containment, and absence of every lease before moving an entry to package-owned trash. Workspace cleanup does not evict reusable seeds.
 
 ## Cache CLI
 
