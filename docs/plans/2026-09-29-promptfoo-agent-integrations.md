@@ -545,7 +545,8 @@ Implement the three checkout adapters and ownership-marked provider roots.
 
 - Give every view a unique ID and private writable state.
 - Require reflink and overlay adapters to pass write-isolation probes before selection.
-- Keep recursive copy as the correctness fallback.
+- Keep recursive copy as a correctness fallback when its full per-row allocation is acceptable.
+- Require reflink or overlay on the target runner before deploying CargoWise-scale writable evaluations; if both probes fail, check filesystem placement and mount privileges, then block that rollout rather than silently copying every row. For explicitly read-only workloads, revise ADR 0001 and the public schema to add an opt-in whole-workspace read-only mode with cooperative write protection and private row scratch, following [ai-evals' read-only contract](https://github.com/WiseTechGlobal/ai-evals/blob/d42496bc03c57bc640cd768cfc7ea90b46ed2158/docs/adr/0006-use-test-scoped-workspaces-for-coding-agent-evaluations.md#read-only-workspaces). Never switch a writable evaluation to read-only automatically.
 - Reject symlink, writable bind, and hardlink sharing.
 - Reserve the workspace ID and contained adapter paths, then atomically publish a pending recovery record before creating a lease, inode tree, or mount.
 - Require each adapter to persist enough teardown state before every irreversible resource-creation step and transition the record to active only after the view is complete.
@@ -561,6 +562,8 @@ Implement the three checkout adapters and ownership-marked provider roots.
 - Overlay tests prove private upper/work directories, correct unmount ordering, and no sibling visibility.
 - Recursive-copy tests document full allocation cost.
 - A 2 GiB sparse/fixture seed scale test records allocated blocks for the seed plus one thousand views and enforces adapter-specific ceilings.
+- On the intended standard GitHub-hosted Ubuntu runner, materialize CargoWise commit `769187bbb4d2f2add3fe11131ce3aedc696145f0` from [ai-evals' representative proof](https://github.com/WiseTechGlobal/ai-evals/blob/d42496bc03c57bc640cd768cfc7ea90b46ed2158/docs/solutions/architecture-patterns/measuring-representative-workspace-costs.md): 245,828 files and 1,814,049,455 logical bytes. Prove that two concurrent writable views select reflink or overlay and share unchanged blocks while writes remain private. The existing sparse 2 GiB fixture does not replace this real-tree proof.
+- Report the selected adapter, seed acquisition time, per-view preparation time, allocated disk space, optional file-change baseline time, and cleanup time separately on that runner. The ai-evals timings were measured on an ext4 VPS, not GitHub Actions, and did not exercise overlay; they are not CI performance guarantees.
 - Capability probe failure cleans state and selects the next safe adapter.
 - Live, unmarked, escaping, symlinked, incompatible, and unknown-mount roots are never reaped.
 - Dead-owner recovery handles PID reuse, unmounts overlay views before lease release, and never exposes a lower-layer deletion race.
@@ -730,6 +733,7 @@ Release-candidate gates additionally cover:
 - normal and skipped provider-cleanup behavior;
 - stale-root and seed-lease recovery after forced process death;
 - thousand-view copy-on-write isolation, 2 GiB allocated-space ceilings, and cross-evaluation seed reuse;
+- On the target GitHub-hosted Ubuntu runner, the representative CargoWise-scale proof selects reflink or overlay, demonstrates private writes and shared unchanged blocks, and reports phase timings and allocated disk use; a recursive-copy result does not clear the large-repo rollout gate.
 - age/size/default/all cache pruning under concurrent leases;
 - optional file-change exactness and bounds;
 - Git provenance and OCI authentication against disposable fixtures;
@@ -741,6 +745,7 @@ Release-candidate gates additionally cover:
 - Stock Promptfoo loads both provider exports from the published package.
 - Git and OCI inputs produce immutable provenance and one persistent cached seed per resolved manifest.
 - One thousand private reflink/overlay views share immutable blocks without sharing writable state; recursive copy remains a correct documented fallback.
+- CargoWise-scale writable rollout on the target runner requires proven copy-on-write; without it, the rollout is blocked. A read-only workaround requires an explicit mode and ADR/schema revision, not a silent fallback.
 - Workspace paths remain available through Promptfoo assertions.
 - Best-effort provider cleanup and safe later stale-root recovery are explicit and verified.
 - Workspace cleanup removes private views and releases leases without deleting reusable seeds.
