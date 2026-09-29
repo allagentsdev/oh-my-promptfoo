@@ -9,7 +9,7 @@ status: proposed
 
 ## Goal
 
-Publish `@allagents/promptfoo-provider` from `allagentsdev/promptfoo-integrations`. The package exports:
+Publish `@allagents/promptfoo-integration` from `allagentsdev/promptfoo-integrations`. The package exports:
 
 - `Provider`, a workspace-owning provider that delegates to Promptfoo's Codex and Claude providers or the package's Copilot provider;
 - `CopilotSdkProvider`, a lower-level provider that executes the public GitHub Copilot SDK in an existing working directory.
@@ -33,13 +33,13 @@ ADR 0001 is authoritative for package boundaries and terminology. `CONTEXT.md` d
 ### Provider references
 
 ```text
-package:@allagents/promptfoo-provider:Provider
-package:@allagents/promptfoo-provider:CopilotSdkProvider
+package:@allagents/promptfoo-integration:Provider
+package:@allagents/promptfoo-integration:CopilotSdkProvider
 ```
 
 `Provider` is both a named export and the default export. `CopilotSdkProvider` is a named export.
 
-The same package exports `@allagents/promptfoo-provider/lifecycle` with one `workspaceLifecycle` function. Promptfoo configs load it through a config-local `file://` re-export shim until Promptfoo supports package references for extensions.
+The same package exports `@allagents/promptfoo-integration/lifecycle` with one `workspaceLifecycle` function and the `allagents-promptfoo` executable. Promptfoo configs load the lifecycle through a config-local `file://` re-export shim until Promptfoo supports package references for extensions.
 
 ### Supported delegates
 
@@ -140,7 +140,7 @@ All public config objects reject unknown keys. Before public validation, each pr
 
 ```yaml
 providers:
-  - id: package:@allagents/promptfoo-provider:Provider
+  - id: package:@allagents/promptfoo-integration:Provider
     config:
       delegate:
         id: openai:codex-sdk
@@ -389,14 +389,15 @@ interface SymlinkState {
 │   │   │   ├── sources/git.ts
 │   │   │   └── sources/oci.ts
 │   │   └── package.json
-│   └── provider/
+│   └── promptfoo-integration/
 │       ├── src/
 │       │   ├── provider.ts
 │       │   ├── config.ts
 │       │   ├── metadata.ts
 │       │   ├── lifecycle.ts
 │       │   ├── runtime.ts
-│       │   ├── prepare.ts
+│       │   ├── doctor.ts
+│       │   ├── cli.ts
 │       │   ├── delegate-runner.ts
 │       │   ├── delegates/
 │       │   │   ├── adapter.ts
@@ -425,50 +426,16 @@ interface SymlinkState {
 └── bun.lock
 ```
 
-`packages/workspace-core` has `"private": true`. Build output for `provider` bundles its runtime and declarations; it is never a published dependency.
+`packages/workspace-core` has `"private": true`. Build output for `promptfoo-integration` bundles its runtime and declarations; it is never a published dependency.
 
-## Phase 0: Workspace lifecycle contract
-
-### Changes
-
-Implement and prove the lifecycle seam before source materialization or delegate work:
-
-1. export `workspaceLifecycle` from the package subpath `@allagents/promptfoo-provider/lifecycle` in both CommonJS and ESM;
-2. expose `WorkspaceRuntime` under the stable process-global key `Symbol.for("@allagents/promptfoo-provider/workspace-runtime")`, store an explicit protocol version in the registry value, and reject an incompatible package copy that finds the same key;
-3. make `beforeEach` attach an opaque random claim as a non-enumerable property under a separate stable global symbol on Promptfoo's exact test object, with the protocol version in the claim value and no provider config or filesystem path;
-4. make `beforeAll` inspect the resolved `context.suite.extensions` list and reject unless exactly one `:workspaceLifecycle` entry occupies the final index, so authored `beforeEach` hooks run before claim attachment and authored `afterEach` hooks finish before workspace release;
-5. make `Provider.callApi()` require the claim from `context.test` before acquisition, register active calls and leases under it, and fail closed when the lifecycle extension is absent or a later hook replaced the test object;
-6. make `afterEach` wait for active calls, release every row lease with all-settled semantics, aggregate failures for suite cleanup, and delete the non-enumerable claim;
-7. bind each claim and provider seed pool to Promptfoo's evaluation ID on first provider use and reject cross-evaluation reuse;
-8. make `afterAll` close its evaluation to new acquisitions, abort and await every tracked active call and runner process group, then use all-settled cleanup only for resources owned by that evaluation;
-9. retain idempotent `Provider.cleanup()` as a host fallback;
-10. give every package-owned runtime root a validated ownership marker and live lease, and reap only unlocked ownership-marked roots after abnormal process termination; and
-11. keep registry-key stability and protocol-value compatibility as permanent cross-version invariants.
-
-The workspace recipe remains exclusively under `Provider.config.workspace`. The extension carries only a non-enumerable claim on Promptfoo's exact test object, so it neither adds report columns nor duplicates configuration. Multiple providers and concurrent rows may each materialize distinct workspaces without a top-level environment field or authoring compiler.
-
-Add an `allagents-promptfoo prepare` binary. Its `prepare --config <path>` command accepts one or more config paths, deduplicates their parent directories, and atomically stages `.allagents/promptfoo-workspace.cjs` plus an ownership/version marker beside each selected config. Sibling configs share one staged shim. Nested monorepo directories receive a shim only when selected. The generated CommonJS file only re-exports `@allagents/promptfoo-provider/lifecycle`; it contains no copied lifecycle implementation or absolute package path. Preparation is idempotent, never rewrites Promptfoo YAML, and refuses to overwrite an unowned or modified target. Consumers may check in the equivalent two-line shim instead.
-
-### Verification
-
-- Stock Promptfoo runs pass, failed-assertion, provider-error, cancellation, and Node `evaluate()` cases with the package lifecycle extension.
-- Concurrent rows, multiple AllAgents providers, and two concurrent `evaluate()` calls in one process use distinct claims; `afterAll` closes and drains only its evaluation before release.
-- One rejecting lease release does not skip later row or suite cleanup, and the suite boundary preserves the aggregate cleanup failure.
-- Missing hooks, duplicate or non-final lifecycle entries, forged or unknown claims, a replaced test object, duplicate release, incompatible runtime versions, and separate CommonJS/ESM imports fail safely before workspace acquisition or cleanup.
-- A timeout that reaches `afterAll` while a delegate is still unwinding aborts and awaits that active call and process group before removing its checkout or seed.
-- A killed process leaves an ownership-marked root that a later invocation reaps; a live lease and every unmarked or malformed path are preserved.
-- Preparation stages one shim for several sibling configs, separate shims for selected nested config directories, and no shim in unrelated monorepo directories.
-- Preparation is atomic and idempotent, rejects symlink/non-file/config collisions and modified generated files, and works from a packed npm installation.
-- A hand-authored two-line shim and a prepared shim behave identically.
-
-## Phase 1: Repository and package foundation
+## Phase 0: Repository and package foundation
 
 ### Changes
 
-1. Create a Bun workspace root with the private workspace-core and public provider package directories.
-2. Configure the public package with the first Promptfoo release that passes the provider-and-extension compatibility matrix as its peer lower bound and `@github/copilot-sdk` as an optional peer dependency plus exact development dependency.
+1. Create a Bun workspace root with the private workspace-core and public promptfoo-integration package directories.
+2. Configure the public integration package with the first Promptfoo release that passes the provider-and-extension compatibility matrix as its peer lower bound and `@github/copilot-sdk` as an optional peer dependency plus exact development dependency.
 3. Pin Bun in `packageManager` and Node in `engines`.
-4. Configure strict TypeScript, Biome, Bun tests, and dual ESM/CommonJS builds. Bundle workspace core into the provider package while externalizing both peers.
+4. Configure strict TypeScript, Biome, Bun tests, dual ESM/CommonJS builds, and the `allagents-promptfoo` bin. Publish the lifecycle protocol in package metadata under a versioned `allagents.workspaceLifecycleProtocol` field that doctor can read without executing package code. Bundle workspace core into the integration package while externalizing both peers.
 5. Add Changesets for package versions and release notes.
 6. Add root commands:
    - `bun run build`;
@@ -486,6 +453,47 @@ Add an `allagents-promptfoo prepare` binary. Its `prepare --config <path>` comma
 - All root commands pass with empty package implementations.
 - `npm pack --dry-run` includes only declarations, runtime files, license, package metadata, and README.
 - A clean npm smoke project installs and executes the tarball. Its manifest and emitted imports contain no private workspace package dependency; `promptfoo` and `@github/copilot-sdk` remain external peers.
+
+## Phase 1: Workspace lifecycle contract and configuration doctor
+
+### Changes
+
+Implement and prove the lifecycle seam before source materialization or delegate work:
+
+1. export `workspaceLifecycle` from the package subpath `@allagents/promptfoo-integration/lifecycle` in both CommonJS and ESM;
+2. expose `WorkspaceRuntime` under the stable process-global key `Symbol.for("@allagents/promptfoo-integration/workspace-runtime")`, store an explicit protocol version in the registry value, and reject an incompatible package copy that finds the same key;
+3. make `beforeEach` attach an opaque random claim as a non-enumerable property under a separate stable global symbol on Promptfoo's exact test object, with the protocol version in the claim value and no provider config or filesystem path;
+4. make `beforeAll` inspect the resolved `context.suite.extensions` list and reject unless exactly one `:workspaceLifecycle` entry occupies the final index, so authored `beforeEach` hooks run before claim attachment and authored `afterEach` hooks finish before workspace release;
+5. make `Provider.callApi()` require the claim from `context.test` before acquisition, register active calls and leases under it, and fail closed when the lifecycle extension is absent or a later hook replaced the test object;
+6. make `afterEach` wait for active calls, release every row lease with all-settled semantics, aggregate failures for suite cleanup, and delete the non-enumerable claim;
+7. bind each claim and provider seed pool to Promptfoo's evaluation ID on first provider use and reject cross-evaluation reuse;
+8. make `afterAll` close its evaluation to new acquisitions, abort and await every tracked active call and runner process group, then use all-settled cleanup only for resources owned by that evaluation;
+9. retain idempotent `Provider.cleanup()` as a host fallback;
+10. give every package-owned runtime root a validated ownership marker and live lease, and reap only unlocked ownership-marked roots after abnormal process termination; and
+11. keep registry-key stability and protocol-value compatibility as permanent cross-version invariants.
+
+The workspace recipe remains exclusively under `Provider.config.workspace`. The extension carries only a non-enumerable claim on Promptfoo's exact test object, so it neither adds report columns nor duplicates configuration. Multiple providers and concurrent rows may each materialize distinct workspaces without a top-level environment field or authoring compiler.
+
+Expose an `allagents-promptfoo` binary from the integration package rather than publishing a separate CLI package. Its `doctor` command is read-only by default. Repeated `--config <path>` arguments validate explicit standalone entrypoints; without them, doctor discovers `promptfooconfig*.yaml` and `promptfooconfig*.yml` below the working directory while respecting `.gitignore` and excluding symlinks, dependency directories, and generated output. It identifies only `package:@allagents/promptfoo-integration:Provider` entries with `config.workspace` and requires the exact final lifecycle URI. It verifies the canonical shim path, regular-file type, and bytes; resolves `@allagents/promptfoo-integration/lifecycle` from the config directory without importing it; locates the owning package manifest; and compares its package version and lifecycle protocol metadata with the running CLI. Read-only doctor never executes configured JavaScript.
+
+A YAML document containing a workspace-enabled AllAgents provider must also contain its lifecycle entry. Doctor validates standalone entrypoint files and does not infer arbitrary multi-config merge groups.
+
+`doctor --fix` uses a YAML concrete-syntax tree, never parse/stringify, to preserve comments, anchors, key order, scalar style, and unrelated whitespace. It inserts the explicit lifecycle entry when absent, deduplicates package-owned entries, moves the entry last, and stages `.allagents/promptfoo-workspace.cjs` plus an ownership/version marker once per unique config directory. Before writing, fix mode preflights every selected YAML edit and shim ownership check. Each file replacement is atomic, and rerunning after interruption completes the idempotent plan without overwriting unowned work. Sibling configs share one shim; selected nested directories get their own. The fixer refuses dynamic or ambiguous YAML, unsupported config formats, symlink targets, and unowned or locally modified shim targets. A lifecycle without a workspace provider is a zero-exit warning and is never automatically removed. Consumers review and commit fixes, while required CI passes the same explicit config paths to read-only doctor and stock Promptfoo; no runtime path compiles or rewrites configuration.
+
+### Verification
+
+- Stock Promptfoo runs pass, failed-assertion, provider-error, cancellation, and Node `evaluate()` cases with the package lifecycle extension.
+- Concurrent rows, multiple AllAgents providers, and two concurrent `evaluate()` calls in one process use distinct claims; `afterAll` closes and drains only its evaluation before release.
+- One rejecting lease release does not skip later row or suite cleanup, and the suite boundary preserves the aggregate cleanup failure.
+- Missing hooks, duplicate or non-final lifecycle entries, forged or unknown claims, a replaced test object, duplicate release, incompatible runtime versions, and separate CommonJS/ESM imports fail safely before workspace acquisition or cleanup.
+- A timeout that reaches `afterAll` while a delegate is still unwinding aborts and awaits that active call and process group before removing its checkout or seed.
+- A killed process leaves an ownership-marked root that a later invocation reaps; a live lease and every unmarked or malformed path are preserved.
+- Read-only doctor discovers the documented YAML filename patterns, respects `.gitignore`, accepts repeated explicit config paths, changes no bytes, and exits nonzero with file/field-specific repairs for every invalid workspace config.
+- Doctor distinguishes no-workspace configs, an unpaired-lifecycle warning, one or several workspace providers requiring one final lifecycle, missing lifecycle entries, duplicate or non-final entries, noncanonical references or shim bytes, unresolved package subpaths, malformed package protocol metadata, and incompatible versions.
+- `doctor --fix` stages one shim for several sibling configs, separate shims only for selected nested config directories, and no shim in unrelated monorepo directories.
+- Fix mode preflights all selected edits, uses atomic per-file replacements, is idempotent, preserves YAML comments and formatting, recovers by rerun after simulated interruption, rejects symlink/non-file/config collisions and modified generated files, and works from a packed npm installation.
+- A hand-authored two-line shim and doctor-managed shim validate and behave identically.
+- Running doctor without `--fix` in consumer CI detects manual configuration drift, while runtime claim enforcement still fails before workspace acquisition if CI is skipped.
 
 ## Phase 2: Workspace configuration and containment
 
@@ -648,7 +656,7 @@ Fixed internal defaults are 90 seconds for each baseline and final capture, 10,0
 
 ### Changes
 
-Implement a clean public-SDK-based provider under `provider/src/copilot/`.
+Implement a clean public-SDK-based provider under `packages/promptfoo-integration/src/copilot/`.
 
 ### Implementation guidance
 
@@ -709,14 +717,14 @@ Export `CopilotSdkProvider` as a named package export. `Provider` remains the na
 ### Verification
 
 - Unit tests use a fake SDK runner for success, SDK error, malformed protocol, timeout, cancellation, signal escalation, large output, and redaction.
-- A packed-package smoke project installs the exact optional SDK peer and loads `package:@allagents/promptfoo-provider:CopilotSdkProvider` through stock Promptfoo.
+- A packed-package smoke project installs the exact optional SDK peer and loads `package:@allagents/promptfoo-integration:CopilotSdkProvider` through stock Promptfoo.
 - An opt-in credentialed test runs the public Copilot SDK but is not required for forked pull requests.
 
 ## Phase 8: Workspace provider, lifecycle, and delegate adapters
 
 ### Changes
 
-Implement `Provider`, `workspaceLifecycle`, the shared runtime, the process-isolated `delegate-runner`, and the three delegate adapters in `provider`.
+Implement `Provider`, `workspaceLifecycle`, the shared runtime, the process-isolated `delegate-runner`, and the three delegate adapters in `packages/promptfoo-integration`.
 
 Constructor responsibilities:
 
@@ -791,7 +799,7 @@ Add executable examples for:
 - Claude with a Git workspace;
 - Copilot with composed Git and OCI sources;
 - parallel rows proving isolated checkouts; and
-- sibling and nested monorepo Promptfoo configs using prepared config-local shims.
+- sibling and nested monorepo Promptfoo configs maintained by doctor.
 
 Every workspace-owning example references:
 
@@ -801,47 +809,45 @@ extensions:
   - file://./.allagents/promptfoo-workspace.cjs:workspaceLifecycle
 ```
 
-Examples run `allagents-promptfoo prepare --config <path>` before Promptfoo validation or evaluation. One example checks in the equivalent two-line shim to prove preparation is convenience rather than a proprietary config compiler. Examples may set `evaluateOptions.cache: false` to avoid cache writes, but correctness tests also run with Promptfoo's default cache enabled.
+Examples run `allagents-promptfoo doctor --fix --config <path>` once to create reviewable config changes, then use read-only `allagents-promptfoo doctor --config <path>` before Promptfoo validation or evaluation. One example hand-authors the equivalent two-line shim and final extension entry to prove doctor is convenience rather than a proprietary config compiler. Examples may set `evaluateOptions.cache: false` to avoid cache writes, but correctness tests also run with Promptfoo's default cache enabled.
 
 Each workspace example includes a JavaScript assertion module loaded with `file://`. The assertion reads `context.providerResponse.metadata.allagents.workspace.path`, resolves a known path beneath that root, and grades the actual file contents. A second assertion demonstrates using `metadata.allagents.fileChanges` without reading file contents.
 
-Add a compatibility matrix for each supported Promptfoo minor. A clean temporary project installs the packed tarball without the optional Copilot peer, prepares a config-local shim, runs `promptfoo validate`, imports `default`, `Provider`, `CopilotSdkProvider`, and the lifecycle subpath, verifies the default is `Provider`, and confirms Copilot calls return the actionable missing-peer error. Keep fake delegate adapters internal to contract tests; the packed public interface has no generic test delegate.
+Add a compatibility matrix for each supported Promptfoo minor. A clean temporary project installs the packed tarball without the optional Copilot peer, applies `doctor --fix`, runs read-only doctor and `promptfoo validate`, imports `default`, `Provider`, `CopilotSdkProvider`, and the lifecycle subpath, verifies the default is `Provider`, and confirms Copilot calls return the actionable missing-peer error. Keep fake delegate adapters internal to contract tests; the packed public interface has no generic test delegate.
 
 ### Verification
 
 - No example imports repository source files directly.
-- All examples resolve providers through `package:` identifiers and extensions through the prepared or checked-in config-local shim.
-- Several configs in one monorepo directory share one `.allagents` shim; nested configs resolve only their own prepared sibling shim.
-- The compatibility matrix fails on package loading, export identity, extension loading, lifecycle behavior, validation, or supported provider-construction drift.
+- All examples resolve providers through `package:` identifiers and extensions through doctor-managed or hand-authored config-local shims.
+- Several configs in one monorepo directory share one `.allagents` shim; nested configs resolve only their own sibling shim.
+- The compatibility matrix fails on package loading, export identity, doctor validation, extension loading, lifecycle behavior, or supported provider-construction drift.
 - Examples contain no live credentials and use local fixtures by default.
 
-## Phase 10: Extension distribution and assertion preparation
+## Phase 10: Distribution audit and upstream migration
 
 ### Changes
 
-Ship the real workspace lifecycle with the provider package; do not create a separate extension package for this coupled protocol.
+Audit and document the lifecycle and doctor artifacts implemented in Phase 1 and exercised by the Phase 9 compatibility matrix. No new runtime dependency may first appear in this phase.
 
-Until Promptfoo supports package-function references for extensions:
+Confirm the published boundary:
 
-- publish `workspaceLifecycle` from the provider package's `./lifecycle` CommonJS/ESM export;
-- stage only a config-local CommonJS re-export and ownership/version marker;
-- support one-or-many config paths so sibling configs share one staged shim;
-- permit consumers to check in the equivalent two-line shim;
-- reject direct `node_modules` paths and copied lifecycle implementations as unsupported;
-- propose native package-function loading for extensions upstream; and
-- track a native post-assertion per-provider callback in [issue #2](https://github.com/allagentsdev/promptfoo-integrations/issues/2).
+- `@allagents/promptfoo-integration` owns `Provider`, `CopilotSdkProvider`, the `./lifecycle` export, lifecycle protocol package metadata, and the `allagents-promptfoo` executable;
+- no separate extension or CLI package exists for the coupled protocol;
+- every workspace-owning config keeps one explicit final `file://./.allagents/promptfoo-workspace.cjs:workspaceLifecycle` entry;
+- read-only `doctor` is the consumer CI check and opt-in `doctor --fix` is the idempotent source repair;
+- config-local shims contain only the canonical CommonJS re-export, while direct `node_modules` paths, copied lifecycle implementations, runtime config mutation, and generated evaluation configs remain unsupported; and
+- repeated explicit config paths and repository discovery retain one shim per unique selected config directory.
 
 Promptfoo already loads JavaScript assertion functions through `package:`. A future assertion package may document direct references such as `package:@allagents/promptfoo-assertions:<export>`. Do not publish an empty placeholder assertion package.
 
-When a released Promptfoo version provides the verified per-row provider callback in issue #2, add a peer-version capability boundary: newer hosts use the native callback and do not load `workspaceLifecycle`; older supported hosts continue using the extension. The provider must reject a configuration that activates both release paths for one call.
+Propose native package-function loading for extensions upstream and track the native post-assertion per-provider callback in [issue #2](https://github.com/allagentsdev/promptfoo-integrations/issues/2). When a released Promptfoo version provides the verified per-row callback, add a peer-version capability boundary: newer hosts use the native callback and do not load `workspaceLifecycle`; older supported hosts continue using the extension. Doctor removes the extension requirement only for that verified peer range, and the provider rejects a configuration that activates both release paths for one call.
 
 ### Verification
 
-- Packed npm tests load the lifecycle through generated and checked-in shims under npm and pnpm layouts.
-- Preparation from repository root and nested config directories resolves the installed package through normal Node resolution without embedding an absolute path.
-- Changing package versions requires preparation only when the generated marker protocol changes; the shim continues to load the lockfile-selected package.
-- The upstream proposal includes a migration from `file://./.allagents/promptfoo-workspace.cjs:workspaceLifecycle` to a future direct package reference.
-- A migration test proves the future native callback removes the need for the lifecycle shim without double-releasing a row.
+- Package manifests, packed tarballs, examples, and public documentation agree on one package, one lifecycle subpath, one executable, and the canonical shim bytes.
+- No separate CLI or lifecycle package is required by npm, pnpm, or Bun smoke projects.
+- The upstream package-function proposal includes a migration from the file shim to a direct package reference.
+- A migration test proves the future native callback removes the extension and corresponding doctor rule without double-releasing a row.
 
 ## Phase 11: Release
 
@@ -849,12 +855,12 @@ When a released Promptfoo version provides the verified per-row provider callbac
 
 1. Confirm npm scope ownership and trusted-publisher configuration.
 2. Publish a release candidate under a `next` dist-tag.
-3. In smoke project A, install only the provider package; import `Provider`, default, and `CopilotSdkProvider`, verify the default is `Provider`, and confirm actionable missing-peer behavior.
-4. In smoke project B, install the provider package and exact `@github/copilot-sdk` peer; run direct `CopilotSdkProvider` and composed `copilot-sdk` smoke cases.
+3. In smoke project A, install only the integration package; import `Provider`, default, and `CopilotSdkProvider`, verify the default is `Provider`, exercise read-only doctor and `doctor --fix`, and confirm actionable missing-peer behavior.
+4. In smoke project B, install the integration package and exact `@github/copilot-sdk` peer; run direct `CopilotSdkProvider` and composed `copilot-sdk` smoke cases.
 5. Run packed and registry-installed compatibility suites.
 6. Publish stable `1.0.0` with provenance.
-7. Announce the exact supported Promptfoo range, Node version, ORAS requirement, optional Copilot peer, config schema, transient workspace lifetime, and file-change bounds.
-8. Update downstream consumer documentation to install the public package rather than copy provider implementations.
+7. Announce the exact supported Promptfoo range, Node version, ORAS requirement, optional Copilot peer, config schema, doctor workflow, transient workspace lifetime, and file-change bounds.
+8. Update downstream consumer documentation to install the public integration package rather than copy provider or lifecycle implementations.
 
 ### Verification
 
@@ -878,7 +884,7 @@ bun run pack:check
 
 The release candidate additionally runs:
 
-- packed-package stock-Promptfoo validation and export-identity checks without the optional Copilot peer;
+- packed-package stock-Promptfoo validation, export-identity checks, and read-only/fixing doctor checks without the optional Copilot peer;
 - concurrent workspace isolation E2E;
 - assertion-lifecycle E2E proving a response checkout exists during JavaScript assertions and is removed by `afterEach`;
 - stock-Promptfoo lifecycle E2E covering CLI pass/fail/error/cancellation and Node `evaluate()`, including all-settled row and suite cleanup when one lease release rejects;
@@ -890,7 +896,7 @@ The release candidate additionally runs:
 
 ## Completion criteria
 
-- The provider package is public and installable from npm with provenance.
+- The integration package is public and installable from npm with provenance.
 - Stock Promptfoo loads `Provider` and `CopilotSdkProvider` from the package through their documented named exports.
 - `Provider` calls Promptfoo's original Codex and Claude providers and the package-local Copilot provider through closed delegate adapters.
 - Git and OCI inputs produce immutable provenance and private per-call checkouts.
@@ -898,6 +904,6 @@ The release candidate additionally runs:
 - Each response checkout remains available through assertions, and `workspaceLifecycle` removes the row afterward.
 - The supported Promptfoo peer range begins at the first released version that passes the provider-and-extension lifecycle matrix; no upstream provider-cleanup fix is required.
 - Bounded `fileChanges` metadata survives result serialization; it never promises durable workspace contents.
-- Cancellation and failure leave no provider process behind; normal lifecycle cleanup removes owned paths, and a later invocation safely reaps only lock-verified abandoned roots after hard termination.
+- Cancellation and failure leave no provider process behind; normal lifecycle cleanup removes owned paths, and a later invocation safely reaps only lease-verified abandoned roots after hard termination.
 - Source credentials are absent from delegate environments, results, logs, and traces.
 - No Promptfoo authoring compiler, network gateway, or custom score protocol is introduced.

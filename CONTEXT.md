@@ -34,7 +34,7 @@ A verified materialization owned by one workspace provider instance. The provide
 
 ## Workspace checkout
 
-A writable copy of one workspace seed owned exclusively by one provider call. It remains available to Promptfoo assertions through the response metadata path. The workspace lifecycle removes it after that row's assertions; suite cleanup, provider cleanup, and lock-backed stale recovery are fallbacks. "Private" means exclusive lifecycle and no shared writable objects, not a security sandbox against a same-user process that deliberately traverses the host filesystem.
+A writable copy of one workspace seed owned exclusively by one provider call. It remains available to Promptfoo assertions through the response metadata path. The workspace lifecycle removes it after that row's assertions; suite cleanup, provider cleanup, and lease-backed stale recovery are fallbacks. "Private" means exclusive lifecycle and no shared writable objects, not a security sandbox against a same-user process that deliberately traverses the host filesystem.
 
 ## File changes
 
@@ -46,11 +46,15 @@ Promptfoo's native response from a delegate. The workspace provider preserves it
 
 ## Integration
 
-A versioned Promptfoo-facing package maintained in this repository. The first package contains providers and their coupled workspace lifecycle; later integrations may include assertions.
+A versioned Promptfoo-facing package maintained in this repository. The first package is `@allagents/promptfoo-integration`; it contains providers, their coupled workspace lifecycle, and the matching configuration doctor. Later integrations may include assertions.
 
 ## Workspace lifecycle
 
 The package-matched Promptfoo extension that creates opaque row claims in `beforeEach`, removes registered row checkouts in `afterEach`, and sweeps remaining resources in `afterAll`. It does not define workspace sources or invoke a model.
+
+## Configuration doctor
+
+The `allagents-promptfoo doctor` command shipped by the integration package. It validates workspace-provider lifecycle configuration without modifying files. Explicit `doctor --fix` applies idempotent, reviewable YAML repairs and stages only the package re-export shim required by Promptfoo's current `file://` extension loader. It never compiles or mutates configuration at evaluation time.
 
 ## Extension
 
