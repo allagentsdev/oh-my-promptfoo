@@ -15,7 +15,7 @@ Publish `@allagents/promptfoo-integration` from `allagentsdev/promptfoo-integrat
 - `CopilotSdkProvider`, a lower-level provider that executes the public GitHub Copilot SDK in an existing working directory; and
 - `allagents-promptfoo cache prune`, a cache-maintenance command that removes unused immutable workspace seeds.
 
-The workspace provider must accept exact Git and OCI inputs, reuse one persistent immutable seed per resolved manifest across providers and evaluations, create one private copy-on-write view per call, preserve the complete JSON-safe native delegate response, expose the live workspace at `metadata.workspace.path`, optionally capture durable changed-file contents at `metadata.fileChanges`, and rely on Promptfoo's best-effort provider cleanup without hiding that limitation.
+The workspace provider must accept exact Git and OCI inputs, reuse one persistent immutable seed per resolved manifest across providers and evaluations, create one private writable view per call using verified copy-on-write where available or a disk-admitted full copy otherwise, preserve the complete JSON-safe native delegate response, expose the live workspace at `metadata.workspace.path`, optionally capture durable changed-file contents at `metadata.fileChanges`, and rely on Promptfoo's best-effort provider cleanup without hiding that limitation.
 
 ADR 0001 is authoritative for package boundaries and terminology. `CONTEXT.md` defines the domain language used below.
 
@@ -340,11 +340,11 @@ interface CheckoutAdapter {
 
 There are three real adapters:
 
-1. reflink/clone using verified filesystem CoW primitives;
-2. overlay using an immutable lower layer and private upper/work directories; and
-3. recursive copy as correctness fallback.
+1. reflink/clone (copy-on-write) using verified filesystem primitives, with ordinary file permissions but requiring a supporting filesystem;
+2. overlay (copy-on-write) using an immutable lower layer and private upper/work directories, with mount privileges or a narrowly privileged mount/unmount helper where unprivileged mounting is unavailable; and
+3. recursive full copy (not copy-on-write) as a disk-admitted correctness fallback requiring ordinary file read/write access.
 
-Startup probes perform a throwaway clone/view, mutate it, and prove seed and sibling bytes remain unchanged. Adapter selection is automatic from successful probes, not platform-name assumptions. Failed probes clean all state before falling through.
+Select in that order. Startup probes create throwaway views, mutate them, and prove seed and sibling bytes remain unchanged. An overlay probe must run in the provider/delegate's mount namespace; an isolated privileged namespace is insufficient. Only probes whose state is fully cleaned may fall through; an unknown mount or failed detach blocks fallback. Copy admission must account for a conservative full-copy estimate per retained view, current free space, headroom, and concurrent admissions; reject before a copy that cannot fit. It may be used for smaller workloads, but never silently replace CoW for CargoWise-scale writable evaluation.
 
 A plain symlink, writable bind mount, or writable hardlink never satisfies this interface. Those mechanisms expose shared inodes and violate row isolation.
 
@@ -551,8 +551,8 @@ Implement the three checkout adapters and ownership-marked provider roots.
 
 - Give every view a unique ID and private writable state.
 - Require reflink and overlay adapters to pass write-isolation probes before selection.
-- Keep recursive copy as a correctness fallback when its full per-row allocation is acceptable.
-- Require a working copy-on-write adapter visible to the provider and delegate on the target runner before deploying CargoWise-scale writable evaluations; if unprivileged probes fail, check filesystem placement and mount privileges, then block that rollout rather than silently copying every row. A privileged mount-namespace probe alone does not clear the gate. For explicitly read-only workloads, revise ADR 0001 and the public schema to add an opt-in whole-workspace read-only mode with cooperative write protection and private row scratch, following [ai-evals' read-only contract](https://github.com/WiseTechGlobal/ai-evals/blob/d42496bc03c57bc640cd768cfc7ea90b46ed2158/docs/adr/0006-use-test-scoped-workspaces-for-coding-agent-evaluations.md#read-only-workspaces). Never switch a writable evaluation to read-only automatically.
+- Keep recursive copy as a correctness fallback when the projected full per-row allocation fits available disk, including already retained views and concurrent copy admissions; fail explicitly before an unaffordable copy rather than exhausting the runner.
+- Implement and verify a narrowly privileged OverlayFS mount/unmount lifecycle on `wtg-use-linux-x64`, with mounts visible to the provider and delegate, path containment, teardown records, and crash recovery. If it or reflink is unavailable, try bounded copy for affordable workloads. CargoWise-scale writable rollout still requires a working CoW adapter on that runner; a recursive-copy result or an isolated mount-namespace probe does not clear the gate. For explicitly read-only workloads, revise ADR 0001 and the public schema to add an opt-in whole-workspace read-only mode with cooperative write protection and private row scratch, following [ai-evals' read-only contract](https://github.com/WiseTechGlobal/ai-evals/blob/d42496bc03c57bc640cd768cfc7ea90b46ed2158/docs/adr/0006-use-test-scoped-workspaces-for-coding-agent-evaluations.md#read-only-workspaces). Never switch a writable evaluation to read-only automatically.
 - Reject symlink, writable bind, and hardlink sharing.
 - Reserve the workspace ID and contained adapter paths, then atomically publish a pending recovery record before creating a lease, inode tree, or mount.
 - Require each adapter to persist enough teardown state before every irreversible resource-creation step and transition the record to active only after the view is complete.
@@ -565,12 +565,12 @@ Implement the three checkout adapters and ownership-marked provider roots.
 - One thousand concurrent mostly unchanged views share one seed and expose distinct paths.
 - Mutating any file, metadata bit, symlink, or Git state in one view changes neither seed nor sibling.
 - Reflink tests compare physical allocation and inode independence.
-- Overlay tests prove private upper/work directories, correct unmount ordering, and no sibling visibility.
-- Recursive-copy tests document full allocation cost.
+- Overlay tests prove provider/delegate-visible mounts, ordinary-user reads and private writes, private upper/work directories, controlled privileged setup, correct unmount ordering, and no sibling visibility; forced termination and failed unmount retain the recovery record and seed lease.
+- Recursive-copy tests document full allocation cost, select it when CoW probes fail and space permits, and reject under concurrent disk pressure before copying when the per-view reserve cannot fit.
 - A 2 GiB sparse/fixture seed scale test records allocated blocks for the seed plus one thousand views and enforces adapter-specific ceilings.
 - On WTG.AI.Prompts' actual `wtg-use-linux-x64` evaluation runner, materialize CargoWise commit `769187bbb4d2f2add3fe11131ce3aedc696145f0` from [ai-evals' representative proof](https://github.com/WiseTechGlobal/ai-evals/blob/d42496bc03c57bc640cd768cfc7ea90b46ed2158/docs/solutions/architecture-patterns/measuring-representative-workspace-costs.md): 245,828 files and 1,814,049,455 logical bytes. Prove that two concurrent writable views select a working copy-on-write adapter and share unchanged blocks while writes remain private. The existing sparse 2 GiB fixture does not replace this real-tree proof.
 - Report the selected adapter, seed acquisition time, per-view preparation time, allocated disk space, optional file-change baseline time, and cleanup time separately on that runner. The ai-evals timings were measured on an ext4 VPS, not GitHub Actions, and did not exercise overlay; they are not CI performance guarantees.
-- Capability probe failure cleans state and selects the next safe adapter.
+- A failed capability probe selects the next safe adapter only after complete cleanup; a failed unmount or unknown mount blocks fallback.
 - Live, unmarked, escaping, symlinked, incompatible, and unknown-mount roots are never reaped.
 - Dead-owner recovery handles PID reuse, unmounts overlay views before lease release, and never exposes a lower-layer deletion race.
 - Process death at every boundary from pending-record publication through active-view transition leaves a recoverable record and no unknown mount.
@@ -743,7 +743,7 @@ Release-candidate gates additionally cover:
 - normal and skipped provider-cleanup behavior;
 - stale-root and seed-lease recovery after forced process death;
 - thousand-view copy-on-write isolation, 2 GiB allocated-space ceilings, and cross-evaluation seed reuse;
-- On WTG.AI.Prompts' target `wtg-use-linux-x64` runner, the representative CargoWise-scale proof selects a working copy-on-write adapter, demonstrates private writes and shared unchanged blocks, and reports phase timings and allocated disk use; a recursive-copy result does not clear the large-repo rollout gate.
+- On WTG.AI.Prompts' target `wtg-use-linux-x64` runner, the representative CargoWise-scale proof selects a provider-visible working copy-on-write adapter through the real mount lifecycle, demonstrates private writes and shared unchanged blocks, and reports phase timings and allocated disk use; a recursive-copy result does not clear the large-repo rollout gate.
 - age/size/default/all cache pruning under concurrent leases;
 - optional file-change exactness and bounds;
 - Git provenance and OCI authentication against disposable fixtures;
@@ -754,8 +754,8 @@ Release-candidate gates additionally cover:
 
 - Stock Promptfoo loads both provider exports from the published package.
 - Git and OCI inputs produce immutable provenance and one persistent cached seed per resolved manifest.
-- One thousand private reflink/overlay views share immutable blocks without sharing writable state; recursive copy remains a correct documented fallback.
-- CargoWise-scale writable rollout on the target runner requires proven copy-on-write; without it, the rollout is blocked. A read-only workaround requires an explicit mode and ADR/schema revision, not a silent fallback.
+- One thousand private reflink/overlay views share immutable blocks without sharing writable state; recursive copy remains a correct, disk-admitted fallback for affordable workloads and fails explicitly when admission cannot fit.
+- CargoWise-scale writable rollout on the target runner requires proven provider-visible copy-on-write; without it, the rollout is blocked even if a smaller job can use recursive copy. A read-only workaround requires an explicit mode and ADR/schema revision, not a silent fallback.
 - Workspace paths remain available through Promptfoo assertions.
 - Best-effort provider cleanup and safe later stale-root recovery are explicit and verified.
 - Workspace cleanup removes private views and releases leases without deleting reusable seeds.

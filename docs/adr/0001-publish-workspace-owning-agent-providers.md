@@ -158,15 +158,17 @@ Lease creation, release, and eviction take the per-digest mutation lock under th
 
 The checkout module has three internal adapters:
 
-1. **Reflink/clone adapter** — uses verified filesystem copy-on-write cloning such as Linux `FICLONE` or macOS `clonefile`; each workspace has private inodes while unchanged data blocks remain shared.
-2. **Overlay adapter** — uses the immutable seed as a read-only lower layer with one private upper and work directory per workspace; the merged mount is the only path sent to the agent.
-3. **Recursive-copy adapter** — portable correctness fallback when safe copy-on-write is unavailable; it may allocate the full workspace size.
+1. **Reflink/clone adapter** — uses verified filesystem copy-on-write cloning such as Linux `FICLONE` or macOS `clonefile`; each workspace has private inodes while unchanged data blocks remain shared. It needs ordinary source-read and destination-write access, not mount privileges, but only works when the backing filesystem supports cloning these files; the target WTG runner returned `EOPNOTSUPP`.
+2. **Overlay adapter** — also provides copy-on-write, using the immutable seed as a read-only lower layer with one private upper and work directory per workspace; the merged mount is the only path sent to the agent. Its mount operation needs permission on the runner. Where unprivileged mounting is denied, a separately designed, narrowly privileged mount/unmount helper may create a view in the provider's mount namespace. The provider and delegate then access it as ordinary users; no unrestricted or implicit `sudo` invocation is part of the provider interface.
+3. **Recursive-copy adapter** — a full independent copy, **not** copy-on-write; portable when ordinary file reads and writes are permitted, but it may allocate the full workspace size per row. Admit each view only after a conservative full-copy estimate, headroom, currently retained views, concurrent admissions, and available disk are accounted for. Otherwise fail explicitly before that copy rather than exhaust the runner.
 
-Selection is automatic and capability-tested at runtime. An adapter is accepted only after a throwaway write proves that mutating its private view cannot change the seed or a sibling view. Failed capability probes clean their state and fall through. Package metadata and documentation report the platforms on which each adapter is supported.
+Selection tries reflink, then usable OverlayFS, then bounded recursive copy. Every adapter must pass a throwaway write-isolation probe; a privileged mount hidden in a private namespace does not count as usable. Failed probes clean their state and fall through. Unknown mount state or failed detach blocks teardown and seed eviction rather than continuing to copy. Package metadata and documentation report supported environments.
 
 Writable symlinks, bind mounts of a writable seed, and writable hardlinks are prohibited. Symlinks inside source content remain ordinary source entries and are validated for containment; they are not a checkout-sharing mechanism.
 
 Copy-on-write allocation is approximately one seed plus each row's changed blocks, rather than one full repository per row. This is not a universal guarantee: reflink metadata, overlay upper layers, agent-generated dependencies, and recursive-copy fallback can still consume substantial disk. Concurrency and free-space behavior require a thousand-view scale test with a multi-gigabyte seed.
+
+On WTG.AI.Prompts' [`wtg-use-linux-x64` runner](https://github.com/WiseTechGlobal/WTG.AI.Prompts/actions/runs/36551124238), reflinks and unprivileged OverlayFS mounts failed, but two CargoWise-sized OverlayFS views mounted under `sudo` in a private namespace shared unchanged data and isolated writes. A [separate direct-mount probe](https://github.com/WiseTechGlobal/WTG.AI.Prompts/actions/runs/36553859211) showed that an ordinary Node child could see and modify a `sudo`-mounted view in the job's namespace while the seed remained unchanged. These prove filesystem and process visibility, not a production privilege helper, crash recovery, actual provider integration, or thousand-view scale. CargoWise-scale writable rollout still requires a working adapter and those gates; recursive copy is not an acceptable silent replacement at that scale.
 
 ### Delegate contract and native response compatibility
 
@@ -304,6 +306,8 @@ workspace:
 
 Every source request has a contained, non-overlapping destination. Git refs and OCI tags are requests; response metadata records resolved commits and manifest digests.
 
+The consuming eval project owns its own workspace-YAML interpretation and `repo + commit` resolution to a GitHub release chunk or OCI image. The generic provider accepts only the resolved Git/OCI source descriptors and materializes its own immutable seed; it does not embed WTG-specific release manifests, AgentV hooks, or a second release resolver. A YAML template containing only a Git URL and commit still needs Git acquisition unless the consumer supplies a resolved local release-backed repository or image digest. Shared read-only checkout symlinks do not satisfy private writable views.
+
 The initial Git adapter accepts `https://` and `file://` repositories and rejects SSH URLs. HTTPS acquisition reads fixed `ALLAGENTS_GIT_USERNAME` and `ALLAGENTS_GIT_TOKEN` channels and scopes them only to Git. OCI acquisition reads `ALLAGENTS_ORAS_PATH` and `ALLAGENTS_ORAS_AUTH_FILE`, copies registry configuration to private temporary state for one acquisition, and deletes it in `finally`. `ALLAGENTS_WORKSPACE_ROOT` optionally selects the owned runtime parent; `ALLAGENTS_CACHE_ROOT` optionally selects the separate package-owned seed-cache root. All six names are reserved from delegates.
 
 Secret values, helper paths, and auth-file contents are redacted from arguments, bounded stderr, errors, metadata, and traces. Neither delegates nor assertions receive acquisition credentials through the provider.
@@ -342,7 +346,7 @@ Provider configuration, workspace metadata, optional file-change results, manife
 
 - Direct Promptfoo and same-process Node evaluations can retain roots until process exit when Promptfoo skips provider cleanup.
 - Persistent seeds intentionally consume cache disk until age or allocated-size policy evicts them.
-- Recursive-copy fallback may allocate the full seed for every row.
+- Recursive-copy fallback can allocate the full seed for every row; it requires workload-aware disk admission and an explicit failure when a large copy workload cannot fit.
 - Optional file capture adds traversal, hashing, encoding, result size, and latency.
 - A provider wrapper adds one stack layer when diagnosing delegated calls.
 - OCI users must provide a supported ORAS executable initially.
