@@ -30,11 +30,13 @@ ALLAGENTS_TEST_ORAS_PATH=/path/to/oras ALLAGENTS_TEST_GIT_HTTPS=1 bun test tests
 bun scripts/benchmark-workspaces.ts
 ```
 
-The current local full suite passes 87 tests with 346 assertions when the privileged OverlayFS identity gate is enabled, including real HTTPS Git and OCI acquisition. The default suite passes 86 tests with 341 assertions. TypeScript, Biome, both builds, packed npm/pnpm/Bun consumers and stock Promptfoo E2E pass.
+The current local full suite passes 87 tests with 348 assertions when the privileged OverlayFS identity gate is enabled, including real HTTPS Git and OCI acquisition. The default suite passes 82 tests with 333 assertions and skips the five real-acquisition gates. TypeScript, Biome, both builds, packed npm/pnpm/Bun consumers and stock Promptfoo E2E pass.
 
 Install the fixed helper documented in `docs/workspace-helper.md` before the real Linux mount/acquisition gates. Validation CI runs Linux/macOS checks and a Linux real-acquisition job. The scale JSON reports fixture geometry as well as allocation; a one-file sparse fixture does not predict OverlayFS metadata cost for a large repository.
 
 Native peers resolve the evaluation project's ESM export conditions. Using Promptfoo's CommonJS export can mask an SDK failure with `chalk.default.red is not a function` under an ordinary npm dependency graph. Native SDK discovery also uses the consumer process directory; the adapter separately forces the isolated workspace as the SDK's working directory. The import/require regression, external-directory regression and independently npm-installed E2E with workspace storage outside the consumer cover these boundaries. Overlay capability probes touch only the selected file and mount root; production views still restore writable modes throughout their source. Cleanup changes directory permissions before unlinking read-only files.
+
+Promptfoo's native Codex adapter starts the Codex CLI with its own minimal environment. The delegate runner forwards exactly the authored `delegate.env` keys into that native adapter's internal `cli_env`, while rejecting authored `cli_env` and environment inheritance. This is required for custom Codex model providers whose CLI configuration and credential are supplied through `CODEX_HOME` and a named key variable. A focused regression checks the boundary; source-free live Azure controls and stock Promptfoo dogfooding are retained in private `allagents-research`.
 
 `promptfoo-e2e.json` records assertions extracted from actual passing Promptfoo component results, cleanup/recovery checks and consumer versions. `scale.json` records actual 1,000 retained views, independent writes, observed allocation and retained cache after cleanup. Private-release measurements, mapped source identifiers and credentialed dogfooding belong in the private `allagents-research` repository; WTG-specific workflows belong in the private `WTG.AI.Prompts` repository.
 

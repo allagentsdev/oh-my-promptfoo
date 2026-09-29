@@ -98,6 +98,8 @@ describe("closed configuration", () => {
         "persist_threads",
         "additional_directories",
         "cliPath",
+        "cli_env",
+        "inherit_process_env",
       ])
         expect(() => validateDelegateConfig(id, { [key]: true })).toThrow();
       expect(() => promptConfig({ prompt: { config: { workspace } } }, id, {})).toThrow();
@@ -296,13 +298,34 @@ describe("protocol and native adapters", () => {
       expect(metadata.context.bustCache).toBe(true);
     }
   });
+  test("Codex passes explicit delegate environment to its CLI without inheriting the runner", async () => {
+    const path = await project(
+      "promptfoo",
+      `export async function loadApiProvider(id, options) {
+        const cli = options.options.config.cli_env;
+        return {async callApi(){return {output:
+          id==='openai:codex-sdk' &&
+          Object.keys(cli).sort().join(',')==='AZURE_OPENAI_API_KEY,CODEX_HOME' &&
+          cli.CODEX_HOME===process.env.CODEX_HOME &&
+          cli.AZURE_OPENAI_API_KEY===process.env.AZURE_OPENAI_API_KEY &&
+          options.options.config.inherit_process_env===undefined ? 'ok' : 'fail'
+        };}};
+      }`,
+    );
+    const result = await runDelegate(
+      frame(path),
+      { CODEX_HOME: "/tmp/fixture-codex-home", AZURE_OPENAI_API_KEY: "fixture-secret" },
+      5000,
+    );
+    expect(result.output).toBe("ok");
+  });
   test("redacts credentials from response fields and native config echoes", async () => {
     const path = await project("promptfoo", native);
     const f = frame(path, "sensitive-token");
     f.config = { apiKey: "sensitive-token" };
     const result = await runDelegate(
       f,
-      { OPENAI_API_KEY: "sensitive-token", ALLAGENTS_TEST: "unpassed" },
+      { OPENAI_API_KEY: "sensitive-token", EXTRA_TEST: "unpassed" },
       5000,
     );
     expect(JSON.stringify(result)).not.toContain("sensitive-token");

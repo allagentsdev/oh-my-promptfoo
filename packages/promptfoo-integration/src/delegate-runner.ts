@@ -5,7 +5,7 @@ import { context as otelContext, propagation, trace } from "@opentelemetry/api";
 import { AsyncLocalStorageContextManager } from "@opentelemetry/context-async-hooks";
 import { W3CTraceContextPropagator } from "@opentelemetry/core";
 import { NodeTracerProvider } from "@opentelemetry/sdk-trace-node";
-import { closed, type JsonObject, object, validateDelegateConfig } from "./config.js";
+import { closed, type JsonObject, object, validateDelegateConfig, validateEnv } from "./config.js";
 import {
   type CallFrame,
   jsonSafe,
@@ -123,7 +123,17 @@ async function execute(input: JsonObject): Promise<void> {
   try {
     closed(
       input,
-      ["version", "type", "delegate", "basePath", "workingDir", "config", "prompt", "context"],
+      [
+        "version",
+        "type",
+        "delegate",
+        "basePath",
+        "workingDir",
+        "config",
+        "prompt",
+        "context",
+        "delegateEnvKeys",
+      ],
       "call",
     );
     if (
@@ -144,6 +154,15 @@ async function execute(input: JsonObject): Promise<void> {
       throw new Error("working_dir is not a directory");
     const frame = input as unknown as CallFrame;
     validateDelegateConfig(frame.delegate, frame.config);
+    if (
+      !Array.isArray(frame.delegateEnvKeys) ||
+      frame.delegateEnvKeys.some((key) => typeof key !== "string")
+    )
+      throw new Error("Call requires explicit delegate environment names");
+    validateEnv(
+      Object.fromEntries(frame.delegateEnvKeys.map((key) => [key, process.env[key] ?? ""])),
+      "delegate.env",
+    );
     object(frame.context, "context");
     sensitive = secrets(
       frame.config,
@@ -199,7 +218,14 @@ async function runNative(frame: CallFrame, signal: AbortSignal): Promise<JsonObj
   const config = {
     ...frame.config,
     working_dir: frame.workingDir,
-    ...(frame.delegate === "openai:codex-sdk" ? { skip_git_repo_check: true } : {}),
+    ...(frame.delegate === "openai:codex-sdk"
+      ? {
+          skip_git_repo_check: true,
+          cli_env: Object.fromEntries(
+            (frame.delegateEnvKeys ?? []).map((key) => [key, process.env[key]]),
+          ),
+        }
+      : {}),
   };
   const provider = await load(frame.delegate, {
     basePath: frame.basePath,

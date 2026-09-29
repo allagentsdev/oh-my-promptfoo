@@ -11,7 +11,7 @@ import {
   trace,
 } from "@opentelemetry/api";
 import { resolve as resolveImport } from "import-meta-resolve";
-import { closed, type DelegateId, type JsonObject, object } from "./config.js";
+import { closed, type DelegateId, type JsonObject, object, validateEnv } from "./config.js";
 
 export const MAX_FRAME_BYTES = 16 * 1024 * 1024;
 export const MAX_STDERR_BYTES = 64 * 1024;
@@ -25,6 +25,7 @@ export interface CallFrame {
   config: JsonObject;
   prompt: string;
   context: JsonObject;
+  delegateEnvKeys?: string[];
 }
 export interface TraceFrame {
   version: 1;
@@ -202,7 +203,8 @@ export async function runDelegate(
   signal?: AbortSignal,
 ): Promise<JsonObject> {
   if (signal?.aborted) throw new Error("Delegate call aborted before execution");
-  const encoded = jsonSafe(frame);
+  validateEnv(env, "delegate.env");
+  const encoded = jsonSafe({ ...frame, delegateEnvKeys: Object.keys(env).sort() });
   const childEnvironment = minimalEnvironment(env);
   const sensitive = secrets(
     frame.config,
