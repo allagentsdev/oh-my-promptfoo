@@ -260,7 +260,7 @@ The lower-level `CopilotSdkProvider` owns:
 
 It accepts an existing `working_dir`; it does not resolve Git or OCI sources. The agent workspace provider composes it with the shared workspace runtime.
 
-The open-source implementation must be based on public Copilot SDK contracts. Code from a private package is not copied unless its license and provenance explicitly permit publication.
+The implementation must follow public Copilot SDK contracts and the provider invariants in this decision. Prior implementations may inform edge cases, but they are neither dependencies nor normative specifications.
 
 ### Extensions and assertions
 

@@ -22,7 +22,7 @@ ADR 0001 is authoritative for package boundaries and terminology. `CONTEXT.md` d
 
 - A network execution service, queue, database, or remote artifact API.
 - Reimplementing Promptfoo's Codex or Claude providers.
-- An AI Evals or AllAgents Promptfoo authoring compiler.
+- A project-specific Promptfoo authoring compiler.
 - Arbitrary delegate providers in the first release.
 - Provider-owned scoring or replacement of Promptfoo assertions.
 - A public workspace-core package before a second external consumer exists.
@@ -549,6 +549,44 @@ Tests cover additions, modifications, deletions, binary files, mode changes, sym
 
 Implement a clean public-SDK-based provider in `provider-copilot-sdk`.
 
+### Implementation guidance
+
+Treat this section and the public SDK contracts as the implementation source of truth. Existing implementations may suggest failure cases, but do not preserve behavior solely because it existed elsewhere.
+
+Keep the provider and SDK runner responsibilities separate:
+
+**Provider process**
+
+- validate the closed public config and extract Promptfoo's trusted loader `basePath`;
+- resolve and validate the effective working directory before spawning;
+- construct a versioned request containing only the SDK inputs the runner needs;
+- spawn the runner with piped stdio and a minimal allowlisted environment;
+- own timeout, cancellation, graceful termination, forced process-tree termination, protocol parsing, redaction, and OpenTelemetry spans;
+- accept one terminal response only, and treat malformed output, premature exit, and missing final output as provider errors; and
+- return Promptfoo-native output, error, token usage, and bounded metadata.
+
+**Runner process**
+
+- validate the complete request before dynamically importing `@github/copilot-sdk`;
+- create `CopilotClient` with its TCP runtime and the validated working directory;
+- create one session with model, reasoning, provider-routing, and permission settings;
+- normalize SDK events into bounded protocol event frames;
+- extract the final assistant text and usage without exposing raw credentials;
+- disconnect the session, then call client `stop`; call `forceStop` if normal cleanup fails; and
+- emit exactly one final or error frame after cleanup completes.
+
+**Protocol and security**
+
+- version every request and response frame;
+- reserve stdout for protocol frames and capture bounded stderr separately;
+- keep API keys in request memory only, redact them before every emitted frame, log, error, metadata object, and span;
+- default to native Copilot routing when no custom provider is configured;
+- require an explicit complete custom-provider tuple rather than inferring partial routing;
+- start from read-only permissions and require an explicit opt-in for unrestricted tools; and
+- test public SDK upgrades against the fake runner, packed Promptfoo consumer, and opt-in live smoke before changing the pinned version.
+
+If SDK behavior conflicts with this contract, update the design explicitly; do not add an undocumented compatibility branch.
+
 The provider must:
 
 - implement Promptfoo's `ApiProvider` contract;
@@ -564,7 +602,7 @@ The provider must:
 - redact configured secrets from output, errors, metadata, stderr, and spans; and
 - return structured cleanup state on success and failure.
 
-Export `CopilotSdkProvider`, `CopilotSdkProvider as Provider`, and the default implementation. Do not copy private AI Evals source without explicit publication rights; use it only as behavioral reference where legally permitted.
+Export `CopilotSdkProvider`, `CopilotSdkProvider as Provider`, and the default implementation. Build it only from public SDK contracts and the self-contained invariants above.
 
 ### Verification
 
@@ -694,7 +732,7 @@ The first assertion PR includes a stock-Promptfoo example using `package:` direc
 4. Run packed and registry-installed compatibility suites.
 5. Publish stable `1.0.0` releases with provenance.
 6. Announce the exact supported Promptfoo range, Node version, ORAS requirement, config schema, and evidence limits.
-7. Update AllAgents and AI Evals documentation to consume the public packages rather than copy implementations.
+7. Update downstream consumer documentation to install the public packages rather than copy provider implementations.
 
 ### Verification
 
