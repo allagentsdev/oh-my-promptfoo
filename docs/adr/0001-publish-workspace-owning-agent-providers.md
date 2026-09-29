@@ -28,7 +28,7 @@ The package exports:
 - `Provider` — the recommended workspace-owning provider and default export; and
 - `CopilotSdkProvider` — the lower-level Copilot SDK provider for callers that already own a working directory.
 
-The same package ships an `allagents-promptfoo` executable whose `cache prune` command removes unused immutable seeds. The package does not ship an eval wrapper, lifecycle extension, pre-return grader, configuration doctor, unbounded artifact store, or custom assertion package in the initial release.
+The same package ships an `allagents-promptfoo` executable whose `cache prune` command removes unused immutable seeds. Promptfoo remains the evaluation runner and grader.
 
 Shared workspace implementation begins as a private workspace package. Its runtime and declaration output is bundled into `@allagents/promptfoo-integration`; the published manifest has no dependency on the private package. It becomes public only after a second external consumer requires a supported interface.
 
@@ -331,7 +331,7 @@ Provider configuration, workspace metadata, optional file-change results, manife
 ### Benefits
 
 - Promptfoo's existing assertions remain the only grading model.
-- Assertions can inspect the exact final workspace without a lifecycle extension or pre-return grader.
+- Assertions inspect the exact final workspace through provider metadata while it remains available.
 - Copilot, Codex, and Claude share one workspace and optional file-change contract.
 - Persistent immutable seeds and private copy-on-write views let a thousand retained workspaces share one multi-gigabyte repository on supported filesystems.
 - Native output, usage, skill, provider metadata, and trajectory assertions remain usable.

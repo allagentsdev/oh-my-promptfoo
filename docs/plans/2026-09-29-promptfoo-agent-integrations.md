@@ -23,9 +23,7 @@ ADR 0001 is authoritative for package boundaries and terminology. `CONTEXT.md` d
 
 - A network execution service, queue, database, or remote artifact interface.
 - Reimplementing Promptfoo's Codex or Claude providers.
-- A Promptfoo eval wrapper, lifecycle extension, or pre-return grading abstraction.
 - Guaranteed workspace deletion after every evaluation path.
-- A configuration doctor or Promptfoo authoring compiler.
 - Per-row cleanup before assertions finish.
 - Writable workspace sharing through symlinks or hardlinks.
 - Unbounded file capture or a durable artifact store.
@@ -712,7 +710,7 @@ Build a matrix for every supported Promptfoo minor covering package exports, wor
 ### Verification
 
 - npm provenance and manifest metadata are correct.
-- Tarball contains public runtime, declarations, and cache executable only; no eval wrapper, lifecycle/doctor files, fixtures, credentials, or private paths.
+- Tarball contains the public runtime, declarations, and cache executable, without fixtures, credentials, or private paths.
 - Fresh consumers prove both provider exports and cache CLI.
 
 ## Required quality gates
@@ -740,7 +738,7 @@ Release-candidate gates additionally cover:
 
 ## Completion criteria
 
-- Stock Promptfoo loads both provider exports from the published package without an eval wrapper.
+- Stock Promptfoo loads both provider exports from the published package.
 - Git and OCI inputs produce immutable provenance and one persistent cached seed per resolved manifest.
 - One thousand private reflink/overlay views share immutable blocks without sharing writable state; recursive copy remains a correct documented fallback.
 - Workspace paths remain available through Promptfoo assertions.
@@ -751,4 +749,3 @@ Release-candidate gates additionally cover:
 - Optional generated/deleted files and unified diff survive serialization when enabled and are absent when disabled.
 - Complete native response, skill metadata, and agent trajectories survive wrapping.
 - Credentials remain isolated and absent from results, logs, errors, and traces.
-- No eval wrapper, lifecycle extension, pre-return grader, configuration doctor, authoring compiler, or remote gateway is introduced.

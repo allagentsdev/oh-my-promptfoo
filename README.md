@@ -29,5 +29,3 @@ promptfoo eval --config promptfooconfig.yaml
 Promptfoo cleanup is best effort, so a provider root may remain until a later process safely recovers it. That is acceptable for copy-on-write views: the capacity problem is the persistent seed cache, not the number of mostly unchanged workspace directories. `allagents-promptfoo cache prune` and automatic garbage collection remove only unleased seeds under age and allocated-size policy; `cache prune --all` removes every unleased seed.
 
 GitHub-hosted Actions runners are disposable, so runner teardown removes stale workspaces and the local seed cache after each job. A seed survives into another hosted job only when the workflow explicitly restores the cache directory. Cache eviction and stale-root recovery matter primarily on local and self-hosted runners and before saving a hosted-runner cache.
-
-No Promptfoo lifecycle extension, eval wrapper, alternate grader, configuration doctor, runtime compiler, fork, or separate execution gateway blocks implementation.
