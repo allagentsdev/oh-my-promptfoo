@@ -1,12 +1,11 @@
 # Promptfoo Integrations
 
-Public Promptfoo providers, extensions, assertions, and workspace integrations for coding agents.
+Public Promptfoo providers and workspace integrations for coding agents.
 
 The first planned package, `@allagents/promptfoo-integration`, exports:
 
-- `Provider`, which owns a workspace and delegates execution to a supported coding-agent provider;
-- `CopilotSdkProvider`, a lower-level provider for callers that already manage their workspace; and
-- `@allagents/promptfoo-integration/lifecycle`, a package-matched subpath exporting the required `workspaceLifecycle` Promptfoo extension that releases row workspaces after assertions.
+- `Provider`, which owns a workspace, delegates one coding-agent call, captures bounded generated/deleted files and a unified diff, runs a trusted verifier while the workspace is still live, and returns success only after cleanup; and
+- `CopilotSdkProvider`, a lower-level provider for callers that already manage their working directory.
 
 ## Architecture
 
@@ -16,4 +15,4 @@ The first planned package, `@allagents/promptfoo-integration`, exports:
 
 The repository currently contains the proposed design and implementation plan. Runtime packages will be added in follow-up pull requests.
 
-The design uses stock Promptfoo package providers and lifecycle extensions. The same package ships `allagents-promptfoo doctor`: read-only mode validates every workspace config for consumer CI, while explicit `doctor --fix` makes reviewable YAML changes and stages one small config-local re-export shim per config directory. No runtime compiler, Promptfoo fork, separate CLI package, or upstream provider-cleanup change blocks implementation.
+The design uses stock Promptfoo package providers. `Provider` preserves the delegate's native output, usage, metadata, skills, and agent trace; captures agent-attributed files and a bounded diff at `metadata.fileChanges`; adds verifier rewards or evidence at `metadata.verifier`; and returns a successful result only after removing the private checkout. Assertions consume durable response data rather than a transient filesystem path. Cleanup failure remains an explicit provider error with ownership-marked stale recovery. No lifecycle extension, configuration doctor, runtime compiler, Promptfoo fork, or separate execution gateway blocks implementation.

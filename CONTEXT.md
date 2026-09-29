@@ -6,11 +6,23 @@ A Promptfoo provider that invokes a coding agent and returns its output, usage, 
 
 ## Workspace provider
 
-The public provider that owns workspace acquisition, one delegated agent call, transient assertion access, and change reporting. It reads the workspace specification from its own config and registers each private checkout under the opaque row claim supplied by the workspace lifecycle.
+The public provider that owns workspace acquisition, one delegated agent call, one post-agent verifier call, and checkout cleanup. It reads the workspace and verifier specifications from its own config and returns a successful response only after the private checkout has been removed. A cleanup failure is a provider error, and any unreleased path remains opaque and ownership-marked for recovery.
 
 ## Delegate
 
 The agent provider selected by the workspace provider. The initial delegates are Promptfoo's Codex SDK provider, Promptfoo's Claude Agent SDK provider, and the package's Copilot SDK provider.
+
+## Verifier
+
+A trusted consumer-supplied executable that runs after the delegate has fully stopped and before its private checkout is removed. It inspects the final workspace, may consider the prompt and delegate response, and emits bounded rewards, JSON evidence, or both. It does not directly decide Promptfoo pass/fail.
+
+## Verifier result
+
+The durable, workspace-independent output returned at `providerResponse.metadata.verifier`. It contains bounded rewards or evidence and may identify a separate verifier trace. Promptfoo assertions consume this result after the checkout no longer exists.
+
+## File changes
+
+The bounded agent-attributed result returned at `providerResponse.metadata.fileChanges`. The provider captures exact generated or modified after-bytes, deleted paths, and an optional unified diff after the delegate stops but before verifier code runs. Assertions consume this durable result after the checkout no longer exists.
 
 ## Source request
 
@@ -34,32 +46,28 @@ A verified materialization owned by one workspace provider instance. The provide
 
 ## Workspace checkout
 
-A writable copy of one workspace seed owned exclusively by one provider call. It remains available to Promptfoo assertions through the response metadata path. The workspace lifecycle removes it after that row's assertions; suite cleanup, provider cleanup, and lease-backed stale recovery are fallbacks. "Private" means exclusive lifecycle and no shared writable objects, not a security sandbox against a same-user process that deliberately traverses the host filesystem.
+A writable copy of one workspace seed owned exclusively by one provider call. The delegate mutates it and the verifier inspects it. A successful provider response means removal succeeded; cleanup failure returns an error and leaves any unreleased root opaque and ownership-marked for recovery. “Private” means exclusive lifecycle and no shared writable objects, not a security sandbox against a same-user process that deliberately traverses the host filesystem.
 
-## File changes
+## Workspace provenance
 
-A bounded immutable record of paths added, modified, deleted, renamed, or left indeterminate relative to the immutable source baseline. It is convenience metadata for results and assertions, not a copy of file contents or a replacement for inspecting the live workspace.
+The immutable manifest digest and resolved Git commits or OCI digests that identify the checkout's inputs. It is durable metadata and contains no local filesystem path.
 
 ## Provider response
 
-Promptfoo's native response from a delegate. The workspace provider preserves its output and usage and adds namespaced workspace provenance, the transient checkout path, and bounded file-change metadata.
+Promptfoo's complete JSON-safe native response from a delegate. The workspace provider preserves its fields and native metadata at their original locations, then adds `metadata.fileChanges`, `metadata.verifier`, and an AllAgents-specific provenance block. In particular, normalized `metadata.skillCalls` remains top-level.
+
+## Agent trace
+
+The Promptfoo row trace containing only delegated agent activity. It carries normalized tool spans used by `trajectory:*` assertions and must not contain verifier commands, tools, or judge calls.
+
+## Verifier trace
+
+A separate optional trace for verifier activity. Its identifier may appear in `metadata.verifier.traceId`; it does not contribute to agent trajectory assertions or delegate token usage.
 
 ## Integration
 
-A versioned Promptfoo-facing package maintained in this repository. The first package is `@allagents/promptfoo-integration`; it contains providers, their coupled workspace lifecycle, and the matching configuration doctor. Later integrations may include assertions.
-
-## Workspace lifecycle
-
-The package-matched Promptfoo extension that creates opaque row claims in `beforeEach`, removes registered row checkouts in `afterEach`, and sweeps remaining resources in `afterAll`. It does not define workspace sources or invoke a model.
-
-## Configuration doctor
-
-The `allagents-promptfoo doctor` command shipped by the integration package. It validates workspace-provider lifecycle configuration without modifying files. Explicit `doctor --fix` applies idempotent, reviewable YAML repairs and stages only the package re-export shim required by Promptfoo's current `file://` extension loader. It never compiles or mutates configuration at evaluation time.
-
-## Extension
-
-A Promptfoo lifecycle hook invoked at `beforeAll`, `beforeEach`, `afterEach`, or `afterAll`. An extension is not a provider and does not decide evaluation scores.
+A versioned Promptfoo-facing package maintained in this repository. The first package is `@allagents/promptfoo-integration`; it contains the workspace-owning provider and lower-level Copilot SDK provider. Later integrations may include assertions only when a concrete consumer requires them.
 
 ## Assertion
 
-A deterministic or model-graded check that contributes to Promptfoo's score and pass/fail result. Providers and lifecycle extensions do not assign evaluation scores.
+A deterministic or model-graded Promptfoo check that contributes to the evaluation score and pass/fail result. Assertions may inspect the unchanged delegate output, durable file changes, or verifier result. Providers and verifiers do not replace Promptfoo's assertion engine.
