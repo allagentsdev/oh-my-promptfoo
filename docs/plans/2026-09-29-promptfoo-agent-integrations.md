@@ -14,7 +14,7 @@ Publish `@allagents/promptfoo-provider` from `allagentsdev/promptfoo-integration
 - `Provider`, a workspace-owning provider that delegates to Promptfoo's Codex and Claude providers or the package's Copilot provider;
 - `CopilotSdkProvider`, a lower-level provider that executes the public GitHub Copilot SDK in an existing working directory.
 
-The workspace provider must accept exact Git and OCI workspace sources, create one private checkout per Promptfoo call, preserve native delegate results, expose each checkout through assertions, return bounded file-change metadata, and clean up at evaluation shutdown.
+The workspace provider must accept exact Git and OCI workspace sources, create one private checkout per Promptfoo call, preserve native delegate results, expose each checkout through assertions, return bounded file-change metadata, and release each checkout through a package-supplied lifecycle extension after that row's assertions.
 
 ADR 0001 is authoritative for package boundaries and terminology. `CONTEXT.md` defines the domain language used below.
 
@@ -38,6 +38,8 @@ package:@allagents/promptfoo-provider:CopilotSdkProvider
 ```
 
 `Provider` is both a named export and the default export. `CopilotSdkProvider` is a named export.
+
+The same package exports `@allagents/promptfoo-provider/lifecycle` with one `workspaceLifecycle` function. Promptfoo configs load it through a config-local `file://` re-export shim until Promptfoo supports package references for extensions.
 
 ### Supported delegates
 
@@ -159,6 +161,9 @@ providers:
             ref: main
             destination: project
       timeoutMs: 900000
+
+extensions:
+  - file://./.allagents/promptfoo-workspace.cjs:workspaceLifecycle
 ```
 
 Source credentials and executable paths are runtime inputs, resolved from provider `options.env` before `process.env`:
@@ -350,7 +355,7 @@ interface SymlinkState {
 }
 ```
 
-`workspace.path` is absolute and remains valid through Promptfoo assertions. It becomes invalid when the provider's evaluation-shutdown `cleanup()` completes and is not a durable artifact reference. [Promptfoo JavaScript assertion context](https://www.promptfoo.dev/docs/configuration/expected-outputs/javascript/#using-test-context) exposes `providerResponse`, including this path and `fileChanges`. Entries and truncation codes are lexically sorted and paths use normalized `/` separators. Summary counts describe returned entries, not unknown changes omitted by a limit. A truncated or failed change capture remains explicit but does not replace an otherwise valid delegate response. Delegate output, error, token usage, cached state, raw response, and existing metadata remain intact.
+`workspace.path` is absolute and remains valid through Promptfoo assertions. It becomes invalid when `workspaceLifecycle` releases the row after assertions and is not a durable artifact reference. [Promptfoo JavaScript assertion context](https://www.promptfoo.dev/docs/configuration/expected-outputs/javascript/#using-test-context) exposes `providerResponse`, including this path and `fileChanges`. Entries and truncation codes are lexically sorted and paths use normalized `/` separators. Summary counts describe returned entries, not unknown changes omitted by a limit. A truncated or failed change capture remains explicit but does not replace an otherwise valid delegate response. Delegate output, error, token usage, raw response, and existing metadata remain native; a delegate response marked `cached` is rejected.
 
 `manifestDigest` is SHA-256 over UTF-8 RFC 8785 canonical JSON containing schema version, Git and OCI materializer versions, and resolved sources sorted by normalized destination. Seed keys use this digest, not mutable requested refs or tags.
 
@@ -359,10 +364,10 @@ interface SymlinkState {
 - Node.js 22.22.0 or newer.
 - Linux and macOS only in the initial release; package metadata rejects Windows because reliable process-tree termination depends on POSIX process groups.
 - Bun 1.4 for repository development and publishing workflows.
-- Promptfoo 0.122.0 is unsupported because it does not guarantee provider cleanup. The public package's `promptfoo` peer lower bound is the first upstream release that invokes every loaded provider cleanup from an outer `finally` with all-settled semantics; the upper bound is the next unverified minor, and the package never bundles Promptfoo.
+- The `promptfoo` peer range begins at the first version that passes the package's provider-and-extension compatibility matrix. Promptfoo 0.122.0 is a candidate baseline; its provider cleanup limitation is not a blocker because the package lifecycle extension owns post-assertion release.
 - The package declares `@github/copilot-sdk: "1.0.6"` as an optional peer dependency and an exact development dependency. Selecting Copilot without installing the peer returns an actionable error; upgrades require protocol and live-smoke validation.
 - OCI materialization uses a runtime-supplied ORAS 1.x executable in the first release.
-- Promptfoo response caching is disabled for workspace-owning provider evaluations.
+- Workspace-backed delegates always receive `bustCache: true`, and a delegate response marked `cached` fails closed. Global Promptfoo caching may remain enabled; `evaluateOptions.cache: false` is optional cache-write hygiene.
 
 ## Target repository layout
 
@@ -389,6 +394,9 @@ interface SymlinkState {
 │       │   ├── provider.ts
 │       │   ├── config.ts
 │       │   ├── metadata.ts
+│       │   ├── lifecycle.ts
+│       │   ├── runtime.ts
+│       │   ├── prepare.ts
 │       │   ├── delegate-runner.ts
 │       │   ├── delegates/
 │       │   │   ├── adapter.ts
@@ -419,32 +427,46 @@ interface SymlinkState {
 
 `packages/workspace-core` has `"private": true`. Build output for `provider` bundles its runtime and declarations; it is never a published dependency.
 
-## Phase 0: Promptfoo cleanup prerequisite
+## Phase 0: Workspace lifecycle contract
 
 ### Changes
 
-Upstream a Promptfoo lifecycle fix before publishing this provider:
+Implement and prove the lifecycle seam before source materialization or delegate work:
 
-1. wrap both the Node `evaluate()` API and CLI evaluation path in an outer `finally` that runs after provider calls, transforms, and assertions;
-2. invoke `cleanup()` on every loaded provider for successful scores, failed scores, thrown errors, and cancellation;
-3. use all-settled cleanup and report one aggregate error only after every provider cleanup has been attempted;
-4. ensure a cleanup failure cannot erase the original evaluation error; and
-5. release the fix, then set the package peer lower bound and runtime version guard to that exact first verified release.
+1. export `workspaceLifecycle` from the package subpath `@allagents/promptfoo-provider/lifecycle` in both CommonJS and ESM;
+2. expose `WorkspaceRuntime` under the stable process-global key `Symbol.for("@allagents/promptfoo-provider/workspace-runtime")`, store an explicit protocol version in the registry value, and reject an incompatible package copy that finds the same key;
+3. make `beforeEach` attach an opaque random claim as a non-enumerable property under a separate stable global symbol on Promptfoo's exact test object, with the protocol version in the claim value and no provider config or filesystem path;
+4. make `beforeAll` inspect the resolved `context.suite.extensions` list and reject unless exactly one `:workspaceLifecycle` entry occupies the final index, so authored `beforeEach` hooks run before claim attachment and authored `afterEach` hooks finish before workspace release;
+5. make `Provider.callApi()` require the claim from `context.test` before acquisition, register active calls and leases under it, and fail closed when the lifecycle extension is absent or a later hook replaced the test object;
+6. make `afterEach` wait for active calls, release every row lease with all-settled semantics, aggregate failures for suite cleanup, and delete the non-enumerable claim;
+7. bind each claim and provider seed pool to Promptfoo's evaluation ID on first provider use and reject cross-evaluation reuse;
+8. make `afterAll` close its evaluation to new acquisitions, abort and await every tracked active call and runner process group, then use all-settled cleanup only for resources owned by that evaluation;
+9. retain idempotent `Provider.cleanup()` as a host fallback;
+10. give every package-owned runtime root a validated ownership marker and live lease, and reap only unlocked ownership-marked roots after abnormal process termination; and
+11. keep registry-key stability and protocol-value compatibility as permanent cross-version invariants.
 
-Process-exit hooks, stale-root reaping, and a happy-path-only cleanup loop do not satisfy this prerequisite. Promptfoo 0.122.0 remains explicitly unsupported.
+The workspace recipe remains exclusively under `Provider.config.workspace`. The extension carries only a non-enumerable claim on Promptfoo's exact test object, so it neither adds report columns nor duplicates configuration. Multiple providers and concurrent rows may each materialize distinct workspaces without a top-level environment field or authoring compiler.
+
+Add an `allagents-promptfoo prepare` binary. Its `prepare --config <path>` command accepts one or more config paths, deduplicates their parent directories, and atomically stages `.allagents/promptfoo-workspace.cjs` plus an ownership/version marker beside each selected config. Sibling configs share one staged shim. Nested monorepo directories receive a shim only when selected. The generated CommonJS file only re-exports `@allagents/promptfoo-provider/lifecycle`; it contains no copied lifecycle implementation or absolute package path. Preparation is idempotent, never rewrites Promptfoo YAML, and refuses to overwrite an unowned or modified target. Consumers may check in the equivalent two-line shim instead.
 
 ### Verification
 
-- Upstream tests cover CLI success, a below-threshold failed score, a provider exception, cancellation, and the Node `evaluate()` API.
-- A multiple-provider test proves one rejecting cleanup does not skip later cleanups and preserves the original evaluation failure.
-- The released npm package, not only an upstream branch, passes the same lifecycle matrix before its version becomes the peer lower bound.
+- Stock Promptfoo runs pass, failed-assertion, provider-error, cancellation, and Node `evaluate()` cases with the package lifecycle extension.
+- Concurrent rows, multiple AllAgents providers, and two concurrent `evaluate()` calls in one process use distinct claims; `afterAll` closes and drains only its evaluation before release.
+- One rejecting lease release does not skip later row or suite cleanup, and the suite boundary preserves the aggregate cleanup failure.
+- Missing hooks, duplicate or non-final lifecycle entries, forged or unknown claims, a replaced test object, duplicate release, incompatible runtime versions, and separate CommonJS/ESM imports fail safely before workspace acquisition or cleanup.
+- A timeout that reaches `afterAll` while a delegate is still unwinding aborts and awaits that active call and process group before removing its checkout or seed.
+- A killed process leaves an ownership-marked root that a later invocation reaps; a live lease and every unmarked or malformed path are preserved.
+- Preparation stages one shim for several sibling configs, separate shims for selected nested config directories, and no shim in unrelated monorepo directories.
+- Preparation is atomic and idempotent, rejects symlink/non-file/config collisions and modified generated files, and works from a packed npm installation.
+- A hand-authored two-line shim and a prepared shim behave identically.
 
 ## Phase 1: Repository and package foundation
 
 ### Changes
 
 1. Create a Bun workspace root with the private workspace-core and public provider package directories.
-2. Configure the public package with the first verified cleanup-safe Promptfoo release as its peer lower bound and `@github/copilot-sdk` as an optional peer dependency plus exact development dependency.
+2. Configure the public package with the first Promptfoo release that passes the provider-and-extension compatibility matrix as its peer lower bound and `@github/copilot-sdk` as an optional peer dependency plus exact development dependency.
 3. Pin Bun in `packageManager` and Node in `engines`.
 4. Configure strict TypeScript, Biome, Bun tests, and dual ESM/CommonJS builds. Bundle workspace core into the provider package while externalizing both peers.
 5. Add Changesets for package versions and release notes.
@@ -557,19 +579,21 @@ Registry credentials come from `ALLAGENTS_ORAS_AUTH_FILE`. The materializer copi
 
 Implement `seed-pool.ts` and `checkout.ts`:
 
-- each `Provider` instance owns one seed pool, one request-resolution map, and all paths created beneath its private runtime root;
+- each `Provider` instance owns one seed pool and request-resolution map, registers that pool to an evaluation through the shared lifecycle runtime, and creates all paths beneath a package-owned leased runtime root;
 - concurrent calls for one canonical request share one resolution promise;
-- the first successful commit/digest is pinned for that request until provider cleanup, even if the remote ref or tag moves;
+- the first successful commit/digest is pinned for that request until suite or provider cleanup, even if the remote ref or tag moves;
 - requests that resolve to one manifest share one seed preparation promise;
 - failed resolution or preparation entries are removed so a later call may retry;
 - completed seeds remain immutable for that provider instance's lifetime;
-- each checkout uses a unique contained directory;
+- each checkout uses a unique contained directory registered to its row claim;
 - checkout creation uses a verified reflink/copy-on-write clone when available and a recursive copy otherwise;
 - hardlinks are prohibited;
-- checkout release and provider cleanup are idempotent;
-- successful calls retain their private checkouts until Promptfoo invokes provider `cleanup()` after assertions;
-- the provider `cleanup()` hook aborts preparation, waits for in-flight calls, then removes every checkout, staging path, and seed it owns;
-- provider construction reaps only versioned, ownership-marked runtime roots whose recorded process is no longer alive; and
+- checkout, row, suite, and provider release are idempotent;
+- successful calls retain their private checkouts only through their row's assertions;
+- `afterEach` waits for active calls and removes every checkout registered to that row;
+- `afterAll` closes its evaluation to new acquisitions, aborts and awaits every active call and runner process group, then removes only that evaluation's retained checkouts, staging paths, and seed pools with all-settled semantics;
+- provider cleanup is an all-settled host fallback;
+- provider construction reaps only versioned, ownership-marked runtime roots whose lease is no longer live; and
 - source acquisition abort and per-call abort are separate so cancellation of one row does not corrupt a seed used by another row.
 
 ### Verification
@@ -578,8 +602,8 @@ Implement `seed-pool.ts` and `checkout.ts`:
 - Concurrent calls while a ref moves share the first resolution; later calls on that provider stay pinned, while a new provider instance resolves the new target.
 - Mutation in one checkout does not change the seed or another checkout.
 - Partial copies, cancellation, and process errors before response publication leave no published checkout.
-- An ownership marker prevents cleanup or stale-root recovery from deleting paths not created by that provider.
-- JavaScript assertions can read each response's distinct checkout path before cleanup; provider cleanup then removes every successful, failed, and cancelled call's owned paths and repeated cleanup is a no-op.
+- An ownership marker and live lease prevent lifecycle cleanup or stale recovery from deleting paths not created by the package or still owned by another process.
+- JavaScript assertions can read each response's distinct checkout path; `afterEach` removes that row, and repeated row, suite, and provider cleanup are no-ops.
 
 ## Phase 6: Workspace file changes
 
@@ -688,59 +712,63 @@ Export `CopilotSdkProvider` as a named package export. `Provider` remains the na
 - A packed-package smoke project installs the exact optional SDK peer and loads `package:@allagents/promptfoo-provider:CopilotSdkProvider` through stock Promptfoo.
 - An opt-in credentialed test runs the public Copilot SDK but is not required for forked pull requests.
 
-## Phase 8: Workspace provider and delegate adapters
+## Phase 8: Workspace provider, lifecycle, and delegate adapters
 
 ### Changes
 
-Implement `Provider`, the process-isolated `delegate-runner`, and the three delegate adapters in `provider`.
+Implement `Provider`, `workspaceLifecycle`, the shared runtime, the process-isolated `delegate-runner`, and the three delegate adapters in `provider`.
 
 Constructor responsibilities:
 
 - validate the exact provider and workspace config above;
 - extract and realpath Promptfoo's loader-injected `basePath` before validating public config, and keep it only in the internal constructor envelope;
-- initialize one owned workspace seed pool;
+- initialize one owned workspace seed pool and register it with the shared runtime;
 - resolve only the fixed runtime input channels;
 - reject nested self-delegation and delegate IDs without registered adapters; and
-- reject reserved path, session, environment-inheritance, and acquisition-credential fields at every authored layer.
+- reject reserved path, session, environment-inheritance, acquisition-credential, lifecycle-claim, and cache-control fields at every authored layer.
 
 For each `callApi`:
 
 1. honor an already-aborted Promptfoo signal;
-2. obtain the immutable seed;
-3. create a unique checkout, initialize and refresh its package-owned change baselines while the checkout is clean, and retain those baselines through execution;
-4. merge only allowed delegate fields from constructor and prompt config, validate again, and inject the validated absolute checkout path as `working_dir` last;
-5. start the delegate runner as a process group with the minimal platform environment plus explicit `delegate.env`;
-6. send a versioned JSON-lines request containing `PromptWire` (`id`, `raw`, `template`, `display`, `label`, `provider`, and `config: {}`) plus `vars`, `debug`, JSON-safe test metadata, cache flags, tracing fields, evaluation/test IDs, and row/prompt/repeat indices;
-7. forward cancellation, enforce the wrapper timeout, await delegate cleanup, and terminate the runner process group before continuing;
-8. collect bounded file-change metadata from the stable checkout whether the delegate succeeds or returns an error;
-9. reject a delegate response that already owns `metadata.allagents`;
-10. preserve the delegate response and add workspace provenance, the transient checkout path, and file-change metadata under that namespace;
-11. register the checkout for evaluation-shutdown cleanup; and
-12. return the response.
+2. require the opaque active claim from `context.test` before creating a path;
+3. obtain the immutable seed;
+4. create and register a unique checkout, initialize and refresh its package-owned change baselines while clean, and retain those baselines through execution;
+5. merge only allowed delegate fields from constructor and prompt config, validate again, and inject the absolute checkout path plus `bustCache: true` at final precedence;
+6. start the delegate runner as a process group with the minimal platform environment plus explicit `delegate.env`;
+7. send a versioned JSON-lines request containing `PromptWire` (`id`, `raw`, `template`, `display`, `label`, `provider`, and `config: {}`) plus `vars`, `debug`, JSON-safe test metadata, forced cache-bypass state, tracing fields, evaluation/test IDs, and row/prompt/repeat indices;
+8. forward cancellation, enforce the wrapper timeout, await delegate cleanup, and terminate the runner process group before continuing;
+9. reject a delegate response marked `cached`;
+10. collect bounded file-change metadata from the stable checkout whether the delegate succeeds or returns an error;
+11. reject a delegate response that already owns `metadata.allagents`;
+12. preserve the delegate response and add workspace provenance, the transient checkout path, and file-change metadata under that namespace; and
+13. return the response while leaving the registered checkout live for assertions.
 
-An idempotent `finally` repeats process-group termination. It removes a checkout only when the call fails before publishing a response; a published checkout remains live for assertions. The provider's idempotent `cleanup()` hook stops new work, aborts preparation, waits for in-flight calls, removes every retained checkout and seed, and rejects with an aggregate of any paths it could not remove. The supported Promptfoo host invokes this hook from its own outer `finally`; the provider does not rely on process-exit hooks or stale-root recovery for normal cleanup.
+An idempotent `finally` repeats process-group termination. It removes a checkout when the call fails before publishing a response. Once published, `afterEach` owns normal row release; `afterAll` and `Provider.cleanup()` are fallbacks. Every path removes active-call reservations in `finally`, and cleanup attempts every lease before returning an aggregate failure.
 
 Protocol v1 reserves stdout for newline-delimited frames with `{ version: 1, requestId, type, payload }`. The parent sends one `call` frame and optional idempotent `abort` frame. The child constructs its own `AbortController`, rejects unknown or duplicate frames, and emits exactly one terminal `response` or `fatal` frame only after native cleanup. Exported constants bound frame bytes, stderr bytes, and shutdown grace time. Malformed, oversized, duplicate-terminal, or non-serializable frames fail closed.
 
-The child receives `traceparent` and `tracestate` and exports spans through explicitly allowlisted OpenTelemetry environment/config; no in-memory tracer or cache callback crosses the boundary. Protocol stderr is separate from stdout, bounded, and redacted before logging or response construction. Wrapper response caching remains disabled.
+The child receives `traceparent` and `tracestate` and exports spans through explicitly allowlisted OpenTelemetry environment/config; no in-memory tracer or cache callback crosses the boundary. Protocol stderr is separate from stdout, bounded, and redacted before logging or response construction. The parent always sends `bustCache: true`; a cached delegate response is a contract error. Global Promptfoo caching is independent and may remain enabled.
 
 The runner receives trusted `basePath` separately from public config and supplies it to `loadApiProvider` for peer/SDK resolution even when the checkout lives outside the config directory. Before serialization, the parent folds the allowed prompt-level `delegate.config` override into the validated effective constructor config and clears `PromptWire.config`. It strips prompt functions, prompt-level provider objects, and every process-local context field; supported delegates receive only the DTO fields above.
 
-Delegate adapters implement one internal interface that validates authored config, binds the owned checkout, constructs the delegate, and declares cleanup requirements. The initial adapter registry is closed:
+Delegate adapters implement one internal interface that validates authored config, binds the owned checkout, constructs the delegate, guarantees response-cache bypass, and declares cleanup requirements. The initial adapter registry is closed:
 
 - Codex and Claude adapters call Promptfoo's public `loadApiProvider`;
 - the Copilot adapter invokes the shared `runCopilotSession` runtime inside the existing delegate runner, never constructs `CopilotSdkProvider`, and never creates a nested detached process group;
 - all adapters run with only essential platform variables and explicit `delegate.env`;
-- every adapter rejects provider-specific paths, session persistence, and environment inheritance that would weaken the workspace contract; and
-- every adapter preserves delegate output, error, usage, raw response, cache metadata, labels, and tracing context, returning only after native cleanup settles.
+- every adapter rejects provider-specific paths, session persistence, authored cache overrides, and environment inheritance that would weaken the workspace contract; and
+- every adapter preserves delegate output, error, usage, raw response, labels, and tracing context, returning only after native cleanup settles.
 
-Export named `Provider` and `CopilotSdkProvider`, with `Provider` also exported as the default.
+Export named `Provider` and `CopilotSdkProvider`, with `Provider` also exported as the default. Export `workspaceLifecycle` only through the documented lifecycle subpath.
 
 ### Verification
 
 - Contract tests run the same fake coding task through Codex, Claude, and Copilot delegates.
-- Prompt-level attempts to set `working_dir`, `additional_directories`, session persistence, environment inheritance, unknown keys, or acquisition credential variables are rejected.
-- Every delegate receives the contained checkout path at final precedence and receives no sibling or seed path through provider configuration.
+- Prompt-level attempts to set `working_dir`, `additional_directories`, session persistence, environment inheritance, cache controls, unknown keys, acquisition credential variables, or lifecycle claims are rejected.
+- Every delegate receives the contained checkout path and `bustCache: true` at final precedence and receives no sibling or seed path through provider configuration.
+- Two concurrent Node `evaluate()` calls prove one evaluation's `afterAll` cannot release the other's checkout or seed pool, and a timeout proves cleanup waits for a still-unwinding call before filesystem removal.
+- With Promptfoo caching enabled, two identical rows execute the delegate twice, mutate separate workspaces, return independent `fileChanges`, and never return `cached: true`.
+- A fake or supported delegate response marked `cached` fails closed and releases unpublished state.
 - Timeout and cancellation tests for every delegate assert the runner process group and any descendants are gone before `callApi` returns.
 - Protocol tests cover abort before and during execution, malformed and oversized frames, duplicate terminal frames, bounded stderr, redaction, trace-context propagation, child cleanup, and forced process-group escalation.
 - Killing the outer delegate runner while a noncooperative Copilot runtime child is active leaves no descendant process.
@@ -748,10 +776,9 @@ Export named `Provider` and `CopilotSdkProvider`, with `Provider` also exported 
 - Prompt DTO tests cover function-backed prompts and prompt configs containing a live provider object without serializing either object; a prompt-level model override reaches the delegate through its validated constructor config while `PromptWire.config` remains empty.
 - Two concurrent calls prove distinct workspaces and isolated `fileChanges`.
 - A delegate-authored `metadata.allagents` namespace returns an explicit collision error rather than being overwritten.
-- JavaScript assertions read each response's workspace files before `cleanup()` and separately consume bounded `fileChanges` metadata.
-- Delegate failure, file-change capture failure, timeout, and cancellation produce explicit bounded results; evaluation-shutdown cleanup leaves no owned process, checkout, staging path, or seed.
-- Host-lifecycle tests cover stock Promptfoo CLI success, below-threshold failed assertions, provider failure, cancellation, the Node `evaluate()` API, and multiple providers where one cleanup rejects; every provider cleanup is attempted exactly once.
-- Packed-package smoke tests load `package:@allagents/promptfoo-provider:Provider` through stock Promptfoo.
+- JavaScript assertions read each response's workspace files before `afterEach` and separately consume bounded `fileChanges` metadata.
+- Delegate failure, file-change capture failure, timeout, and cancellation produce explicit bounded results; row and suite cleanup leave no owned process, checkout, staging path, or seed.
+- Packed-package smoke tests load `Provider` and the lifecycle subpath through stock Promptfoo.
 
 ## Phase 9: Examples and Promptfoo compatibility
 
@@ -762,47 +789,59 @@ Add executable examples for:
 - direct Copilot with an existing directory;
 - Codex with a Git workspace;
 - Claude with a Git workspace;
-- Copilot with composed Git and OCI sources; and
-- parallel rows proving isolated checkouts.
+- Copilot with composed Git and OCI sources;
+- parallel rows proving isolated checkouts; and
+- sibling and nested monorepo Promptfoo configs using prepared config-local shims.
 
-Every workspace-owning example sets:
+Every workspace-owning example references:
 
 ```yaml
-evaluateOptions:
-  cache: false
+extensions:
+  # Keep the AllAgents lifecycle last.
+  - file://./.allagents/promptfoo-workspace.cjs:workspaceLifecycle
 ```
+
+Examples run `allagents-promptfoo prepare --config <path>` before Promptfoo validation or evaluation. One example checks in the equivalent two-line shim to prove preparation is convenience rather than a proprietary config compiler. Examples may set `evaluateOptions.cache: false` to avoid cache writes, but correctness tests also run with Promptfoo's default cache enabled.
 
 Each workspace example includes a JavaScript assertion module loaded with `file://`. The assertion reads `context.providerResponse.metadata.allagents.workspace.path`, resolves a known path beneath that root, and grades the actual file contents. A second assertion demonstrates using `metadata.allagents.fileChanges` without reading file contents.
 
-Add a compatibility matrix for each supported Promptfoo minor. A clean temporary project installs the packed tarball without the optional Copilot peer, runs `promptfoo validate`, imports `default`, `Provider`, and `CopilotSdkProvider`, verifies the default is `Provider`, and confirms Copilot calls return the actionable missing-peer error. Keep fake delegate adapters internal to contract tests; the packed public interface has no generic test delegate.
+Add a compatibility matrix for each supported Promptfoo minor. A clean temporary project installs the packed tarball without the optional Copilot peer, prepares a config-local shim, runs `promptfoo validate`, imports `default`, `Provider`, `CopilotSdkProvider`, and the lifecycle subpath, verifies the default is `Provider`, and confirms Copilot calls return the actionable missing-peer error. Keep fake delegate adapters internal to contract tests; the packed public interface has no generic test delegate.
 
 ### Verification
 
 - No example imports repository source files directly.
-- All examples resolve providers through `package:` identifiers.
-- The compatibility matrix fails on package loading, export identity, validation, or supported provider-construction drift.
+- All examples resolve providers through `package:` identifiers and extensions through the prepared or checked-in config-local shim.
+- Several configs in one monorepo directory share one `.allagents` shim; nested configs resolve only their own prepared sibling shim.
+- The compatibility matrix fails on package loading, export identity, extension loading, lifecycle behavior, validation, or supported provider-construction drift.
 - Examples contain no live credentials and use local fixtures by default.
 
-## Phase 10: Extension and assertion preparation
+## Phase 10: Extension distribution and assertion preparation
 
 ### Changes
 
-Reserve package names and establish shared build conventions only when the first real extension or assertion is implemented.
-
-Promptfoo already loads JavaScript assertion functions through `package:`. The first assertion package documents direct references such as `package:@allagents/promptfoo-assertions:<export>`.
+Ship the real workspace lifecycle with the provider package; do not create a separate extension package for this coupled protocol.
 
 Until Promptfoo supports package-function references for extensions:
 
-- publish normal named extension exports;
-- document a checked-in `file://` re-export shim;
-- reject direct `node_modules` paths as unsupported; and
-- open an upstream Promptfoo proposal for extension package loading.
+- publish `workspaceLifecycle` from the provider package's `./lifecycle` CommonJS/ESM export;
+- stage only a config-local CommonJS re-export and ownership/version marker;
+- support one-or-many config paths so sibling configs share one staged shim;
+- permit consumers to check in the equivalent two-line shim;
+- reject direct `node_modules` paths and copied lifecycle implementations as unsupported;
+- propose native package-function loading for extensions upstream; and
+- track a native post-assertion per-provider callback in [issue #2](https://github.com/allagentsdev/promptfoo-integrations/issues/2).
 
-Do not ship empty placeholder packages.
+Promptfoo already loads JavaScript assertion functions through `package:`. A future assertion package may document direct references such as `package:@allagents/promptfoo-assertions:<export>`. Do not publish an empty placeholder assertion package.
+
+When a released Promptfoo version provides the verified per-row provider callback in issue #2, add a peer-version capability boundary: newer hosts use the native callback and do not load `workspaceLifecycle`; older supported hosts continue using the extension. The provider must reject a configuration that activates both release paths for one call.
 
 ### Verification
 
-The first assertion PR includes a stock-Promptfoo example using `package:` directly. The first extension PR proves its `file://` shim and includes a migration note for future native package references.
+- Packed npm tests load the lifecycle through generated and checked-in shims under npm and pnpm layouts.
+- Preparation from repository root and nested config directories resolves the installed package through normal Node resolution without embedding an absolute path.
+- Changing package versions requires preparation only when the generated marker protocol changes; the shim continues to load the lockfile-selected package.
+- The upstream proposal includes a migration from `file://./.allagents/promptfoo-workspace.cjs:workspaceLifecycle` to a future direct package reference.
+- A migration test proves the future native callback removes the need for the lifecycle shim without double-releasing a row.
 
 ## Phase 11: Release
 
@@ -841,8 +880,8 @@ The release candidate additionally runs:
 
 - packed-package stock-Promptfoo validation and export-identity checks without the optional Copilot peer;
 - concurrent workspace isolation E2E;
-- assertion-lifecycle E2E proving a response checkout exists during JavaScript assertions and is removed only after provider cleanup;
-- stock-Promptfoo cleanup E2E covering CLI pass/fail/error/cancellation and Node `evaluate()`, including all-settled cleanup when one provider rejects;
+- assertion-lifecycle E2E proving a response checkout exists during JavaScript assertions and is removed by `afterEach`;
+- stock-Promptfoo lifecycle E2E covering CLI pass/fail/error/cancellation and Node `evaluate()`, including all-settled row and suite cleanup when one lease release rejects;
 - bounded file-change E2E proving a large Git checkout does not stage files, mutate its real index, read clean tracked contents into application memory, or exceed published internal bounds;
 - Git provenance E2E;
 - OCI digest/authentication E2E against a disposable registry;
@@ -856,9 +895,9 @@ The release candidate additionally runs:
 - `Provider` calls Promptfoo's original Codex and Claude providers and the package-local Copilot provider through closed delegate adapters.
 - Git and OCI inputs produce immutable provenance and private per-call checkouts.
 - Concurrent calls share no writable filesystem objects; mutation through one checkout cannot change its seed or sibling checkouts.
-- Each response checkout remains available through assertions, and provider cleanup removes all owned paths afterward.
-- The supported Promptfoo peer range begins at a released version that guarantees all-path, all-settled provider cleanup; 0.122.0 is rejected.
+- Each response checkout remains available through assertions, and `workspaceLifecycle` removes the row afterward.
+- The supported Promptfoo peer range begins at the first released version that passes the provider-and-extension lifecycle matrix; no upstream provider-cleanup fix is required.
 - Bounded `fileChanges` metadata survives result serialization; it never promises durable workspace contents.
-- Cancellation and failure leave no provider process or provider-owned path behind after evaluation-shutdown cleanup.
+- Cancellation and failure leave no provider process behind; normal lifecycle cleanup removes owned paths, and a later invocation safely reaps only lock-verified abandoned roots after hard termination.
 - Source credentials are absent from delegate environments, results, logs, and traces.
 - No Promptfoo authoring compiler, network gateway, or custom score protocol is introduced.

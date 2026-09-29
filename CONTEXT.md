@@ -6,7 +6,7 @@ A Promptfoo provider that invokes a coding agent and returns its output, usage, 
 
 ## Workspace provider
 
-The public provider that owns workspace acquisition, one delegated agent call, transient assertion access, change reporting, and evaluation-shutdown cleanup. It delegates model execution through a supported delegate adapter.
+The public provider that owns workspace acquisition, one delegated agent call, transient assertion access, and change reporting. It reads the workspace specification from its own config and registers each private checkout under the opaque row claim supplied by the workspace lifecycle.
 
 ## Delegate
 
@@ -34,7 +34,7 @@ A verified materialization owned by one workspace provider instance. The provide
 
 ## Workspace checkout
 
-A writable copy of one workspace seed owned exclusively by one provider call. It remains available to Promptfoo assertions through the response metadata path and is removed by the provider's evaluation-shutdown `cleanup()` hook. The package supports only Promptfoo releases that guarantee this hook after successful, failed, cancelled, and exceptional evaluations. "Private" means exclusive lifecycle and no shared writable objects, not a security sandbox against a same-user process that deliberately traverses the host filesystem.
+A writable copy of one workspace seed owned exclusively by one provider call. It remains available to Promptfoo assertions through the response metadata path. The workspace lifecycle removes it after that row's assertions; suite cleanup, provider cleanup, and lock-backed stale recovery are fallbacks. "Private" means exclusive lifecycle and no shared writable objects, not a security sandbox against a same-user process that deliberately traverses the host filesystem.
 
 ## File changes
 
@@ -46,11 +46,15 @@ Promptfoo's native response from a delegate. The workspace provider preserves it
 
 ## Integration
 
-A versioned Promptfoo-facing package maintained in this repository. Integrations include providers now and may include extensions and assertions later.
+A versioned Promptfoo-facing package maintained in this repository. The first package contains providers and their coupled workspace lifecycle; later integrations may include assertions.
+
+## Workspace lifecycle
+
+The package-matched Promptfoo extension that creates opaque row claims in `beforeEach`, removes registered row checkouts in `afterEach`, and sweeps remaining resources in `afterAll`. It does not define workspace sources or invoke a model.
 
 ## Extension
 
-A Promptfoo lifecycle hook invoked at `beforeAll`, `beforeEach`, `afterEach`, or `afterAll`. An extension is not a provider and does not invoke a model.
+A Promptfoo lifecycle hook invoked at `beforeAll`, `beforeEach`, `afterEach`, or `afterAll`. An extension is not a provider and does not decide evaluation scores.
 
 ## Assertion
 

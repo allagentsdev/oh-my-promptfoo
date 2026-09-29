@@ -9,18 +9,13 @@ AllAgents needs an open-source Promptfoo provider for the GitHub Copilot SDK. Co
 
 Promptfoo already supplies capable `openai:codex-sdk` and `anthropic:claude-agent-sdk` providers. Reimplementing those integrations would duplicate model invocation, metadata, streaming, tracing, and provider-specific behavior. A separate execution gateway would add a network protocol, queue, durable state, and another evaluation boundary that local and CI jobs do not require.
 
-A lifecycle extension can reset one fixed workspace around serialized rows, but that design has material limits:
+A lifecycle extension that resets one fixed path forces serialized rows and cannot bind a response to one private checkout. A lifecycle extension and provider can instead share an opaque row claim: the extension marks row boundaries, while the provider reads its own `config.workspace`, creates a unique checkout, and registers that checkout under the claim. This preserves concurrent row isolation and keeps the workspace recipe with the component that materializes it.
 
-- every row shares one path and must run serially;
-- a deferred assertion can observe a later row's workspace;
-- a path transported through suite state does not identify one private row checkout; and
-- source preparation, agent execution, assertion access, and cleanup do not form one owned lifecycle.
+AllAgents must implement a custom provider for Copilot regardless. A provider wrapper can therefore give Copilot, Codex, and Claude one workspace contract while continuing to use Promptfoo's original Codex and Claude implementations. Each response exposes its private checkout to assertions; a package-supplied `afterEach` hook releases that checkout after assertions, and `afterAll` sweeps remaining row and shared resources.
 
-AllAgents must implement a custom provider for Copilot regardless. A provider wrapper can therefore give Copilot, Codex, and Claude one workspace contract while continuing to use Promptfoo's original Codex and Claude implementations. Each response exposes its private checkout to assertions, but that design is safe only when the host guarantees provider cleanup after the complete evaluation lifecycle.
+Promptfoo 0.122.0 publicly exports `loadApiProvider`, package-provider loading, JavaScript assertion access to `providerResponse`, and lifecycle extensions. Its package loader requires an explicit exported constructor; it does not fall back to a default export when the suffix is omitted. Extensions still require `file://` references and cannot load an npm package export directly.
 
-Promptfoo 0.122.0 publicly exports `loadApiProvider`, package-provider loading, and JavaScript assertion access to `providerResponse`. Its package loader requires an explicit exported constructor; it does not fall back to a default export when the suffix is omitted. Extensions still require `file://` references.
-
-Promptfoo 0.122.0 cannot support retained response checkouts: its [`evaluate()` API returns without provider cleanup](https://github.com/promptfoo/promptfoo/blob/0.122.0/src/evaluate.ts#L347-L375), while its [CLI returns below the pass-rate threshold before reaching cleanup](https://github.com/promptfoo/promptfoo/blob/0.122.0/src/node/doEval.ts#L1169-L1199); thrown errors and cancellation can bypass the same loop. The first provider release is therefore blocked on an upstream Promptfoo release that invokes every loaded provider's cleanup from an outer `finally` after assertions and uses all-settled semantics so one cleanup failure cannot skip another. The package peer range starts at that first verified release, and runtime construction rejects older hosts.
+Promptfoo 0.122.0 does not consistently invoke provider `cleanup()`, so provider cleanup cannot be the primary workspace boundary. This is a host limitation rather than a release blocker: the required lifecycle extension owns post-assertion release, provider cleanup remains an idempotent fallback, and ownership-marked leases recover abandoned roots after hard process termination. The supported peer range begins at the first Promptfoo version that passes the package's extension-lifecycle compatibility matrix; 0.122.0 is a candidate baseline rather than being rejected solely for provider cleanup.
 
 ## Decision
 
@@ -28,13 +23,11 @@ Create the public repository `allagentsdev/promptfoo-integrations` as a Bun work
 
 The initial public package is `@allagents/promptfoo-provider`. It exports:
 
-- `Provider` — the recommended workspace-owning provider and default export; and
-- `CopilotSdkProvider` — the lower-level Copilot SDK provider for callers that already own a workspace.
+- `Provider` — the recommended workspace-owning provider and default export;
+- `CopilotSdkProvider` — the lower-level Copilot SDK provider for callers that already own a workspace; and
+- `@allagents/promptfoo-provider/lifecycle` — a CommonJS/ESM subpath exporting `workspaceLifecycle`.
 
-The repository may later publish:
-
-- `@allagents/promptfoo-extensions`;
-- `@allagents/promptfoo-assertions`.
+The package also exposes an `allagents-promptfoo prepare` command that stages a small config-local lifecycle shim. The repository may later publish `@allagents/promptfoo-assertions`; the workspace lifecycle remains versioned with the provider because both sides share one internal claim and lease protocol.
 
 Shared workspace implementation begins as a private workspace package. Its runtime and declaration output is bundled into `@allagents/promptfoo-provider`; the published manifest has no dependency on the private package. It becomes public only after a second external consumer requires a supported interface.
 
@@ -70,7 +63,7 @@ providers:
 
 Explicit named exports are stable across ESM/CommonJS interop. The default is available to ordinary JavaScript consumers but is not the documented Promptfoo convention because Promptfoo package references require the export suffix.
 
-The wrapper configuration is closed. A representative complete configuration is:
+The wrapper configuration is closed. The workspace recipe remains under the provider; the lifecycle extension is generic and receives no duplicate workspace manifest:
 
 ```yaml
 providers:
@@ -90,28 +83,32 @@ providers:
             ref: main
             destination: project
       timeoutMs: 900000
+
+extensions:
+  - file://./.allagents/promptfoo-workspace.cjs:workspaceLifecycle
 ```
 
 `delegate` is a discriminated union for the three supported IDs. Each delegate has an internal adapter and an explicit field allowlist; the initial release excludes extra directories, session reuse, settings/plugin discovery, executable overrides, arbitrary native passthroughs, environment inheritance, and function-valued hooks. Prompt-level configuration may override only fields under `delegate.config`. The wrapper validates the merged allowlisted config and injects its validated absolute checkout path as `working_dir` last. The accompanying implementation plan defines the complete TypeScript schema and precedence rules.
 
-### Workspace provider
+### Workspace provider and lifecycle
 
-The public `Provider` owns one complete provider call:
+The lifecycle extension and public `Provider` jointly own one row:
 
-1. validate a workspace specification containing credential-free Git and OCI source requests;
-2. resolve each mutable request once per provider instance to an immutable Git commit or OCI manifest digest;
-3. obtain an immutable seed from the provider instance's single-flight seed pool;
-4. create one private writable checkout for the call;
-5. sanitize every provider and prompt-level delegate config, rejecting `working_dir`, `additional_directories`, session persistence, environment inheritance, and other paths outside the checkout;
-6. start a process-isolated delegate runner with an allowlisted environment and make the checkout the final-precedence `working_dir`;
-7. load and call the selected delegate inside that runner with the sanitized prompt, call context, and cancellation signal;
-8. wait for the delegate to settle, invoke its cleanup, and quiesce the runner process group;
-9. collect a bounded file-change summary from the stable checkout;
-10. preserve the delegate's native response and merge namespaced AllAgents workspace provenance, transient checkout path, and file-change metadata;
-11. register the checkout as live until evaluation shutdown; and
-12. return the response so JavaScript assertions can inspect that checkout and consumers can use the bounded file-change summary.
+1. `beforeEach` attaches an opaque random row claim as a non-enumerable property under a stable `Symbol.for(...)` key on Promptfoo's exact test object; the claim value carries the lifecycle protocol version;
+2. `Provider.callApi()` requires that claim, validates its credential-free Git and OCI workspace specification, resolves mutable requests to immutable identities, obtains a seed, and creates one private writable checkout;
+3. the provider registers the checkout under the claim before delegate execution;
+4. the provider sanitizes every provider and prompt-level delegate config, injects the checkout as final-precedence `working_dir`, starts the process-isolated delegate, and forces a response-cache miss;
+5. the provider rejects any delegate response marked `cached`, waits for delegate cleanup, quiesces the runner process group, and captures bounded file changes;
+6. the provider preserves the native response and adds workspace provenance, the transient checkout path, and file-change metadata;
+7. Promptfoo assertions inspect the live checkout;
+8. `afterEach` waits for active calls and releases every checkout registered to the row with all-settled semantics; and
+9. `afterAll` closes that evaluation to new acquisitions, aborts and awaits every tracked active call and runner process group, then uses all-settled cleanup for only the rows, provider seed pools, and shared resources registered to that evaluation.
 
-Construction, acquisition, and checkout-preparation failures remove their partial paths immediately. Once a checkout is exposed in a response, only the provider's idempotent `cleanup()` hook removes it, after assertions finish. The supported Promptfoo host guarantee above must invoke that hook after successful scores, failed scores, thrown errors, and cancellation. The hook aborts preparation, waits for active calls, removes every checkout, staging directory, and seed owned by that provider instance, and reports cleanup failures instead of changing an already returned response. Provider construction also reaps only versioned, ownership-marked roots whose recorded process is no longer alive; it never substitutes stale-root recovery for normal cleanup and never deletes another live provider's root.
+Construction, acquisition, and checkout-preparation failures remove their partial paths immediately. A failure before response publication releases its checkout in the provider call. Once a checkout path is published, the lifecycle extension—not Promptfoo's provider cleanup loop—is the normal release owner. `Provider.cleanup()` remains an idempotent host fallback.
+
+The provider and lifecycle entrypoints may load through different CommonJS and ESM module graphs. They rendezvous through the stable process-global registry key `Symbol.for("@allagents/promptfoo-provider/workspace-runtime")`; the stored value carries an explicit protocol version, so a second incompatible package copy finds the same registry and fails instead of creating an isolated slot. A separate stable global symbol identifies the non-enumerable claim on Promptfoo's exact test object, and the claim value carries the same protocol version. The provider binds that claim to Promptfoo's evaluation ID on first use and rejects cross-evaluation reuse. The coordinator maps each claim to its active calls and leases and never accepts a filesystem path from authored config or test data. `afterAll` first closes and drains only its evaluation, so concurrent `evaluate()` calls in one process cannot release each other's resources or race live calls. The claim is never copied into prompt variables or serialized results and is deleted during row cleanup.
+
+Each package-owned runtime root has a validated ownership marker and live lease. Normal `afterEach` cleanup removes row checkouts promptly. Provider cleanup and `afterAll` are fallbacks; a later provider construction reaps only ownership-marked roots whose lease is no longer live. Stale recovery never deletes a live or unmarked path and does not replace normal lifecycle cleanup.
 
 The initial delegate allowlist is deliberately closed:
 
@@ -119,11 +116,11 @@ The initial delegate allowlist is deliberately closed:
 - `anthropic:claude-agent-sdk`;
 - `copilot-sdk`.
 
-Inside the isolated runner, the wrapper uses Promptfoo's public `loadApiProvider` API for Codex and Claude. The Copilot adapter calls the package's shared Copilot session runtime directly inside that existing runner; it does not construct `CopilotSdkProvider` or create a second detached process group. Standalone `CopilotSdkProvider` wraps the same session runtime in its own runner. `@github/copilot-sdk` is an optional peer dependency: selecting `copilot-sdk` or directly calling `CopilotSdkProvider` without installing it returns an actionable configuration error, while Codex- and Claude-only consumers do not install the SDK. Arbitrary Promptfoo providers are unsupported. A new delegate requires an adapter that proves the same path, serialization, cancellation, process-tree, and cleanup contract.
+Inside the isolated runner, the wrapper uses Promptfoo's public `loadApiProvider` API for Codex and Claude. The Copilot adapter calls the package's shared Copilot session runtime directly inside that existing runner; it does not construct `CopilotSdkProvider` or create a second detached process group. Standalone `CopilotSdkProvider` wraps the same session runtime in its own runner. `@github/copilot-sdk` is an optional peer dependency: selecting `copilot-sdk` or directly calling `CopilotSdkProvider` without installing it returns an actionable configuration error, while Codex- and Claude-only consumers do not install the SDK. Arbitrary Promptfoo providers are unsupported. A new delegate requires an adapter that proves the same path, serialization, cancellation, cleanup, and cache-bypass invariants.
 
-The delegate runner protocol is versioned JSON Lines. A v1 request contains a `PromptWire` DTO (`id`, `raw`, `template`, `display`, `label`, `provider`, and `config: {}`) plus only the wire-safe context fields consumed by supported delegates: variables, debug state, JSON-safe test metadata, cache flags, W3C tracing fields, evaluation/test IDs, and row/prompt/repeat indices. The parent folds the allowed prompt-level `delegate.config` override into the validated effective delegate config before serialization, then supplies that config only to the delegate constructor. Prompt functions, live provider objects, `filters`, `getCache`, `logger`, `originalProvider`, and live `AbortSignal` objects never cross the boundary. The parent sends an `abort` control frame; the child owns an `AbortController`, calls native provider cleanup, and emits exactly one bounded `response` or `fatal` frame before exit. Malformed, duplicate-terminal, oversized, and non-serializable frames fail closed.
+The delegate runner protocol is versioned JSON Lines. A v1 request contains a `PromptWire` DTO (`id`, `raw`, `template`, `display`, `label`, `provider`, and `config: {}`) plus only the wire-safe context fields consumed by supported delegates: variables, debug state, JSON-safe test metadata, `bustCache: true`, W3C tracing fields, evaluation/test IDs, and row/prompt/repeat indices. The parent folds the allowed prompt-level `delegate.config` override into the validated effective delegate config before serialization, then supplies that config only to the delegate constructor. Prompt functions, live provider objects, `filters`, `getCache`, `logger`, `originalProvider`, and live `AbortSignal` objects never cross the boundary. The parent sends an `abort` control frame; the child creates its own controller and combines wrapper cancellation with native cleanup.
 
-Promptfoo response caching is disabled for the wrapper. The child receives `traceparent` and `tracestate` and exports spans through the explicitly configured OpenTelemetry exporter; no in-memory cache or tracer object crosses the process boundary. Protocol stderr is bounded, captured separately from stdout, and redacted before logging or returning an error.
+Workspace-backed calls never consume a cached delegate response. Every adapter must prove a reliable cache-read bypass, the wrapper sets `bustCache: true` at final precedence, and a response with `cached: true` fails closed. Global `evaluateOptions.cache: false` remains an optional way to avoid cache writes across the whole evaluation, not a correctness prerequisite. The child receives `traceparent` and `tracestate` and exports spans through the explicitly configured OpenTelemetry exporter; no in-memory cache or tracer object crosses the process boundary. Protocol stderr is bounded, captured separately from stdout, and redacted before logging or returning an error.
 
 `promptfoo` is a peer dependency and remains external to every bundle. The package must not bundle another Promptfoo copy because duplicated registries, tracing state, caches, and runtime types would be incorrect.
 
@@ -298,7 +295,7 @@ interface SymlinkState {
 }
 ```
 
-`workspace.path` is an absolute local path valid only until the provider's evaluation-shutdown `cleanup()` completes. [Promptfoo JavaScript assertion context](https://www.promptfoo.dev/docs/configuration/expected-outputs/javascript/#using-test-context) exposes the complete provider response, so assertions read `context.providerResponse.metadata.allagents.workspace.path` and inspect files directly. Persisted results may retain the path as historical metadata after the directory is gone; consumers must not treat it as a durable artifact reference.
+`workspace.path` is an absolute local path valid through Promptfoo assertions and removed by the row lifecycle after assertions finish. [Promptfoo JavaScript assertion context](https://www.promptfoo.dev/docs/configuration/expected-outputs/javascript/#using-test-context) exposes the complete provider response, so assertions read `context.providerResponse.metadata.allagents.workspace.path` and inspect files directly. Persisted results may retain the path as historical metadata after the directory is gone; consumers must not treat it as a durable artifact reference.
 
 [Vercel's `agent-eval`](https://github.com/vercel-labs/agent-eval/blob/7e9aae4f7779f080af785ec88c17ef3c2ab3cebd/packages/agent-eval/src/lib/agents/shared.ts#L229-L276) establishes a Git baseline and captures generated and deleted files after agent execution. This provider uses the same baseline-and-delta idea but does not copy its `git add .` implementation: staging the real checkout would be unsafe and unbounded for large repositories.
 
@@ -329,25 +326,31 @@ It accepts an existing `working_dir`; it does not resolve Git or OCI sources. Th
 
 The implementation must follow public Copilot SDK contracts and the provider invariants in this decision. Prior implementations may inform edge cases, but they are neither dependencies nor normative specifications.
 
-### Extensions and assertions
+### Lifecycle extension distribution
 
-Providers, future extensions, and future assertions live in this repository because they share Promptfoo compatibility tests, workspace and file-change contracts, release automation, and examples.
-
-Extensions and assertions use the loading behavior Promptfoo already provides:
-
-- assertion functions use direct `package:@allagents/promptfoo-assertions:<export>` references;
-- extension functions are normal named npm exports, with a checked-in `file://` re-export shim until Promptfoo supports package references for extensions.
+The workspace lifecycle is not a future independent extension package. It is a required, version-matched subpath of `@allagents/promptfoo-provider` because the extension and provider share one claim and lease protocol:
 
 ```js
-export { workspace } from "@allagents/promptfoo-extensions";
+'use strict';
+
+module.exports = require('@allagents/promptfoo-provider/lifecycle');
 ```
 
-```yaml
-extensions:
-  - file://./promptfoo/extensions.mjs:workspace
+Promptfoo extensions currently require `file://` references. The preferred monorepo workflow runs the package's idempotent preparation command for one or more selected configs:
+
+```bash
+allagents-promptfoo prepare --config path/to/promptfooconfig.yaml
 ```
 
-Direct `node_modules` file paths are not a supported contract. The project should contribute package-function loading for extensions upstream.
+For each unique config directory, the command atomically stages one generated `.allagents/promptfoo-workspace.cjs` re-export shim and an ownership/version marker. Sibling configs share that one shim. Nested config directories receive their own shim only when prepared, so consumers do not copy a file at every monorepo level. The command never rewrites Promptfoo YAML, refuses to overwrite an unowned or modified target, and stages no provider or lifecycle implementation.
+
+The lifecycle entry must appear exactly once and be last in the config's resolved `extensions` list. During `beforeAll`, `workspaceLifecycle` inspects `context.suite.extensions` and rejects any missing, duplicate, or non-final `:workspaceLifecycle` entry before workspace acquisition. It therefore attaches each claim after authored `beforeEach` hooks and releases the checkout after authored `afterEach` hooks.
+
+Consumers may instead check in the same two-line shim. They must not copy the lifecycle implementation itself. Direct `node_modules` file paths are unsupported because physical layouts differ across npm, pnpm, Yarn Plug'n'Play, hoisting, and nested configs. The project should contribute package-function loading for extensions upstream; when Promptfoo supports it, the file shim can become a direct package reference.
+
+[Issue #2](https://github.com/allagentsdev/promptfoo-integrations/issues/2) tracks a native Promptfoo post-assertion provider callback. Once a released Promptfoo version invokes that callback exactly once per published response across pass, assertion failure, exception, cancellation, timeout, and concurrent rows, the package can move row release into the provider and retire the required lifecycle entry, config-local shim, and preparation step for that supported peer range. Provider cleanup and stale recovery remain final fallbacks; the package must never run both row-release mechanisms for one call.
+
+Future assertion functions may use direct `package:@allagents/promptfoo-assertions:<export>` references.
 
 ### Repository and release policy
 
@@ -366,34 +369,35 @@ Provider configuration, provider metadata, workspace manifests, file-change shap
 - Every call receives a private checkout, allowing safe Promptfoo row concurrency.
 - Assertions can inspect the live private checkout, while bounded file-change metadata remains visible in Promptfoo results.
 - Source provenance and agent execution are presented through one deep provider interface.
-- The provider package is usable from stock Promptfoo without an authoring compiler.
-- Future extensions and assertions can share the same repository and release infrastructure.
+- The provider package is usable from stock Promptfoo without an authoring compiler or Promptfoo fork.
+- Config-local runtime preparation gives nested monorepo configs one stable relative extension path without copying implementation code.
 
 ### Costs
 
-- The wrapper depends on Promptfoo's public provider-loading behavior and must test each supported Promptfoo minor.
-- Publication depends on an upstream Promptfoo release with a verified all-path provider-cleanup guarantee; 0.122.0 is explicitly unsupported.
+- The wrapper depends on Promptfoo's public provider and extension behavior and must test each supported Promptfoo minor.
+- Every workspace config must reference the lifecycle shim, and generated shims must be prepared before Promptfoo loads the config.
 - Workspace preparation adds filesystem and source-resolution work around every evaluation job.
 - OCI users must provide a supported ORAS executable in the initial release.
-- The provider must enforce change-collection bounds, delayed cleanup, and credential separation across three delegate adapters.
-- Published checkouts remain on disk until evaluation shutdown because the provider has no per-row post-assertion callback. Copy-on-write cloning reduces physical use where supported, but large suites must budget for concurrent retained workspaces.
+- The provider must enforce change-collection bounds, cache bypass, row claims, cleanup, and credential separation across three delegate adapters.
 - A provider wrapper adds one stack layer when diagnosing delegated calls.
 
 ### Risks and mitigations
 
 - **Credential exposure:** Git and OCI acquisition credentials enter through fixed runtime channels used only by source subprocesses; the process-isolated delegate runner starts from an allowlisted environment and is tested against leakage.
 - **Seed mutation:** seed paths are never sent to delegates, seeds are read-only, integrity is verified before cloning, and writable hardlinks are prohibited. This prevents accidental cross-call mutation; hostile same-user filesystem traversal remains out of scope.
-- **Provider drift:** packed-package integration tests run against every supported Promptfoo version.
-- **Missing host cleanup:** the peer lower bound and runtime version guard exclude Promptfoo 0.122.0 and any release that does not invoke every provider cleanup on success, failed assertions, thrown errors, and cancellation.
+- **Provider or extension drift:** packed-package integration tests run against every supported Promptfoo version, and the process-global runtime rejects incompatible protocol versions.
+- **Missing lifecycle extension:** `Provider.callApi()` requires an active row claim and fails before workspace acquisition when the hook is absent.
+- **Cached agent response:** the wrapper forces `bustCache: true` at final precedence and rejects a delegate response marked `cached`; global Promptfoo caching may remain enabled.
+- **Interrupted cleanup:** `afterEach` owns normal row release, `afterAll` and provider cleanup sweep remaining leases, and lock-backed stale recovery removes only verified abandoned roots.
 - **Recursive delegation:** the wrapper rejects itself and delegate IDs without registered adapters.
-- **Silent cleanup failure:** the supported host uses all-settled provider cleanup and reports an aggregate error; stale-root recovery handles only verified orphaned roots.
+- **Silent cleanup failure:** row and suite cleanup attempt every lease and preserve an aggregate failure for the suite boundary even when Promptfoo logs an individual `afterEach` error.
 - **Unbounded change collection:** fixed time, candidate, entry, file-read, subprocess-output, and serialized-metadata limits produce explicit truncated or failed metadata without failing the delegate result.
 
 ## Alternatives considered
 
-### Keep a fixed lifecycle-extension workspace
+### Use a fixed lifecycle-extension workspace
 
-Rejected as the primary abstraction. It forces serialization, exposes ordering hazards with deferred grading, and cannot bind each response to one private row checkout. Extensions remain useful for unrelated suite lifecycle behavior.
+Rejected. One fixed path forces serialization and cannot bind each response to one private row checkout. The selected design retains a lifecycle extension but limits it to row claims and cleanup; the provider still creates a unique checkout from its own workspace configuration.
 
 ### Implement independent Copilot, Codex, and Claude providers
 
