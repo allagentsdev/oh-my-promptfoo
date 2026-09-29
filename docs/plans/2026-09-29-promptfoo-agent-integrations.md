@@ -11,11 +11,11 @@ status: proposed
 
 Publish `@allagents/promptfoo-integration` from `allagentsdev/promptfoo-integrations`. The package provides:
 
-- `Provider`, a workspace-owning provider that delegates to Promptfoo's Codex and Claude providers or the package's Copilot provider, retains each private workspace through assertions, and optionally returns bounded file changes;
+- `Provider`, a workspace-owning provider that delegates to Promptfoo's Codex and Claude providers or the package's Copilot provider, retains each row's workspace lease through assertions, and optionally returns bounded file changes;
 - `CopilotSdkProvider`, a lower-level provider that executes the public GitHub Copilot SDK in an existing working directory; and
 - `allagents-promptfoo cache prune`, a cache-maintenance command that removes unused immutable workspace seeds.
 
-The workspace provider must accept exact Git and OCI inputs, reuse one persistent immutable seed per resolved manifest across providers and evaluations, create one private writable view per call using verified copy-on-write where available or a disk-admitted full copy otherwise, preserve the complete JSON-safe native delegate response, expose the live workspace at `metadata.workspace.path`, optionally capture durable changed-file contents at `metadata.fileChanges`, and rely on Promptfoo's best-effort provider cleanup without hiding that limitation.
+The workspace provider must accept exact Git and OCI inputs, reuse one persistent immutable seed per resolved manifest across providers and evaluations, create either a private writable view or an explicitly requested protected shared read-only checkout per call, preserve the complete JSON-safe native delegate response, expose the live workspace at `metadata.workspace.path`, optionally capture durable changed-file contents at `metadata.fileChanges`, and rely on Promptfoo's best-effort provider cleanup without hiding that limitation.
 
 ADR 0001 is authoritative for package boundaries and terminology. `CONTEXT.md` defines the domain language used below.
 
@@ -185,6 +185,7 @@ These names are reserved and rejected in delegate configuration. Workspace and c
 ```ts
 interface WorkspaceSpec {
   sources: WorkspaceSource[];
+  permissions?: "all" | "read-only";
   limits?: Partial<SourceLimits>;
 }
 
@@ -216,6 +217,52 @@ type OciSource = {
 
 Destinations are relative, normalized, non-empty, non-overlapping, and cannot traverse or resolve outside the seed root. Configuration contains no credentials or arbitrary acquisition commands. Git initially accepts `https://` and `file://`, rejecting SSH, Git, and credential-bearing URLs.
 
+### Explicit read-only selection
+
+`workspace.permissions` defaults to `all`: a private writable view for each call. `read-only` is opt-in on a provider configuration. It is separate from the delegate's native sandbox/permission settings and cannot be overridden by prompt variables or test-level provider config. In stock Promptfoo, use labeled provider instances plus [`defaultTest.providers` and `tests[].providers`](https://www.promptfoo.dev/docs/configuration/test-cases/#filtering-tests-by-provider) to choose the mode for each test:
+
+```yaml
+providers:
+  - id: package:@allagents/promptfoo-integration:Provider
+    label: cargowise-readonly
+    config:
+      delegate:
+        id: openai:codex-sdk
+        config:
+          sandbox_mode: read-only
+      workspace:
+        permissions: read-only
+        sources:
+          - type: git
+            repository: https://github.com/WiseTechGlobal/CargoWise.git
+            ref: 953adb94d49ae392c08082dc68717eefac0526cc
+            destination: CargoWise
+  - id: package:@allagents/promptfoo-integration:Provider
+    label: cargowise-writable
+    config:
+      delegate:
+        id: openai:codex-sdk
+        config:
+          sandbox_mode: workspace-write
+      workspace:
+        permissions: all
+        sources:
+          - type: git
+            repository: https://github.com/WiseTechGlobal/CargoWise.git
+            ref: 953adb94d49ae392c08082dc68717eefac0526cc
+            destination: CargoWise
+defaultTest:
+  providers: [cargowise-readonly]
+tests:
+  - vars:
+      task: Find the data transformation implementation.
+  - providers: [cargowise-writable]
+    vars:
+      task: Fix the data transformation bug.
+```
+
+Without `defaultTest.providers` or a test's own filter, Promptfoo runs that test against **both** providers. The default filter above selects the read-only instance; a writable test overrides it. This selects provider configuration, not a mutable per-row workspace override. The consumer may resolve the Git pin to a release-backed source before the provider runs; that does not set permissions.
+
 ### Native response and workspace metadata
 
 The delegate child returns the complete JSON-safe Promptfoo `ProviderResponse`. The wrapper validates serialized bytes and JSON safety, then round-trips every field and native metadata key. Functions, symbols, circular values, unsupported binary values, and oversized responses fail explicitly rather than disappearing.
@@ -240,7 +287,7 @@ interface IntegratedMetadata extends Record<string, unknown> {
 
 A delegate response already owning `metadata.workspace` or `metadata.fileChanges` fails before capture or response publication. `metadata.skillCalls` remains top-level for Promptfoo's `skill-used` assertions.
 
-`workspace.path` is absolute and remains available to transforms and assertions. Promptfoo may skip provider cleanup; persisted results may therefore contain either a still-present transient path or a stale path removed by cleanup, later recovery, or host teardown. No consumer may treat it as a durable artifact reference.
+`workspace.path` is absolute and remains available to transforms and assertions. Matching read-only rows may report the same protected checkout path; writable rows receive separate paths. Promptfoo may skip provider cleanup; persisted results may therefore contain either a still-present transient path or a stale path removed by cleanup, later recovery, or host teardown. No consumer may treat it as a durable artifact reference.
 
 ### Optional file-change result
 
@@ -301,11 +348,11 @@ Fixed internal defaults are 90 seconds, 10,000 candidates, 2,000 returned files,
 `Provider.cleanup()` closes the provider to new calls, aborts and awaits active call process groups, then runs one dependency-ordered teardown chain per workspace:
 
 1. read and validate that workspace's recovery record;
-2. detach the adapter view, including a required overlay unmount;
-3. only after detachment succeeds, remove its private paths and release its seed lease; and
+2. detach a private adapter view, including a required overlay unmount, or release a read-only row's private scratch;
+3. only after detachment succeeds, remove row-owned paths and release its seed and shared-checkout leases; and
 4. mark the recovery record released.
 
-Teardown is all-settled across independent workspace chains, not across dependent steps inside one chain. A failed detach keeps that workspace's recovery record and seed lease for later recovery. Independent staging paths are removed, and the provider root is removed only when no unreleased record remains. `cleanup()` returns an aggregate error after attempting every chain.
+Teardown is all-settled across independent workspace chains, not across dependent steps inside one chain. A failed detach keeps that workspace's recovery record and lease for later recovery. Independent staging paths are removed; a protected checkout still leased by other read-only rows is retained, and the provider root is removed only when no unreleased record remains. `cleanup()` returns an aggregate error after attempting every chain.
 
 Promptfoo does not currently guarantee this hook on every path. A Node evaluation or some CLI failures may leave ownership-marked roots and leases until process exit. Later provider construction reaps only valid package-owned roots whose recorded process identity is no longer alive. It refuses live, unmarked, malformed, escaping, or unknown-mount paths. Same-process abandoned roots remain live until the process exits.
 
@@ -316,6 +363,8 @@ GitHub-hosted Actions runner disposal is the final cleanup backstop and prevents
 ### Persistent seed-cache contract
 
 The content-addressed seed cache is package-owned and outside every provider runtime root. It defaults to the platform cache directory; `ALLAGENTS_CACHE_ROOT` may select another contained root. Entries are keyed by the resolved manifest digest and contain immutable content plus mutable package-owned state. Workspace cleanup never deletes an entry merely because its current views finished.
+
+For `permissions: read-only`, a package-owned, protected prepared checkout is separate from the immutable seed and may be shared by matching setup-free rows. Its allocated bytes count toward the same cache ceiling; live row leases block pruning, and a seed lease stays held whenever the prepared checkout still depends on seed blocks. Each row owns contained private scratch and a recoverable lease through assertions. Unexpected mutation invalidates the prepared checkout rather than resetting it in place; no subsequent row receives it. File-change capture excludes package-owned scratch. Cooperative file modes do not protect against a deliberate same-UID process changing permissions.
 
 Cross-process per-digest mutation locks serialize preparation, lease publication, lease release, and entry mutation. Creating a view records a lease containing provider-root identity and a process identity resistant to PID reuse. A dead owner does not make a seed evictable: later provider construction must recover and unmount the dependent workspace before releasing its lease. Eviction validates the ownership marker and containment, rechecks that no lease record remains, and atomically renames the entry to package-owned trash before deletion.
 
@@ -466,6 +515,7 @@ Canonical request JSON single-flights mutable ref/tag resolution. SHA-256 over R
 ### Verification
 
 - Table tests cover POSIX/Windows forms, Unicode normalization, overlap order, URL user-info, malformed digests, unknown fields, and canonicalization.
+- `workspace.permissions` rejects unknown values, defaults to `all`, remains fixed for each labeled provider instance, and cannot be changed by prompt/test overrides.
 - Prompt overrides cannot replace workspace, fileChanges, timeout, environment, delegate identity, working directory, or cache behavior.
 - Unmarked, symlinked, nested, or overlapping configured roots fail before acquisition.
 
@@ -524,8 +574,9 @@ Implement the shared immutable cache and lease-aware garbage collection.
 - Enforce canonical lock ordering: admission lock first, then per-digest locks sorted by digest; release a preparation lock before admission and recheck after reacquisition.
 - Single-flight equivalent preparation across processes and atomically publish complete seeds.
 - Evict failed preparation state for retry.
-- Keep content read-only and never expose it to delegates.
+- Keep immutable seed content read-only and never expose the seed itself to delegates.
 - Create a live seed lease only after a pending workspace recovery record exists.
+- Prepare one separate protected read-only checkout for identical setup-free manifests; charge its allocated bytes to the cache ceiling, hold row leases through assertions, and preserve any seed lease needed by its backing blocks.
 - Enforce 50 GiB allocated size and 30 days unused age; evict unleased LRU entries only.
 - Implement `cache prune` and `cache prune --all` with bounded reporting and explicit nonzero failure.
 - Make lease release and trash deletion idempotent and containment-checked.
@@ -533,6 +584,7 @@ Implement the shared immutable cache and lease-aware garbage collection.
 ### Verification
 
 - The same resolved manifest reuses one seed across concurrent processes, provider instances, and sequential evaluations.
+- Matching read-only rows reuse the protected checkout, retain distinct private scratch and leases, and block cache prune while any lease is live; the immutable seed is never the delegate's working directory.
 - Every lease record blocks age, size, default-prune, and `--all` eviction.
 - Dead-owner lease records continue to block pruning until workspace recovery releases them; concurrent acquire-versus-prune cannot delete an acquired seed.
 - LRU size eviction, 30-day age eviction, capacity exhaustion, corrupt ownership, symlink attacks, interrupted trash deletion, and retry are deterministic.
@@ -549,11 +601,12 @@ Implement the shared immutable cache and lease-aware garbage collection.
 
 Implement the three checkout adapters and ownership-marked provider roots.
 
-- Give every view a unique ID and private writable state.
+- Give every writable view a unique ID and private state.
 - Require reflink and overlay adapters to pass write-isolation probes before selection.
 - Keep recursive copy as a correctness fallback when the projected full per-row allocation fits available disk, including already retained views and concurrent copy admissions; fail explicitly before an unaffordable copy rather than exhausting the runner.
-- Implement and verify a narrowly privileged OverlayFS mount/unmount lifecycle on `wtg-use-linux-x64`, with mounts visible to the provider and delegate, path containment, teardown records, and crash recovery. If it or reflink is unavailable, try bounded copy for affordable workloads. CargoWise-scale writable rollout still requires a working CoW adapter on that runner; a recursive-copy result or an isolated mount-namespace probe does not clear the gate. For explicitly read-only workloads, revise ADR 0001 and the public schema to add an opt-in whole-workspace read-only mode with cooperative write protection and private row scratch, following [ai-evals' read-only contract](https://github.com/WiseTechGlobal/ai-evals/blob/d42496bc03c57bc640cd768cfc7ea90b46ed2158/docs/adr/0006-use-test-scoped-workspaces-for-coding-agent-evaluations.md#read-only-workspaces). Never switch a writable evaluation to read-only automatically.
-- Reject symlink, writable bind, and hardlink sharing.
+- Implement and verify a narrowly privileged OverlayFS mount/unmount lifecycle on `wtg-use-linux-x64`, with mounts visible to the provider and delegate, path containment, teardown records, and crash recovery. If it or reflink is unavailable, try bounded copy for affordable writable workloads. CargoWise-scale **writable** rollout still requires a working CoW adapter on that runner; a recursive-copy result or an isolated mount-namespace probe does not clear the gate.
+- Implement `permissions: read-only` as an explicit alternative for setup-free rows: use a separate package-owned protected checkout, row-private scratch and leases, and cooperative file-mode protection as in [ai-evals' read-only contract](https://github.com/WiseTechGlobal/ai-evals/blob/d42496bc03c57bc640cd768cfc7ea90b46ed2158/docs/adr/0006-use-test-scoped-workspaces-for-coding-agent-evaluations.md#read-only-workspaces). A workspace-changing setup must be prepared in the immutable source or use a private `all` view; do not silently switch a writable evaluation to read-only. Detect unexpected changes, invalidate the prepared checkout, and fail rather than reset it in place; same-UID bypass remains outside the security guarantee.
+- Reject symlink and hardlink sharing of writable content, and writable bind sharing of a seed. The protected read-only checkout is never the seed.
 - Reserve the workspace ID and contained adapter paths, then atomically publish a pending recovery record before creating a lease, inode tree, or mount.
 - Require each adapter to persist enough teardown state before every irreversible resource-creation step and transition the record to active only after the view is complete.
 - Make view release, unmount, root removal, and stale recovery idempotent and containment-checked.
@@ -562,11 +615,12 @@ Implement the three checkout adapters and ownership-marked provider roots.
 
 ### Verification
 
-- One thousand concurrent mostly unchanged views share one seed and expose distinct paths.
-- Mutating any file, metadata bit, symlink, or Git state in one view changes neither seed nor sibling.
+- One thousand concurrent mostly unchanged **writable** views share one seed and expose distinct paths.
+- Mutating any file, metadata bit, symlink, or Git state in one writable view changes neither seed nor sibling.
 - Reflink tests compare physical allocation and inode independence.
 - Overlay tests prove provider/delegate-visible mounts, ordinary-user reads and private writes, private upper/work directories, controlled privileged setup, correct unmount ordering, and no sibling visibility; forced termination and failed unmount retain the recovery record and seed lease.
 - Recursive-copy tests document full allocation cost, select it when CoW probes fail and space permits, and reject under concurrent disk pressure before copying when the per-view reserve cannot fit.
+- Matching read-only rows share one protected checkout without per-row full copies or OverlayFS, receive private scratch and leases, and reject ordinary file/Git writes; setup-changing rows are not shared. A changed checkout is invalidated and never reused; same-UID `chmod` is documented as outside the guardrail.
 - A 2 GiB sparse/fixture seed scale test records allocated blocks for the seed plus one thousand views and enforces adapter-specific ceilings.
 - On WTG.AI.Prompts' actual `wtg-use-linux-x64` evaluation runner, materialize CargoWise commit `769187bbb4d2f2add3fe11131ce3aedc696145f0` from [ai-evals' representative proof](https://github.com/WiseTechGlobal/ai-evals/blob/d42496bc03c57bc640cd768cfc7ea90b46ed2158/docs/solutions/architecture-patterns/measuring-representative-workspace-costs.md): 245,828 files and 1,814,049,455 logical bytes. Prove that two concurrent writable views select a working copy-on-write adapter and share unchanged blocks while writes remain private. The existing sparse 2 GiB fixture does not replace this real-tree proof.
 - Report the selected adapter, seed acquisition time, per-view preparation time, allocated disk space, optional file-change baseline time, and cleanup time separately on that runner. The ai-evals timings were measured on an ext4 VPS, not GitHub Actions, and did not exercise overlay; they are not CI performance guarantees.
@@ -653,31 +707,33 @@ For each `callApi`:
 1. honor pre-abort;
 2. resolve and validate the immutable seed entry without creating a view;
 3. reserve an opaque workspace ID and contained adapter paths, then atomically publish a pending recovery record;
-4. acquire the seed lease and create the private view, persisting teardown state before each irreversible adapter step;
+4. acquire the seed lease and either create a private writable view or acquire a protected shared read-only checkout with row-private scratch, persisting teardown state before each irreversible step;
 5. transition the recovery record to active and optionally establish a change baseline;
 6. run and quiesce the delegate;
 7. validate the complete response and reject reserved metadata collisions;
 8. optionally capture file changes;
 9. add `metadata.workspace` and optional `metadata.fileChanges` while preserving native metadata; and
-10. return without releasing the published view.
+10. return without releasing the row's workspace lease.
 
-On pre-publication failure, run the recorded teardown chain immediately; release the seed lease only after adapter detachment succeeds, otherwise retain the pending record and lease for later recovery. On success, `Provider.cleanup()` owns normal release. No delayed timer or later provider call guesses when assertions have finished. If Promptfoo skips cleanup, later process recovery owns the abandoned root and its seed leases.
+On pre-publication failure, run the recorded teardown chain immediately; release the seed lease only after adapter detachment or read-only scratch release succeeds, otherwise retain the pending record and lease for later recovery. On success, `Provider.cleanup()` owns normal release. No delayed timer or later provider call guesses when assertions have finished. If Promptfoo skips cleanup, later process recovery owns the abandoned root and its leases.
 
 ### Verification
 
-- JavaScript assertions read and modify known files through each returned workspace path.
-- Parallel rows receive isolated paths and mutations.
+- JavaScript assertions read and modify known files through each returned **writable** workspace path.
+- Parallel writable rows receive isolated paths and mutations; matching read-only rows may share one protected path but not row scratch or leases.
 - Workspace exists for passing, failing, asynchronous, model-graded, and trajectory assertions.
 - Every response reports `cleanup: "best-effort-evaluation"`.
-- Provider cleanup removes every successfully detached private view and retains any failed record with its lease.
-- Cleanup never deletes the reusable seed.
-- A Node evaluation that skips cleanup leaves a marked root; a later process releases it and its leases.
+- Provider cleanup removes every successfully detached private view or released read-only row scratch and retains any failed record with its lease.
+- Cleanup never deletes the reusable seed or a protected checkout still leased by another read-only row.
+- A Node evaluation that skips cleanup leaves a marked root; a later process releases it and its leases without reaping a live reader.
 - Live same-process roots are never reaped.
 - Failure before or during view creation is recovered from the pending record; no lease or mount can exist without teardown intent.
 - A failed overlay unmount keeps its seed lease while independent views still clean up.
 - Sequential provider instances reuse the same resolved seed.
 - Native skill metadata stays top-level; reserved collisions fail before publication.
 - Optional file changes are absent when disabled and durable when enabled.
+- Read-only provider labels and `defaultTest.providers` / `tests[].providers` run only the selected mode; a missing filter demonstrably runs both, and prompt variables cannot elevate `read-only` to `all`.
+- Read-only assertions can inspect the protected checkout; ordinary writes fail, package scratch is excluded from optional file changes, and unexpected baseline mutation invalidates reuse rather than triggering an in-place restore.
 
 ## Phase 10: Examples and Promptfoo compatibility
 
@@ -689,6 +745,7 @@ Add executable examples for:
 - Codex with a Git workspace and JavaScript filesystem assertion;
 - Claude with optional file-change assertion;
 - Copilot with Git and OCI sources;
+- mixed read-only and writable tests selecting labeled provider configurations;
 - one thousand parallel rows using copy-on-write views; and
 - cache pruning on a long-lived self-hosted runner.
 
@@ -705,6 +762,7 @@ Build a matrix for every supported Promptfoo minor covering package exports, wor
 - Examples import only packed/public package interfaces and contain no credentials.
 - npm, pnpm, and Bun temporary projects resolve the consumer's Promptfoo peer correctly.
 - Ordinary `contains`, `regex`, `is-json`, JavaScript, `llm-rubric`, `skill-used`, and `trajectory:*` assertions retain direct-provider behavior.
+- Stock Promptfoo runs a default read-only test only against its read-only provider label and an overriding writable test only against its writable label.
 - Multi-gigabyte scale example shows the selected adapter, allocated disk for one thousand views, best-effort view cleanup, and retained seed-cache size.
 - GitHub-hosted example relies on runner disposal unless it explicitly saves the cache directory.
 - Self-hosted example runs `allagents-promptfoo cache prune` before cache reporting or backup.
@@ -718,7 +776,7 @@ Build a matrix for every supported Promptfoo minor covering package exports, wor
 3. Test packed and registry-installed projects with and without Copilot peer.
 4. Exercise normal and skipped provider-cleanup paths.
 5. Publish stable `1.0.0` with provenance.
-6. Announce supported Promptfoo range, Node/Bun versions, ORAS requirement, checkout adapters, recursive-copy cost, optional file-change bounds, best-effort workspace cleanup, persistent seed-cache policy, and `cache prune`.
+6. Announce supported Promptfoo range, Node/Bun versions, ORAS requirement, explicit read-only permissions and cooperative limits, checkout adapters, recursive-copy cost, optional file-change bounds, best-effort workspace cleanup, persistent seed-cache policy, and `cache prune`.
 
 ### Verification
 
@@ -743,6 +801,7 @@ Release-candidate gates additionally cover:
 - normal and skipped provider-cleanup behavior;
 - stale-root and seed-lease recovery after forced process death;
 - thousand-view copy-on-write isolation, 2 GiB allocated-space ceilings, and cross-evaluation seed reuse;
+- explicit read-only provider selection, protected setup-free checkout reuse with private scratch, mutation invalidation, cache accounting, and cleanup without deleting a live reader;
 - On WTG.AI.Prompts' target `wtg-use-linux-x64` runner, the representative CargoWise-scale proof selects a provider-visible working copy-on-write adapter through the real mount lifecycle, demonstrates private writes and shared unchanged blocks, and reports phase timings and allocated disk use; a recursive-copy result does not clear the large-repo rollout gate.
 - age/size/default/all cache pruning under concurrent leases;
 - optional file-change exactness and bounds;
@@ -755,10 +814,10 @@ Release-candidate gates additionally cover:
 - Stock Promptfoo loads both provider exports from the published package.
 - Git and OCI inputs produce immutable provenance and one persistent cached seed per resolved manifest.
 - One thousand private reflink/overlay views share immutable blocks without sharing writable state; recursive copy remains a correct, disk-admitted fallback for affordable workloads and fails explicitly when admission cannot fit.
-- CargoWise-scale writable rollout on the target runner requires proven provider-visible copy-on-write; without it, the rollout is blocked even if a smaller job can use recursive copy. A read-only workaround requires an explicit mode and ADR/schema revision, not a silent fallback.
+- CargoWise-scale **writable** rollout on the target runner requires proven provider-visible copy-on-write; without it, that rollout is blocked even if a smaller job can use recursive copy. Explicit `permissions: read-only` permits setup-free read-only evaluations to share a protected prepared checkout without claiming writable isolation.
 - Workspace paths remain available through Promptfoo assertions.
 - Best-effort provider cleanup and safe later stale-root recovery are explicit and verified.
-- Workspace cleanup removes private views and releases leases without deleting reusable seeds.
+- Workspace cleanup removes private writable views or read-only row scratch and releases leases without deleting reusable seeds or live shared checkouts.
 - Automatic and explicit cache pruning remove only unleased entries under the locked age/size policy.
 - GitHub-hosted runners require no cross-job cleanup unless the cache directory is explicitly persisted.
 - Optional generated/deleted files and unified diff survive serialization when enabled and are absent when disabled.
