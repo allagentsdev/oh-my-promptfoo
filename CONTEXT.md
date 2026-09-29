@@ -4,13 +4,13 @@
 
 A Promptfoo provider that invokes a coding agent and returns its output, usage, trajectory, and provider metadata. An agent provider does not decide evaluation scores.
 
-## Agent workspace provider
+## Workspace provider
 
-The public provider that owns one evaluation call from workspace checkout through delegated agent execution, evidence capture, and cleanup. It delegates model execution to a supported agent provider.
+The public provider that owns one evaluation call from workspace checkout through delegated agent execution, evidence capture, and cleanup. It delegates model execution through a supported delegate adapter.
 
 ## Delegate
 
-The agent provider selected by the agent workspace provider. The initial delegates are Promptfoo's Codex SDK provider, Promptfoo's Claude Agent SDK provider, and the AllAgents Copilot SDK provider.
+The agent provider selected by the workspace provider. The initial delegates are Promptfoo's Codex SDK provider, Promptfoo's Claude Agent SDK provider, and the package's Copilot SDK provider.
 
 ## Source request
 
@@ -30,7 +30,7 @@ The complete declaration of source requests and their destinations for an agent 
 
 ## Workspace seed
 
-A verified materialization owned by one agent workspace provider instance. The provider treats it as immutable, verifies its integrity before cloning, and never shares writable filesystem objects with checkouts.
+A verified materialization owned by one workspace provider instance. The provider treats it as immutable, verifies its integrity before cloning, and never shares writable filesystem objects with checkouts.
 
 ## Workspace checkout
 
@@ -42,7 +42,7 @@ A bounded immutable record finalized after checkout disposal. Filesystem facts a
 
 ## Provider response
 
-Promptfoo's native response from a delegate. The agent workspace provider preserves its output and usage and adds AllAgents workspace evidence under namespaced metadata.
+Promptfoo's native response from a delegate. The workspace provider preserves its output and usage and adds AllAgents workspace evidence under namespaced metadata.
 
 ## Integration
 

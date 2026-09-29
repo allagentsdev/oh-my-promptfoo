@@ -9,12 +9,12 @@ status: proposed
 
 ## Goal
 
-Publish two public npm packages from `allagentsdev/promptfoo-integrations`:
+Publish `@allagents/promptfoo-provider` from `allagentsdev/promptfoo-integrations`. The package exports:
 
-- `@allagents/promptfoo-provider-agent`, a workspace-owning provider that delegates to Promptfoo's Codex and Claude providers or the AllAgents Copilot provider;
-- `@allagents/promptfoo-provider-copilot-sdk`, a lower-level provider that executes the public GitHub Copilot SDK in an existing working directory.
+- `Provider` / `WorkspaceProvider`, a workspace-owning provider that delegates to Promptfoo's Codex and Claude providers or the package's Copilot provider;
+- `CopilotSdkProvider`, a lower-level provider that executes the public GitHub Copilot SDK in an existing working directory.
 
-The agent provider must accept exact Git and OCI workspace sources, create one private checkout per Promptfoo call, preserve native delegate results, capture bounded immutable evidence, and clean up on success, failure, timeout, and cancellation.
+The workspace provider must accept exact Git and OCI workspace sources, create one private checkout per Promptfoo call, preserve native delegate results, capture bounded immutable evidence, and clean up on success, failure, timeout, and cancellation.
 
 ADR 0001 is authoritative for package boundaries and terminology. `CONTEXT.md` defines the domain language used below.
 
@@ -33,11 +33,11 @@ ADR 0001 is authoritative for package boundaries and terminology. `CONTEXT.md` d
 ### Provider references
 
 ```yaml
-package:@allagents/promptfoo-provider-agent:Provider
-package:@allagents/promptfoo-provider-copilot-sdk:Provider
+package:@allagents/promptfoo-provider:Provider
+package:@allagents/promptfoo-provider:CopilotSdkProvider
 ```
 
-Implementation classes retain descriptive names and are additionally exported as `Provider` and `default`.
+`WorkspaceProvider` is also exported as `Provider` and `default`. `CopilotSdkProvider` is a named export.
 
 ### Supported delegates
 
@@ -47,15 +47,17 @@ anthropic:claude-agent-sdk
 copilot-sdk
 ```
 
-The agent provider rejects itself, unknown delegates, and any nested delegate `working_dir`.
+The workspace provider rejects itself, unknown delegate IDs, delegates without registered adapters, and any nested delegate `working_dir`.
+
+The external config remains a closed discriminated union. Internally, each supported ID maps to one `DelegateAdapter` that validates its allowed config, binds the owned checkout at final precedence, loads the provider, and declares cleanup behavior. There is no generic fallback to `loadApiProvider`.
 
 ### Public provider configuration
 
-`AgentWorkspaceProvider` accepts one closed, versioned configuration:
+`WorkspaceProvider` accepts one closed, versioned configuration:
 
 ```ts
-interface AgentWorkspaceProviderConfig {
-  agent: CodexDelegate | ClaudeDelegate | CopilotDelegate;
+interface WorkspaceProviderConfig {
+  delegate: CodexDelegate | ClaudeDelegate | CopilotDelegate;
   workspace: WorkspaceSpec;
   evidence?: Partial<EvidenceLimits>;
   timeoutMs?: number;
@@ -133,13 +135,13 @@ interface CopilotSdkProviderConfig {
 }
 ```
 
-All public config objects reject unknown keys. Before public validation, each provider constructor extracts Promptfoo's loader-injected `basePath` into an internal envelope; users cannot set or override it through prompt config. The initial release deliberately omits native-provider fields that enable extra directories, session reuse, settings/plugin discovery, executable overrides, arbitrary CLI/MCP passthroughs, process-environment inheritance, or function-valued hooks. Prompt-level config may override only fields under `agent.config`; workspace, evidence, timeout, environment, and agent identity are constructor-only. The wrapper merges that allowed override into constructor config, rejects reserved fields in either layer, validates the result, and injects the validated absolute checkout path as `working_dir` last.
+All public config objects reject unknown keys. Before public validation, each provider constructor extracts Promptfoo's loader-injected `basePath` into an internal envelope; users cannot set or override it through prompt config. The initial release deliberately omits native-provider fields that enable extra directories, session reuse, settings/plugin discovery, executable overrides, arbitrary CLI/MCP passthroughs, process-environment inheritance, or function-valued hooks. Prompt-level config may override only fields under `delegate.config`; workspace, evidence, timeout, environment, and delegate identity are constructor-only. The wrapper merges that allowed override into constructor config, rejects reserved fields in either layer, validates the result, and injects the validated absolute checkout path as `working_dir` last.
 
 ```yaml
 providers:
-  - id: package:@allagents/promptfoo-provider-agent:Provider
+  - id: package:@allagents/promptfoo-provider:Provider
     config:
-      agent:
+      delegate:
         id: openai:codex-sdk
         config:
           model: gpt-5.3-codex
@@ -174,7 +176,7 @@ Source credentials and executable paths are runtime inputs, resolved from provid
 - `ALLAGENTS_ORAS_AUTH_FILE`; and
 - optional `ALLAGENTS_WORKSPACE_ROOT`.
 
-These names are reserved and rejected in `agent.env` and every prompt-level delegate field. `ALLAGENTS_ORAS_AUTH_FILE` points to a Docker-compatible registry auth file; the materializer copies it to a private mode-`0600` file for each acquisition. Defaults and hard maxima for every evidence and source limit are exported constants, documented in the package README, and included in the schema version.
+These names are reserved and rejected in `delegate.env` and every prompt-level delegate field. `ALLAGENTS_ORAS_AUTH_FILE` points to a Docker-compatible registry auth file; the materializer copies it to a private mode-`0600` file for each acquisition. Defaults and hard maxima for every evidence and source limit are exported constants, documented in the package README, and included in the schema version.
 
 ### Workspace sources
 
@@ -318,9 +320,8 @@ Arrays and `truncation.reasons` are lexically sorted, paths use normalized `/` s
 - Node.js 22.22.0 or newer.
 - Linux and macOS only in the initial release; package metadata rejects Windows because reliable process-tree termination depends on POSIX process groups.
 - Bun 1.4 for repository development and publishing workflows.
-- Initial public packages declare `promptfoo: ">=0.122.0 <0.123.0"` as a peer dependency and never bundle it.
-- The agent package declares the Copilot package as an optional peer dependency and loads it only for the `copilot-sdk` delegate.
-- The Copilot package pins `@github/copilot-sdk` to `1.0.6`; upgrades require protocol and live-smoke validation.
+- The public package declares `promptfoo: ">=0.122.0 <0.123.0"` as a peer dependency and never bundles it.
+- The package declares `@github/copilot-sdk: "1.0.6"` as an optional peer dependency and an exact development dependency. Selecting Copilot without installing the peer returns an actionable error; upgrades require protocol and live-smoke validation.
 - OCI materialization uses a runtime-supplied ORAS 1.x executable in the first release.
 - Promptfoo response caching is disabled for workspace-owning provider evaluations.
 
@@ -344,21 +345,23 @@ Arrays and `truncation.reasons` are lexically sorted, paths use normalized `/` s
 │   │   │   ├── sources/git.ts
 │   │   │   └── sources/oci.ts
 │   │   └── package.json
-│   ├── provider-copilot-sdk/
-│   │   ├── src/
-│   │   │   ├── provider.ts
-│   │   │   ├── runner.ts
-│   │   │   ├── protocol.ts
-│   │   │   ├── tracing.ts
-│   │   │   └── redaction.ts
-│   │   └── package.json
-│   └── provider-agent/
+│   └── provider/
 │       ├── src/
-│       │   ├── provider.ts
-│       │   ├── delegate-factory.ts
+│       │   ├── workspace-provider.ts
 │       │   ├── config.ts
+│       │   ├── metadata.ts
 │       │   ├── delegate-runner.ts
-│       │   └── metadata.ts
+│       │   ├── delegates/
+│       │   │   ├── adapter.ts
+│       │   │   ├── codex.ts
+│       │   │   ├── claude.ts
+│       │   │   └── copilot.ts
+│       │   └── copilot/
+│       │       ├── provider.ts
+│       │       ├── runner.ts
+│       │       ├── protocol.ts
+│       │       ├── tracing.ts
+│       │       └── redaction.ts
 │       └── package.json
 ├── examples/
 │   ├── codex/
@@ -367,7 +370,7 @@ Arrays and `truncation.reasons` are lexically sorted, paths use normalized `/` s
 │   └── git-and-oci-workspace/
 ├── scripts/
 │   ├── build.ts
-│   ├── smoke-packed-packages.ts
+│   ├── smoke-packed-package.ts
 │   └── publish.ts
 ├── package.json
 ├── tsconfig.json
@@ -375,17 +378,17 @@ Arrays and `truncation.reasons` are lexically sorted, paths use normalized `/` s
 └── bun.lock
 ```
 
-`packages/workspace-core` has `"private": true`. Build output for `provider-agent` bundles its runtime and declarations; it is never a published dependency.
+`packages/workspace-core` has `"private": true`. Build output for `provider` bundles its runtime and declarations; it is never a published dependency.
 
 ## Phase 1: Repository and package foundation
 
 ### Changes
 
-1. Create a Bun workspace root with the three package directories.
-2. Configure both public packages with `promptfoo` as a peer dependency. Configure the agent package with `@allagents/promptfoo-provider-copilot-sdk` as an optional peer dependency and development dependency.
+1. Create a Bun workspace root with the private workspace-core and public provider package directories.
+2. Configure the public package with `promptfoo` as a peer dependency and `@github/copilot-sdk` as an optional peer dependency plus exact development dependency.
 3. Pin Bun in `packageManager` and Node in `engines`.
-4. Configure strict TypeScript, Biome, Bun tests, and dual ESM/CommonJS builds. Bundle workspace core into the agent package while externalizing `promptfoo` and the optional Copilot peer.
-5. Add Changesets for independent package versions and release notes.
+4. Configure strict TypeScript, Biome, Bun tests, and dual ESM/CommonJS builds. Bundle workspace core into the provider package while externalizing both peers.
+5. Add Changesets for package versions and release notes.
 6. Add root commands:
    - `bun run build`;
    - `bun run typecheck`;
@@ -400,8 +403,8 @@ Arrays and `truncation.reasons` are lexically sorted, paths use normalized `/` s
 
 - A clean checkout installs with `bun install --frozen-lockfile`.
 - All root commands pass with empty package implementations.
-- `npm pack --dry-run` for both public packages includes only declarations, runtime files, license, package metadata, and README.
-- A clean npm smoke project installs and executes each tarball. The agent tarball's manifest and emitted imports contain no private workspace package dependency; `promptfoo` and the Copilot package remain external peers.
+- `npm pack --dry-run` includes only declarations, runtime files, license, package metadata, and README.
+- A clean npm smoke project installs and executes the tarball. Its manifest and emitted imports contain no private workspace package dependency; `promptfoo` and `@github/copilot-sdk` remain external peers.
 
 ## Phase 2: Workspace configuration and containment
 
@@ -495,7 +498,7 @@ Registry credentials come from `ALLAGENTS_ORAS_AUTH_FILE`. The materializer copi
 
 Implement `seed-pool.ts` and `checkout.ts`:
 
-- each `AgentWorkspaceProvider` instance owns one seed pool, one request-resolution map, and all paths created beneath its private runtime root;
+- each `WorkspaceProvider` instance owns one seed pool, one request-resolution map, and all paths created beneath its private runtime root;
 - concurrent calls for one canonical request share one resolution promise;
 - the first successful commit/digest is pinned for that request until provider cleanup, even if the remote ref or tag moves;
 - requests that resolve to one manifest share one seed preparation promise;
@@ -547,7 +550,7 @@ Tests cover additions, modifications, deletions, binary files, mode changes, sym
 
 ### Changes
 
-Implement a clean public-SDK-based provider in `provider-copilot-sdk`.
+Implement a clean public-SDK-based provider under `provider/src/copilot/`.
 
 ### Implementation guidance
 
@@ -570,6 +573,7 @@ Keep the provider and SDK runner responsibilities separate:
 - validate the complete request before dynamically importing `@github/copilot-sdk`;
 - create `CopilotClient` with its TCP runtime and the validated working directory;
 - create one session with model, reasoning, provider-routing, and permission settings;
+- delegate session execution to a shared `runCopilotSession` runtime used by both standalone and composed modes;
 - normalize SDK events into bounded protocol event frames;
 - extract the final assistant text and usage without exposing raw credentials;
 - disconnect the session, then call client `stop`; call `forceStop` if normal cleanup fails; and
@@ -602,19 +606,19 @@ The provider must:
 - redact configured secrets from output, errors, metadata, stderr, and spans; and
 - return structured cleanup state on success and failure.
 
-Export `CopilotSdkProvider`, `CopilotSdkProvider as Provider`, and the default implementation. Build it only from public SDK contracts and the self-contained invariants above.
+Export `CopilotSdkProvider` as a named package export. `Provider` and the default export remain reserved for `WorkspaceProvider`. Build only from public SDK contracts and the self-contained invariants above.
 
 ### Verification
 
 - Unit tests use a fake SDK runner for success, SDK error, malformed protocol, timeout, cancellation, signal escalation, large output, and redaction.
-- A packed-package smoke project loads `package:@allagents/promptfoo-provider-copilot-sdk:Provider` through stock Promptfoo.
+- A packed-package smoke project installs the exact optional SDK peer and loads `package:@allagents/promptfoo-provider:CopilotSdkProvider` through stock Promptfoo.
 - An opt-in credentialed test runs the public Copilot SDK but is not required for forked pull requests.
 
-## Phase 8: Agent workspace provider
+## Phase 8: Workspace provider and delegate adapters
 
 ### Changes
 
-Implement `AgentWorkspaceProvider` and its process-isolated `delegate-runner` in `provider-agent`.
+Implement `WorkspaceProvider`, the process-isolated `delegate-runner`, and the three delegate adapters in `provider`.
 
 Constructor responsibilities:
 
@@ -622,7 +626,7 @@ Constructor responsibilities:
 - extract and realpath Promptfoo's loader-injected `basePath` before validating public config, and keep it only in the internal constructor envelope;
 - initialize one owned workspace seed pool;
 - resolve only the fixed runtime input channels;
-- reject nested self-delegation and unknown agent IDs; and
+- reject nested self-delegation and delegate IDs without registered adapters; and
 - reject reserved path, session, environment-inheritance, and acquisition-credential fields at every authored layer.
 
 For each `callApi`:
@@ -631,7 +635,7 @@ For each `callApi`:
 2. obtain the immutable seed;
 3. create a unique checkout;
 4. merge only allowed delegate fields from constructor and prompt config, validate again, and inject the validated absolute checkout path as `working_dir` last;
-5. start the delegate runner as a process group with the minimal platform environment plus explicit `agent.env`;
+5. start the delegate runner as a process group with the minimal platform environment plus explicit `delegate.env`;
 6. send a versioned JSON-lines request containing `PromptWire` (`id`, `raw`, `template`, `display`, `label`, `provider`, and `config: {}`) plus `vars`, `debug`, JSON-safe test metadata, cache flags, tracing fields, evaluation/test IDs, and row/prompt/repeat indices;
 7. forward cancellation, enforce the wrapper timeout, await delegate cleanup, and terminate the runner process group before continuing;
 8. collect filesystem facts whether the delegate succeeds or returns an error;
@@ -645,18 +649,17 @@ Protocol v1 reserves stdout for newline-delimited frames with `{ version: 1, req
 
 The child receives `traceparent` and `tracestate` and exports spans through explicitly allowlisted OpenTelemetry environment/config; no in-memory tracer or cache callback crosses the boundary. Protocol stderr is separate from stdout, bounded, and redacted before logging or response construction. Wrapper response caching remains disabled.
 
-The runner receives trusted `basePath` separately from public config and supplies it to `loadApiProvider` for peer/SDK resolution even when the checkout lives outside the config directory. Before serialization, the parent folds the allowed prompt-level `agent.config` override into the validated effective constructor config and clears `PromptWire.config`. It strips prompt functions, prompt-level provider objects, and every process-local context field; supported delegates receive only the DTO fields above.
+The runner receives trusted `basePath` separately from public config and supplies it to `loadApiProvider` for peer/SDK resolution even when the checkout lives outside the config directory. Before serialization, the parent folds the allowed prompt-level `delegate.config` override into the validated effective constructor config and clears `PromptWire.config`. It strips prompt functions, prompt-level provider objects, and every process-local context field; supported delegates receive only the DTO fields above.
 
-Delegate runner behavior:
+Delegate adapters implement one internal interface that validates authored config, binds the owned checkout, constructs the delegate, and declares cleanup requirements. The initial adapter registry is closed:
 
-- call Promptfoo's public `loadApiProvider` for Codex and Claude;
-- dynamically import the optional packaged Copilot provider for `copilot-sdk`, returning an actionable configuration error when it is not installed;
-- run with only essential platform variables and explicit `agent.env`, so Claude's inheritance of its own `process.env` remains contained;
-- omit process-local context fields (`filters`, `getCache`, `logger`, and `originalProvider`) only after compatibility tests prove the supported delegates do not consume them, and reject non-serializable values inside the wire-safe subset;
-- preserve delegate output, error, usage, raw response, cache metadata, labels, and tracing context; and
-- return a final response only after native provider cleanup settles.
+- Codex and Claude adapters call Promptfoo's public `loadApiProvider`;
+- the Copilot adapter invokes the shared `runCopilotSession` runtime inside the existing delegate runner, never constructs `CopilotSdkProvider`, and never creates a nested detached process group;
+- all adapters run with only essential platform variables and explicit `delegate.env`;
+- every adapter rejects provider-specific paths, session persistence, and environment inheritance that would weaken the workspace contract; and
+- every adapter preserves delegate output, error, usage, raw response, cache metadata, labels, and tracing context, returning only after native cleanup settles.
 
-Export `AgentWorkspaceProvider`, `AgentWorkspaceProvider as Provider`, and the default implementation.
+Export `WorkspaceProvider`, `WorkspaceProvider as Provider`, `CopilotSdkProvider`, and `WorkspaceProvider` as the default.
 
 ### Verification
 
@@ -665,13 +668,14 @@ Export `AgentWorkspaceProvider`, `AgentWorkspaceProvider as Provider`, and the d
 - Every delegate receives the contained checkout path at final precedence and receives no sibling or seed path through provider configuration.
 - Timeout and cancellation tests for every delegate assert the runner process group and any descendants are gone before `callApi` returns.
 - Protocol tests cover abort before and during execution, malformed and oversized frames, duplicate terminal frames, bounded stderr, redaction, trace-context propagation, child cleanup, and forced process-group escalation.
+- Killing the outer delegate runner while a noncooperative Copilot runtime child is active leaves no descendant process.
 - Base-path tests run with process cwd, Promptfoo config directory, installed package directory, and workspace root all different; native SDK resolution still uses the trusted config base while every delegate receives the absolute checkout.
 - Prompt DTO tests cover function-backed prompts and prompt configs containing a live provider object without serializing either object; a prompt-level model override reaches the delegate through its validated constructor config while `PromptWire.config` remains empty.
 - Two concurrent calls prove distinct workspaces and evidence.
 - A delegate-authored `metadata.allagents` namespace returns an explicit collision error rather than being overwritten.
 - A delayed model-grade simulation consumes finalized evidence after both checkouts are gone.
 - Delegate failure, evidence failure, timeout, cancellation, and cleanup failure produce explicit results and no leaked process, checkout, staging path, or seed.
-- Packed-package smoke tests load `package:@allagents/promptfoo-provider-agent:Provider` through stock Promptfoo.
+- Packed-package smoke tests load `package:@allagents/promptfoo-provider:Provider` through stock Promptfoo.
 
 ## Phase 9: Examples and Promptfoo compatibility
 
@@ -692,13 +696,13 @@ evaluateOptions:
   cache: false
 ```
 
-Add a compatibility matrix for each supported Promptfoo minor. Tests install packed package tarballs into a clean temporary project with that Promptfoo version and run `promptfoo validate` plus a deterministic fake-delegate evaluation.
+Add a compatibility matrix for each supported Promptfoo minor. A clean temporary project installs the packed tarball without the optional Copilot peer, runs `promptfoo validate`, imports `default`, `Provider`, `WorkspaceProvider`, and `CopilotSdkProvider`, verifies alias identity, and confirms Copilot calls return the actionable missing-peer error. Keep fake delegate adapters internal to contract tests; the packed public interface has no generic test delegate.
 
 ### Verification
 
 - No example imports repository source files directly.
 - All examples resolve providers through `package:` identifiers.
-- The compatibility matrix fails on public loader or provider-contract drift.
+- The compatibility matrix fails on package loading, export identity, validation, or supported provider-construction drift.
 - Examples contain no live credentials and use local fixtures by default.
 
 ## Phase 10: Extension and assertion preparation
@@ -727,19 +731,20 @@ The first assertion PR includes a stock-Promptfoo example using `package:` direc
 ### Changes
 
 1. Confirm npm scope ownership and trusted-publisher configuration.
-2. Publish release candidates under a `next` dist-tag.
-3. Install both packages from the public registry into a clean smoke project.
-4. Run packed and registry-installed compatibility suites.
-5. Publish stable `1.0.0` releases with provenance.
-6. Announce the exact supported Promptfoo range, Node version, ORAS requirement, config schema, and evidence limits.
-7. Update downstream consumer documentation to install the public packages rather than copy provider implementations.
+2. Publish a release candidate under a `next` dist-tag.
+3. In smoke project A, install only the provider package; verify `Provider`, `WorkspaceProvider`, default, and `CopilotSdkProvider` export identity plus actionable missing-peer behavior.
+4. In smoke project B, install the provider package and exact `@github/copilot-sdk` peer; run direct `CopilotSdkProvider` and composed `copilot-sdk` smoke cases.
+5. Run packed and registry-installed compatibility suites.
+6. Publish stable `1.0.0` with provenance.
+7. Announce the exact supported Promptfoo range, Node version, ORAS requirement, optional Copilot peer, config schema, and evidence limits.
+8. Update downstream consumer documentation to install the public package rather than copy provider implementations.
 
 ### Verification
 
-- npm displays provenance for both packages.
+- npm displays provenance for the package.
 - `npm view` shows the expected repository, license, exports, engines, peer dependencies, and dist-tags.
-- A fresh project can run both documented `package:...:Provider` references.
-- Published tarballs contain no fixtures, credentials, source maps with private paths, or private repository references.
+- Fresh smoke projects prove both the no-peer and exact-peer installation paths.
+- The published tarball contains no fixtures, credentials, source maps with private paths, or private repository references.
 
 ## Required quality gates
 
@@ -756,18 +761,18 @@ bun run pack:check
 
 The release candidate additionally runs:
 
-- packed-package stock-Promptfoo validation;
+- packed-package stock-Promptfoo validation and export-identity checks without the optional Copilot peer;
 - concurrent workspace isolation E2E;
 - Git provenance E2E;
 - OCI digest/authentication E2E against a disposable registry;
-- Copilot protocol and cancellation E2E with a fake runner; and
+- Copilot protocol and cancellation E2E with a fake runner, including forced outer-runner death; and
 - credentialed live-provider smoke tests when organization secrets are available.
 
 ## Completion criteria
 
-- Both provider packages are public and installable from npm with provenance.
-- Stock Promptfoo loads each package through its documented `:Provider` export.
-- Agent workspace provider calls original Promptfoo Codex and Claude providers and the AllAgents Copilot provider.
+- The provider package is public and installable from npm with provenance.
+- Stock Promptfoo loads `Provider` and `CopilotSdkProvider` from the package through their documented named exports.
+- `WorkspaceProvider` calls Promptfoo's original Codex and Claude providers and the package-local Copilot provider through closed delegate adapters.
 - Git and OCI inputs produce immutable provenance and private per-call checkouts.
 - Concurrent calls share no writable filesystem objects; mutation through one checkout cannot change its seed or sibling checkouts.
 - Evidence remains available after cleanup and is safe for deferred grading.

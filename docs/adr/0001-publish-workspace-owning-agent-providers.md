@@ -1,4 +1,4 @@
-# ADR 0001: Publish workspace-owning Promptfoo agent providers
+# ADR 0001: Publish a workspace-owning Promptfoo provider package
 
 - Status: Proposed
 - Date: 2026-09-29
@@ -25,54 +25,59 @@ Promptfoo 0.122.0 publicly exports `loadApiProvider`, and package providers can 
 
 Create the public repository `allagentsdev/promptfoo-integrations` as a Bun workspace that publishes independently versioned npm integrations.
 
-The initial public packages are:
+The initial public package is `@allagents/promptfoo-provider`. It exports:
 
-- `@allagents/promptfoo-provider-agent` — the recommended workspace-owning provider wrapper;
-- `@allagents/promptfoo-provider-copilot-sdk` — the lower-level Copilot SDK provider for callers that already own a workspace.
+- `WorkspaceProvider` — the recommended workspace-owning provider;
+- `WorkspaceProvider as Provider` — the stable short alias used by Promptfoo package references; and
+- `CopilotSdkProvider` — the lower-level Copilot SDK provider for callers that already own a workspace.
 
 The repository may later publish:
 
 - `@allagents/promptfoo-extensions`;
 - `@allagents/promptfoo-assertions`.
 
-Shared workspace implementation begins as a private workspace package. Its runtime and declaration output is bundled into `@allagents/promptfoo-provider-agent`; the published manifest has no dependency on the private package. It becomes a public package only after a second external consumer requires a supported API.
+Shared workspace implementation begins as a private workspace package. Its runtime and declaration output is bundled into `@allagents/promptfoo-provider`; the published manifest has no dependency on the private package. It becomes public only after a second external consumer requires a supported interface.
 
 ### Public provider references
 
-Each provider package exports its descriptive implementation class and a stable `Provider` alias:
+The package exports descriptive class names, the workspace provider as `Provider`, and the workspace provider as the default:
 
 ```ts
+export class WorkspaceProvider {
+  // implementation
+}
+
 export class CopilotSdkProvider {
   // implementation
 }
 
-export { CopilotSdkProvider as Provider };
-export default CopilotSdkProvider;
+export { WorkspaceProvider as Provider };
+export default WorkspaceProvider;
 ```
 
-Promptfoo configurations use the short alias required by the current package syntax:
+The workspace-owning provider is:
 
 ```yaml
 providers:
-  - id: package:@allagents/promptfoo-provider-agent:Provider
+  - id: package:@allagents/promptfoo-provider:Provider
 ```
 
-and, for direct Copilot use:
+Direct Copilot use selects the named export:
 
 ```yaml
 providers:
-  - id: package:@allagents/promptfoo-provider-copilot-sdk:Provider
+  - id: package:@allagents/promptfoo-provider:CopilotSdkProvider
 ```
 
-The implementation class names remain descriptive in TypeScript, stack traces, and generated declarations. `:default` is not the documented convention because named `Provider` exports are explicit and stable across ESM/CommonJS interop.
+Named exports keep TypeScript, stack traces, and generated declarations descriptive. The default is not the documented Promptfoo convention because explicit named exports are stable across ESM/CommonJS interop.
 
 The wrapper configuration is closed. A representative complete configuration is:
 
 ```yaml
 providers:
-  - id: package:@allagents/promptfoo-provider-agent:Provider
+  - id: package:@allagents/promptfoo-provider:Provider
     config:
-      agent:
+      delegate:
         id: openai:codex-sdk
         config:
           model: gpt-5.3-codex
@@ -95,11 +100,11 @@ providers:
       timeoutMs: 900000
 ```
 
-`agent` is a discriminated union for the three supported IDs. Each delegate has an explicit field allowlist; the initial release excludes extra directories, session reuse, settings/plugin discovery, executable overrides, arbitrary native passthroughs, environment inheritance, and function-valued hooks. Prompt-level configuration may override only fields under `agent.config`. The wrapper validates the merged allowlisted config and injects its validated absolute checkout path as `working_dir` last. The accompanying implementation plan defines the complete TypeScript schema and precedence rules.
+`delegate` is a discriminated union for the three supported IDs. Each delegate has an internal adapter and an explicit field allowlist; the initial release excludes extra directories, session reuse, settings/plugin discovery, executable overrides, arbitrary native passthroughs, environment inheritance, and function-valued hooks. Prompt-level configuration may override only fields under `delegate.config`. The wrapper validates the merged allowlisted config and injects its validated absolute checkout path as `working_dir` last. The accompanying implementation plan defines the complete TypeScript schema and precedence rules.
 
-### Agent workspace provider
+### Workspace provider
 
-The public `AgentWorkspaceProvider` owns one complete provider call:
+The public `WorkspaceProvider` owns one complete provider call:
 
 1. validate a workspace specification containing credential-free Git and OCI source requests;
 2. resolve each mutable request once per provider instance to an immutable Git commit or OCI manifest digest;
@@ -122,13 +127,13 @@ The initial delegate allowlist is deliberately closed:
 - `anthropic:claude-agent-sdk`;
 - `copilot-sdk`.
 
-Inside the isolated runner, the wrapper uses Promptfoo's public `loadApiProvider` API for Codex and Claude and dynamically loads `@allagents/promptfoo-provider-copilot-sdk` for Copilot. The Copilot package is an optional peer dependency of the agent package: selecting `copilot-sdk` without installing it returns an actionable configuration error, while Codex- and Claude-only consumers do not install the Copilot SDK. The runner provides a minimal process environment, then adds only explicitly configured delegate variables; acquisition credentials are never inherited. Arbitrary Promptfoo providers are unsupported until they demonstrate the same path, serialization, cancellation, and cleanup contract.
+Inside the isolated runner, the wrapper uses Promptfoo's public `loadApiProvider` API for Codex and Claude. The Copilot adapter calls the package's shared Copilot session runtime directly inside that existing runner; it does not construct `CopilotSdkProvider` or create a second detached process group. Standalone `CopilotSdkProvider` wraps the same session runtime in its own runner. `@github/copilot-sdk` is an optional peer dependency: selecting `copilot-sdk` or directly calling `CopilotSdkProvider` without installing it returns an actionable configuration error, while Codex- and Claude-only consumers do not install the SDK. Arbitrary Promptfoo providers are unsupported. A new delegate requires an adapter that proves the same path, serialization, cancellation, process-tree, and cleanup contract.
 
-The delegate runner protocol is versioned JSON Lines. A v1 request contains a `PromptWire` DTO (`id`, `raw`, `template`, `display`, `label`, `provider`, and `config: {}`) plus only the wire-safe context fields consumed by supported delegates: variables, debug state, JSON-safe test metadata, cache flags, W3C tracing fields, evaluation/test IDs, and row/prompt/repeat indices. The parent folds the allowed prompt-level `agent.config` override into the validated effective delegate config before serialization, then supplies that config only to the delegate constructor. Prompt functions, live provider objects, `filters`, `getCache`, `logger`, `originalProvider`, and live `AbortSignal` objects never cross the boundary. The parent sends an `abort` control frame; the child owns an `AbortController`, calls native provider cleanup, and emits exactly one bounded `response` or `fatal` frame before exit. Malformed, duplicate-terminal, oversized, and non-serializable frames fail closed.
+The delegate runner protocol is versioned JSON Lines. A v1 request contains a `PromptWire` DTO (`id`, `raw`, `template`, `display`, `label`, `provider`, and `config: {}`) plus only the wire-safe context fields consumed by supported delegates: variables, debug state, JSON-safe test metadata, cache flags, W3C tracing fields, evaluation/test IDs, and row/prompt/repeat indices. The parent folds the allowed prompt-level `delegate.config` override into the validated effective delegate config before serialization, then supplies that config only to the delegate constructor. Prompt functions, live provider objects, `filters`, `getCache`, `logger`, `originalProvider`, and live `AbortSignal` objects never cross the boundary. The parent sends an `abort` control frame; the child owns an `AbortController`, calls native provider cleanup, and emits exactly one bounded `response` or `fatal` frame before exit. Malformed, duplicate-terminal, oversized, and non-serializable frames fail closed.
 
 Promptfoo response caching is disabled for the wrapper. The child receives `traceparent` and `tracestate` and exports spans through the explicitly configured OpenTelemetry exporter; no in-memory cache or tracer object crosses the process boundary. Protocol stderr is bounded, captured separately from stdout, and redacted before logging or returning an error.
 
-`promptfoo` is a peer dependency of both public provider packages and remains external to every bundle. The packages must not bundle another Promptfoo copy because duplicated registries, tracing state, caches, and runtime types would be incorrect.
+`promptfoo` is a peer dependency and remains external to every bundle. The package must not bundle another Promptfoo copy because duplicated registries, tracing state, caches, and runtime types would be incorrect.
 
 ### Workspace source contract
 
@@ -258,7 +263,7 @@ The lower-level `CopilotSdkProvider` owns:
 - usage and session metadata; and
 - response redaction.
 
-It accepts an existing `working_dir`; it does not resolve Git or OCI sources. The agent workspace provider composes it with the shared workspace runtime.
+It accepts an existing `working_dir`; it does not resolve Git or OCI sources. The workspace provider composes it with the shared workspace runtime.
 
 The implementation must follow public Copilot SDK contracts and the provider invariants in this decision. Prior implementations may inform edge cases, but they are neither dependencies nor normative specifications.
 
@@ -286,7 +291,7 @@ Direct `node_modules` file paths are not a supported contract. The project shoul
 
 The repository is named `promptfoo-integrations`, not `promptfoo-recipes`, because downstream projects execute its packages as production dependencies. Copyable configurations belong under `examples/`.
 
-Packages target Node.js 22.22.0 or newer on Linux and macOS; the initial release is POSIX-only so detached process groups can be terminated reliably. Bun manages workspaces, tests, builds, and release scripts. Public packages ship ESM, CommonJS, and declaration entrypoints. The agent package bundles the private workspace core into both module formats and declaration output while externalizing `promptfoo` and the optional Copilot peer. Releases use GitHub trusted publishing with npm provenance and never require a long-lived npm token.
+The package targets Node.js 22.22.0 or newer on Linux and macOS; the initial release is POSIX-only so detached process groups can be terminated reliably. Bun manages workspaces, tests, builds, and release scripts. The package ships ESM, CommonJS, and declaration entrypoints. It bundles the private workspace core while externalizing `promptfoo` and optional `@github/copilot-sdk`. Releases use GitHub trusted publishing with npm provenance and never require a long-lived npm token.
 
 Provider configuration, provider metadata, workspace manifests, evidence shapes, and runtime environment variable names are versioned public contracts. Breaking changes require a major version.
 
@@ -299,7 +304,7 @@ Provider configuration, provider metadata, workspace manifests, evidence shapes,
 - Every call receives a private checkout, allowing safe Promptfoo row concurrency.
 - Evidence is captured from a quiescent checkout, finalized after cleanup, and remains stable for deferred grading.
 - Source provenance and agent execution are presented through one deep provider interface.
-- Provider packages are usable from stock Promptfoo without an authoring compiler.
+- The provider package is usable from stock Promptfoo without an authoring compiler.
 - Future extensions and assertions can share the same repository and release infrastructure.
 
 ### Costs
@@ -307,7 +312,7 @@ Provider configuration, provider metadata, workspace manifests, evidence shapes,
 - The wrapper depends on Promptfoo's public provider-loading behavior and must test each supported Promptfoo minor.
 - Workspace preparation adds filesystem and source-resolution work around every evaluation job.
 - OCI users must provide a supported ORAS executable in the initial release.
-- The provider must enforce evidence bounds, cleanup, and credential separation across three delegates.
+- The provider must enforce evidence bounds, cleanup, and credential separation across three delegate adapters.
 - A provider wrapper adds one stack layer when diagnosing delegated calls.
 
 ### Risks and mitigations
@@ -315,7 +320,7 @@ Provider configuration, provider metadata, workspace manifests, evidence shapes,
 - **Credential exposure:** Git and OCI acquisition credentials enter through fixed runtime channels used only by source subprocesses; the process-isolated delegate runner starts from an allowlisted environment and is tested against leakage.
 - **Seed mutation:** seed paths are never sent to delegates, seeds are read-only, integrity is verified before cloning, and writable hardlinks are prohibited. This prevents accidental cross-call mutation; hostile same-user filesystem traversal remains out of scope.
 - **Provider drift:** packed-package integration tests run against every supported Promptfoo version.
-- **Recursive delegation:** the wrapper rejects itself and unrecognized provider IDs as delegates.
+- **Recursive delegation:** the wrapper rejects itself and delegate IDs without registered adapters.
 - **Silent cleanup failure:** cleanup state is included in metadata and cleanup failure returns a provider error.
 - **Unbounded artifacts:** evidence collection has explicit limits and truncation markers.
 
@@ -331,15 +336,15 @@ Rejected. Only Copilot is missing. Reimplementing Codex and Claude would duplica
 
 ### Put Git and OCI acquisition directly inside the Copilot provider
 
-Rejected. Source materialization is shared by every delegate. It remains a separate internal module composed by the agent workspace provider.
+Rejected. Source materialization is shared by every delegate. It remains a separate internal module composed by the workspace provider.
 
 ### Build a remote execution gateway
 
 Rejected for the initial scope. A network service, durable queue, tenancy, recovery protocol, and remote artifact API are unnecessary for disposable local and CI jobs. They may be reconsidered only for concrete remote-execution or hostile multi-tenant requirements.
 
-### Publish one package containing every integration
+### Publish separate workspace and Copilot provider packages
 
-Rejected initially. Separate provider packages permit direct low-level Copilot use, independent compatibility releases, and an optional Copilot dependency for wrapper consumers that use only Promptfoo's native delegates. The repository remains shared.
+Rejected initially. One package can expose the workspace provider as `Provider` and direct Copilot as `CopilotSdkProvider`, while keeping `@github/copilot-sdk` optional. This removes a package, release stream, and self-peer dependency without widening the delegate contract.
 
 ### Use a separate repository for extensions
 
