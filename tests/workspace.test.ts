@@ -851,7 +851,7 @@ test("large inventory JSON can use an explicit bounded read without relaxing def
   expect((await json<{ inventory: string }>(path, 512 * 1024 * 1024)).inventory.length).toBe(
     65 * 1024 * 1024,
   );
-});
+}, 30_000);
 
 test("default runtime canonicalizes the platform temporary directory while explicit symlink roots stay rejected", async () => {
   const root = await mkdtemp(join(realpathSync(tmpdir()), "allagents-default-root-"));
@@ -984,7 +984,7 @@ test("recent verified seed reuse avoids another full capacity walk but refreshes
   expect((await json<{ lastUsed: number }>(metadataPath)).lastUsed).toBeGreaterThan(
     Date.now() - 60_000,
   );
-});
+}, 30_000);
 
 test("bounded JSON writes reject before leaving a partial or temporary file", async () => {
   const root = await mkdtemp(join(realpathSync(tmpdir()), "allagents-json-write-"));

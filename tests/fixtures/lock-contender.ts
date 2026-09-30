@@ -1,8 +1,8 @@
 import { mock } from "bun:test";
 import * as childProcess from "node:child_process";
 import { createHash } from "node:crypto";
-import { fstatSync, realpathSync, statSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { fstatSync, statSync } from "node:fs";
+import { readFile, realpath } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 
 const original = { ...childProcess };
@@ -13,7 +13,7 @@ const admission = statSync(admissionPath);
 const windowsLockName =
   process.platform === "win32"
     ? `Global\\allagents-cache-lock-${createHash("sha256")
-        .update(join(realpathSync(dirname(admissionPath)), basename(admissionPath)).toLowerCase())
+        .update(join(await realpath(dirname(admissionPath)), basename(admissionPath)).toLowerCase())
         .digest("hex")}`
     : undefined;
 // Scale only the native backend's wait clock. The competing lock and all
