@@ -505,14 +505,14 @@ export async function protect(
         const stat = await lstat(path);
         if (stat.isSymbolicLink()) return [];
         if (stat.isDirectory()) {
-          await chmod(path, writable ? 0o700 : 0o555);
+          await chmod(path, writable ? 0o700 : stat.mode & ~0o222);
           return (await readdir(path)).map((name) => join(path, name));
         }
         // Git never edits an existing loose object or pack file. Its object
         // directories remain writable for newly created objects, while keeping
         // existing object bytes read-only avoids OverlayFS metadata copy-ups.
         if (writable && preserveGitObjects && path.startsWith(`${gitObjects}${sep}`)) return [];
-        await chmod(path, (stat.mode & 0o111 ? 0o555 : 0o444) | (writable ? 0o200 : 0));
+        await chmod(path, (stat.mode & ~0o222) | (writable ? 0o200 : 0));
         return [];
       }),
     );
