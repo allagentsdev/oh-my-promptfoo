@@ -1,7 +1,9 @@
 name: Validate other platforms
 on:
   workflow_dispatch:
-  pull_request:
+  schedule:
+    # Monday 03:17 UTC; use workflow_dispatch for release-time checks.
+    - cron: '17 3 * * 1'
 permissions:
   contents: read
 jobs:
