@@ -420,10 +420,20 @@ async function windowsTreeAccess(root: string, writable: boolean): Promise<void>
       return sid;
     });
   const sid = await windowsIdentity;
-  // Explicit inheritable owner ACE per inode; no chmod/write-open on Git objects.
-  const grant = `*${sid}:(OI)(CI)${writable ? "F" : "RX"}`;
-  await run("icacls.exe", [root, "/grant:r", grant, "/T", "/L", "/Q"]);
+  // Inheritable (OI)(CI) grants alone give existing files no effective ACE.
+  // Keep explicit rights on every inode before removing inherited permissions;
+  // directories also need inheritable rights for future Git objects.
+  await run("icacls.exe", [root, "/grant:r", `*${sid}:F`, "/T", "/L", "/Q"]);
   await run("icacls.exe", [root, "/inheritance:r", "/T", "/L", "/Q"]);
+  if (!writable) await run("icacls.exe", [root, "/grant:r", `*${sid}:RX`, "/T", "/L", "/Q"]);
+  await run("icacls.exe", [
+    root,
+    "/grant",
+    `*${sid}:(OI)(CI)${writable ? "F" : "RX"}`,
+    "/T",
+    "/L",
+    "/Q",
+  ]);
 }
 
 /** Existing objects stay read-only, while object directories accept new Git objects. */
