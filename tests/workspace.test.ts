@@ -25,6 +25,7 @@ import {
   atomicJson,
   exists,
   inventory,
+  inventoryWithAllocation,
   isMounted,
   json,
   MARKER,
@@ -136,6 +137,9 @@ test("bounded inventory retains depth-first order and allocated blocks match ino
     0,
   );
   expect(await allocated(root)).toBe(expected);
+  const combined = await inventoryWithAllocation(root);
+  expect(combined.entries).toEqual(entries);
+  expect(combined.allocatedBytes).toBe(expected);
 });
 test("writable Git views retain immutable objects while allowing new Git objects", async () => {
   const root = await mkdtemp(join(realpathSync(tmpdir()), "allagents-git-object-modes-"));
