@@ -61,6 +61,9 @@ export function manifestDigest(sources: ResolvedSource[]): Digest {
   return `sha256:${hash(canonicalJson({ schemaVersion: 1, sources: identities }))}`;
 }
 const MAX_INVENTORY_JSON_BYTES = 512 * 1024 ** 2;
+// Cache age is measured in days; refreshing a recently verified entry on every
+// row would repeatedly traverse a large published tree just to update recency.
+const LAST_USED_REFRESH_MS = 60 * 60 * 1000;
 
 export class SeedCache {
   private readonly verified = new Map<Digest, SeedMetadata>();
@@ -224,10 +227,11 @@ export class SeedCache {
     value: unknown,
     digest: Digest,
     checkoutKey?: string,
+    reservationAlreadyHeld = false,
   ): Promise<void> {
     const bytes = Buffer.byteLength(JSON.stringify(value));
     if (bytes > MAX_INVENTORY_JSON_BYTES) throw new Error("Inventory metadata exceeds write bound");
-    await this.admit(bytes + 1024 ** 2, digest, checkoutKey);
+    if (!reservationAlreadyHeld) await this.admit(bytes + 1024 ** 2, digest, checkoutKey);
     await atomicJson(path, value, MAX_INVENTORY_JSON_BYTES);
   }
   async prepare(
@@ -247,13 +251,22 @@ export class SeedCache {
           async () => {
             signal?.throwIfAborted();
             if (await exists(join(this.root, "published", this.key(digest)))) {
+              const previouslyVerified = this.verified.has(digest);
               const metadata = await this.verifiedSeed(digest);
-              metadata.lastUsed = Date.now();
-              await this.writeMetadata(
-                join(this.root, "published", this.key(digest), "metadata.json"),
-                metadata,
-                digest,
-              );
+              const now = Date.now();
+              if (
+                !previouslyVerified ||
+                !Number.isSafeInteger(metadata.lastUsed) ||
+                metadata.lastUsed > now ||
+                now - metadata.lastUsed >= LAST_USED_REFRESH_MS
+              ) {
+                metadata.lastUsed = now;
+                await this.writeMetadata(
+                  join(this.root, "published", this.key(digest), "metadata.json"),
+                  metadata,
+                  digest,
+                );
+              }
               if (lease) await this.writeLease(lease);
               return metadata;
             }
@@ -291,7 +304,15 @@ export class SeedCache {
                 createdAt: Date.now(),
                 lastUsed: Date.now(),
               };
-              await this.writeMetadata(join(staging, "metadata.json"), metadata, digest);
+              // The initial admission already reserved the maximum inventory
+              // document and its temporary atomic replacement.
+              await this.writeMetadata(
+                join(staging, "metadata.json"),
+                metadata,
+                digest,
+                undefined,
+                true,
+              );
               if ((await allocated(staging)) > reservation)
                 throw new Error("Seed metadata exceeds physical staging reservation");
               const { unlink } = await import("node:fs/promises");
@@ -433,6 +454,7 @@ export class SeedCache {
                   },
                   record.digest,
                   key,
+                  true,
                 );
                 const { unlink } = await import("node:fs/promises");
                 await unlink(join(stage, "staging.json"));

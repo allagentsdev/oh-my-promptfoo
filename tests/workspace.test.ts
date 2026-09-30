@@ -822,6 +822,47 @@ test("seed reuse reserves the atomic inventory replacement before writing and pr
   ).toEqual(["metadata.json", "tree"]);
 });
 
+test("recent verified seed reuse avoids another full capacity walk but refreshes stale recency", async () => {
+  const { SeedCache } = await import("../packages/workspace-core/src/seed-cache.ts");
+  const { DEFAULT_LIMITS } = await import("../packages/workspace-core/src/config.ts");
+  const f = await fixture();
+  const owner = manager(f.spec, f.channels);
+  const row = await owner.prepare();
+  const metadataPath = join(
+    f.channels.ALLAGENTS_CACHE_ROOT!,
+    "published",
+    row.manifestDigest.slice(7),
+    "metadata.json",
+  );
+  const metadata = await json<{ sources: typeof row.sources; lastUsed: number }>(metadataPath);
+  class CountingCache extends SeedCache {
+    sizeCalls = 0;
+    override async size(): Promise<number> {
+      this.sizeCalls++;
+      return super.size();
+    }
+  }
+  const cache = new CountingCache(f.channels.ALLAGENTS_CACHE_ROOT!);
+  await cache.initialize();
+  await cache.prepare(metadata.sources, DEFAULT_LIMITS, f.channels);
+  const initialWalks = cache.sizeCalls;
+  expect(initialWalks).toBeGreaterThan(0);
+  const current = await readFile(metadataPath, "utf8");
+  await cache.prepare(metadata.sources, DEFAULT_LIMITS, f.channels);
+  expect(cache.sizeCalls).toBe(initialWalks);
+  expect(await readFile(metadataPath, "utf8")).toBe(current);
+
+  await atomicJson(metadataPath, {
+    ...JSON.parse(current),
+    lastUsed: Date.now() - 2 * 60 * 60 * 1000,
+  });
+  await cache.prepare(metadata.sources, DEFAULT_LIMITS, f.channels);
+  expect(cache.sizeCalls).toBeGreaterThan(initialWalks);
+  expect((await json<{ lastUsed: number }>(metadataPath)).lastUsed).toBeGreaterThan(
+    Date.now() - 60_000,
+  );
+});
+
 test("bounded JSON writes reject before leaving a partial or temporary file", async () => {
   const root = await mkdtemp(join(realpathSync(tmpdir()), "allagents-json-write-"));
   temporary.push(root);
