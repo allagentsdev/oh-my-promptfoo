@@ -1,5 +1,6 @@
+import { lstatSync, statSync } from "node:fs";
 import { stat } from "node:fs/promises";
-import { isAbsolute } from "node:path";
+import { basename, dirname, isAbsolute, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { context as otelContext, propagation, trace } from "@opentelemetry/api";
 import { AsyncLocalStorageContextManager } from "@opentelemetry/context-async-hooks";
@@ -258,6 +259,54 @@ interface ClientLike {
   stop(): Promise<unknown>;
   forceStop(): Promise<unknown>;
 }
+interface SkillCall {
+  name: string;
+  path: string;
+  source: "read-tool";
+}
+
+function observedSkillRead(
+  toolName: string,
+  args: unknown,
+  workingDir: string,
+): SkillCall | undefined {
+  if (
+    !["read", "read_file", "view"].includes(toolName) ||
+    !args ||
+    typeof args !== "object" ||
+    Array.isArray(args)
+  )
+    return;
+  const fields = args as JsonObject;
+  const path = fields.path ?? fields.file_path ?? fields.filePath;
+  if (typeof path !== "string" || !path || basename(path) !== "SKILL.md") return;
+  const candidate = resolve(workingDir, path);
+  const skillDirectory = dirname(candidate);
+  const skillsDirectory = dirname(skillDirectory);
+  if (
+    basename(skillsDirectory) !== "skills" ||
+    ![".agents", ".claude", ".github"].includes(basename(dirname(skillsDirectory)))
+  )
+    return;
+  try {
+    const root = statSync(workingDir, { bigint: true });
+    if (root.ino === 0n) return;
+    let cursor = candidate;
+    let file = true;
+    while (true) {
+      const info = lstatSync(cursor, { bigint: true });
+      if (info.isSymbolicLink() || (file && !info.isFile())) return;
+      if (info.dev === root.dev && info.ino === root.ino)
+        return { name: basename(skillDirectory), path: candidate, source: "read-tool" };
+      const parent = dirname(cursor);
+      if (parent === cursor) return;
+      cursor = parent;
+      file = false;
+    }
+  } catch {
+    return;
+  }
+}
 async function runCopilot(frame: CallFrame, signal: AbortSignal): Promise<JsonObject> {
   const sdk = await import(pathToFileURL(resolvePeer(frame.basePath, "@github/copilot-sdk")).href);
   if (typeof sdk.CopilotClient !== "function")
@@ -291,6 +340,8 @@ async function runCopilot(frame: CallFrame, signal: AbortSignal): Promise<JsonOb
   let callError: unknown;
   const cleanupErrors: unknown[] = [];
   const tools = new Set<string>();
+  const skillReads = new Map<string, SkillCall>();
+  const skillCalls: SkillCall[] = [];
   const permissions = (frame.config.permissions ?? {}) as JsonObject;
   const approve = (request: JsonObject): JsonObject => {
     const allowed =
@@ -345,6 +396,10 @@ async function runCopilot(frame: CallFrame, signal: AbortSignal): Promise<JsonOb
         ) {
           if (tools.has(data.toolCallId)) throw new Error("Duplicate Copilot tool identity");
           tools.add(data.toolCallId);
+          if (!data.mcpServerName) {
+            const skillRead = observedSkillRead(data.toolName, data.arguments, frame.workingDir);
+            if (skillRead) skillReads.set(data.toolCallId, skillRead);
+          }
           emit({
             version: 1,
             type: "tool",
@@ -361,7 +416,10 @@ async function runCopilot(frame: CallFrame, signal: AbortSignal): Promise<JsonOb
           event.type === "tool.execution_complete" &&
           typeof data.toolCallId === "string" &&
           tools.delete(data.toolCallId)
-        )
+        ) {
+          const skillRead = skillReads.get(data.toolCallId);
+          skillReads.delete(data.toolCallId);
+          if (skillRead && data.success === true) skillCalls.push(skillRead);
           emit({
             version: 1,
             type: "tool",
@@ -369,6 +427,7 @@ async function runCopilot(frame: CallFrame, signal: AbortSignal): Promise<JsonOb
             id: data.toolCallId,
             ...(data.success === false ? { error: "Copilot tool failed" } : {}),
           });
+        }
       } catch (e) {
         sessionError = (e as Error).message;
         abort();
@@ -387,7 +446,10 @@ async function runCopilot(frame: CallFrame, signal: AbortSignal): Promise<JsonOb
         output,
         tokenUsage: usage,
         cost,
-        metadata: { copilot: { sdkVersion: "1.0.6", skillSupport: false } },
+        metadata: {
+          copilot: { sdkVersion: "1.0.6", skillSupport: true },
+          skillCalls,
+        },
       };
     }
   } catch (error) {
