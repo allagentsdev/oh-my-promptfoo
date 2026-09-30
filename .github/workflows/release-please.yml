@@ -22,7 +22,7 @@ jobs:
       issues: write
       pull-requests: write
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
       - uses: actions/setup-node@v7
@@ -171,7 +171,7 @@ jobs:
           mkdir -p "$RUNNER_TEMP/release-tools"
           cp scripts/sync-release-lock.ts "$RUNNER_TEMP/release-tools/sync-release-lock.ts"
           npm install --prefix "$RUNNER_TEMP/release-tools" --ignore-scripts --no-audit --no-fund --no-save jsonc-parser@3.3.1
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         if: steps.pr.outputs.branch != ''
         with:
           ref: ${{ steps.pr.outputs.branch }}
@@ -222,7 +222,7 @@ jobs:
       pull-requests: read
       id-token: write
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
           fetch-depth: 0
