@@ -1,7 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, readdir, realpath, rename, statfs } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
-import { acquisitionPhysicalReservation } from "./acquisition-budget.js";
+import {
+  acquisitionPhysicalReservation,
+  controlledAcquisitionPhysicalReservation,
+} from "./acquisition-budget.js";
 import { DEFAULT_LOCK_TIMEOUT_MS, withLock } from "./cache-lock.js";
 import { prepareProtectedCopy } from "./checkout.js";
 import { canonicalJson } from "./config.js";
@@ -275,7 +278,11 @@ export class SeedCache {
               acquisitionPhysicalReservation(sources, limits) +
               MAX_INVENTORY_JSON_BYTES +
               1024 ** 2;
-            await this.admit(reservation, digest);
+            const diskReservation =
+              controlledAcquisitionPhysicalReservation(limits) +
+              MAX_INVENTORY_JSON_BYTES +
+              1024 ** 2;
+            await this.admit(reservation, digest, undefined, diskReservation);
             const staging = join(this.root, "staging", randomUUID());
             await mkdir(staging, { mode: 0o700 });
             await atomicJson(join(staging, "staging.json"), {
@@ -553,7 +560,12 @@ export class SeedCache {
       result += await allocated(join(this.root, name));
     return result;
   }
-  private async admit(reservation: number, exclude?: Digest, checkoutKey?: string): Promise<void> {
+  private async admit(
+    reservation: number,
+    exclude?: Digest,
+    checkoutKey?: string,
+    diskReservation = reservation,
+  ): Promise<void> {
     if (reservation > CACHE_CEILING)
       throw new Error("Acquisition reservation exceeds 50 GiB cache ceiling");
     await this.collect(false, reservation, exclude, checkoutKey);
@@ -561,7 +573,7 @@ export class SeedCache {
     const disk = await statfs(this.root);
     if (
       current + reservation > CACHE_CEILING ||
-      reservation + 256 * 1024 ** 2 > Number(disk.bavail) * Number(disk.bsize)
+      diskReservation + 256 * 1024 ** 2 > Number(disk.bavail) * Number(disk.bsize)
     )
       throw new Error("Cache physical capacity reservation cannot fit");
   }
