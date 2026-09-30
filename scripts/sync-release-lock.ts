@@ -1,13 +1,18 @@
 import { readFile, writeFile } from "node:fs/promises";
+import { resolve } from "node:path";
 import { applyEdits, modify, type ParseError, parse } from "jsonc-parser";
 
 const workspacePath = "packages/promptfoo-integration";
-const root = JSON.parse(await readFile("package.json", "utf8"));
-const manifest = JSON.parse(await readFile(`${workspacePath}/package.json`, "utf8"));
+const projectRoot = resolve(process.argv[2] ?? process.cwd());
+const root = JSON.parse(await readFile(resolve(projectRoot, "package.json"), "utf8"));
+const manifest = JSON.parse(
+  await readFile(resolve(projectRoot, workspacePath, "package.json"), "utf8"),
+);
 if (root.version !== manifest.version)
   throw new Error(`Root version ${root.version} differs from package version ${manifest.version}`);
 
-const original = await readFile("bun.lock", "utf8");
+const lockPath = resolve(projectRoot, "bun.lock");
+const original = await readFile(lockPath, "utf8");
 const errors: ParseError[] = [];
 const lock = parse(original, errors, { allowTrailingComma: true });
 if (errors.length) throw new Error("Cannot update an invalid Bun lockfile");
@@ -25,5 +30,5 @@ if (workspace.version !== manifest.version) {
   const parsed = parse(updated, updatedErrors, { allowTrailingComma: true });
   if (updatedErrors.length || parsed.workspaces?.[workspacePath]?.version !== manifest.version)
     throw new Error("Failed to update the public workspace version in bun.lock");
-  await writeFile("bun.lock", updated);
+  await writeFile(lockPath, updated);
 }

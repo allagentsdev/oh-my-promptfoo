@@ -7,10 +7,16 @@ import { parse } from "jsonc-parser";
 
 const script = join(import.meta.dir, "..", "scripts", "sync-release-lock.ts");
 
-test("release version updates only the public Bun workspace and remains retry-safe", async () => {
+test("release lock sync updates only the public workspace without running project preloads", async () => {
   const root = await mkdtemp(join(tmpdir(), "allagents-release-lock-"));
+  const toolRoot = await mkdtemp(join(tmpdir(), "allagents-release-tools-"));
   try {
     await mkdir(join(root, "packages", "promptfoo-integration"), { recursive: true });
+    await writeFile(join(root, "bunfig.toml"), '[run]\npreload = ["./preload.js"]\n');
+    await writeFile(
+      join(root, "preload.js"),
+      `require("node:fs").writeFileSync(${JSON.stringify(join(root, "preload-ran"))}, "unsafe");\n`,
+    );
     await writeFile(join(root, "package.json"), JSON.stringify({ version: "1.1.0" }));
     await writeFile(
       join(root, "packages", "promptfoo-integration", "package.json"),
@@ -32,8 +38,10 @@ test("release version updates only the public Bun workspace and remains retry-sa
   },
 }\n`,
     );
-    const run = () => spawnSync(process.execPath, [script], { cwd: root, encoding: "utf8" });
+    const run = () =>
+      spawnSync(process.execPath, [script, root], { cwd: toolRoot, encoding: "utf8" });
     expect(run().status).toBe(0);
+    expect(await Bun.file(join(root, "preload-ran")).exists()).toBe(false);
     const updated = await readFile(lockPath, "utf8");
     const workspaces = parse(updated).workspaces;
     expect(workspaces["packages/promptfoo-integration"].version).toBe("1.1.0");
@@ -48,5 +56,6 @@ test("release version updates only the public Bun workspace and remains retry-sa
     expect(await readFile(lockPath, "utf8")).toBe(updated);
   } finally {
     await rm(root, { recursive: true, force: true });
+    await rm(toolRoot, { recursive: true, force: true });
   }
 });

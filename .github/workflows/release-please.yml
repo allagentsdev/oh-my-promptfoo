@@ -6,13 +6,19 @@ on:
 concurrency:
   group: release-please
   cancel-in-progress: false
+  queue: max
 permissions: {}
 jobs:
   release-please:
     runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
     timeout-minutes: 25
+    outputs:
+      pending_pr: ${{ steps.pr.outputs.number }}
+      current_released: ${{ steps.current.outputs.ready }}
     permissions:
       contents: write
+      actions: write
       issues: write
       pull-requests: write
     steps:
@@ -22,7 +28,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-      - name: Wait for the current version to be released
+      - name: Inspect the current release
         id: current
         env:
           GH_TOKEN: ${{ github.token }}
@@ -33,19 +39,29 @@ jobs:
           const root = JSON.parse(readFileSync('package.json', 'utf8'));
           const manifest = JSON.parse(readFileSync('packages/promptfoo-integration/package.json', 'utf8'));
           if (root.version !== manifest.version) throw Error('Root and public package versions differ');
-          const result = spawnSync('npm', ['view', `${manifest.name}@${manifest.version}`, 'version', '--json', '--registry=https://registry.npmjs.org'], { encoding: 'utf8' });
-          if (result.status !== 0) {
-            if (!/\bE404\b/.test(result.stderr)) throw Error(`npm view failed (${result.status}): ${result.stderr}`);
-            console.log(`${manifest.name}@${manifest.version} has not been published yet`);
+          const version = manifest.version;
+          const npm = spawnSync('npm', ['view', `${manifest.name}@${version}`, 'version', '--json', '--registry=https://registry.npmjs.org'], { encoding: 'utf8' });
+          if (npm.status !== 0 && !/\b(?:E404|ETARGET)\b/.test(`${npm.stdout}\n${npm.stderr}`))
+            throw Error(`npm view failed (${npm.status}): ${npm.stderr}`);
+          const published = npm.status === 0;
+          if (published && JSON.parse(npm.stdout) !== version) throw Error('Unexpected registry version');
+          const release = spawnSync('gh', ['release', 'view', `v${version}`, '--json', 'isDraft,tagName,targetCommitish'], { encoding: 'utf8' });
+          if (release.error) throw release.error;
+          if (release.status !== 0 && !/release not found|HTTP 404\b/i.test(release.stderr)) throw Error(`GitHub release lookup failed (${release.status}): ${release.stderr}`);
+          const found = release.status === 0 ? JSON.parse(release.stdout) : null;
+          if (found && found.tagName !== `v${version}`) throw Error('Unexpected GitHub release tag');
+          const publishedDraft = published && found?.isDraft === true;
+          const ready = published && found !== null;
+          if (version === '1.0.0' && !ready) {
+            console.log('The first 1.0.0 release must be published manually before Release Please starts');
             process.exit(0);
           }
-          if (JSON.parse(result.stdout) !== manifest.version) throw Error('Unexpected registry version');
-          const release = spawnSync('gh', ['release', 'view', `v${manifest.version}`, '--json', 'isDraft', '--jq', '.isDraft'], { encoding: 'utf8' });
-          if (release.status !== 0 || release.stdout.trim() !== 'false') throw Error('Current version needs a published GitHub release');
-          appendFileSync(process.env.GITHUB_OUTPUT, 'ready=true\n');
+          if (!published && found && !found.isDraft) throw Error('GitHub release was published before the npm version');
+          if (version !== '1.0.0' && published && !found) throw Error('npm version exists without a GitHub release');
+          appendFileSync(process.env.GITHUB_OUTPUT, `run_release=true\nversion=${version}\nready=${ready ? 'true' : 'false'}\npublished_draft=${publishedDraft ? 'true' : 'false'}\n`);
           JS
       - name: Ensure Release Please labels
-        if: steps.current.outputs.ready == 'true'
+        if: steps.current.outputs.run_release == 'true'
         env:
           GH_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN || github.token }}
         run: |
@@ -80,13 +96,53 @@ jobs:
             gh pr ready "$pr" --undo
           fi
       - name: Prepare version and changelog pull request
-        if: steps.current.outputs.ready == 'true'
+        if: steps.current.outputs.run_release == 'true'
         id: release
         uses: googleapis/release-please-action@v5
         with:
           token: ${{ secrets.RELEASE_PLEASE_TOKEN || github.token }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+          skip-github-release: ${{ steps.current.outputs.published_draft == 'true' }}
+          skip-github-pull-request: ${{ steps.current.outputs.ready != 'true' }}
+      - name: Dispatch publication of the draft release
+        if: steps.current.outputs.run_release == 'true' && steps.current.outputs.ready != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.current.outputs.version }}
+          RELEASE_CREATED: ${{ steps.release.outputs.release_created }}
+          RELEASES_CREATED: ${{ steps.release.outputs.releases_created }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag_name }}
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+          RELEASE_SHA: ${{ steps.release.outputs.sha }}
+        run: |
+          node --input-type=module <<'JS'
+          import { execFileSync } from 'node:child_process';
+          const gh = args => execFileSync('gh', args, { encoding: 'utf8' }).trim();
+          const version = process.env.VERSION;
+          const tag = `v${version}`;
+          const repo = process.env.GITHUB_REPOSITORY;
+          if (!/^v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/.test(tag)) throw Error('Expected a stable version tag');
+          const release = JSON.parse(gh(['release', 'view', tag, '--json', 'isDraft,tagName,targetCommitish']));
+          if (release.tagName !== tag || release.isDraft !== true) throw Error('Stable release must remain a draft until registry validation');
+          const sha = gh(['api', `repos/${repo}/commits/${tag}`, '--jq', '.sha']);
+          if (release.targetCommitish !== sha) throw Error('Draft release target differs from the stable tag commit');
+          const prs = JSON.parse(gh(['pr', 'list', '--state', 'merged', '--base', 'main', '--json', 'title,headRefName,headRepositoryOwner,mergeCommit', '--limit', '100']));
+          const expected = 'release-please--branches--main--components--promptfoo-integration';
+          const owner = repo.split('/')[0];
+          const matches = prs.filter(pr => pr.title === `chore(release): release ${version}` && pr.headRefName === expected && pr.headRepositoryOwner?.login === owner);
+          if (matches.length !== 1 || matches[0].mergeCommit?.oid !== sha) throw Error('Draft tag must point at the merged Release Please pull request commit');
+          const status = gh(['api', `repos/${repo}/compare/${sha}...main`, '--jq', '.status']);
+          if (status !== 'ahead' && status !== 'identical') throw Error('Draft tag commit must be an ancestor of main');
+          if (process.env.RELEASE_CREATED === 'true') {
+            if (process.env.RELEASE_TAG !== tag || process.env.RELEASE_VERSION !== version || process.env.RELEASE_SHA !== sha)
+              throw Error('Release Please created a release for a different version or commit');
+          } else if (process.env.RELEASES_CREATED === 'true') {
+            throw Error('Release Please created an unexpected release');
+          }
+          JS
+          TAG="v$VERSION"
+          gh workflow run publish.yml --ref "$TAG" -f ref="$TAG"
       - name: Resolve pending release pull request
         if: steps.current.outputs.ready == 'true'
         id: pr
@@ -120,16 +176,11 @@ jobs:
         with:
           ref: ${{ steps.pr.outputs.branch }}
           persist-credentials: false
-      - uses: oven-sh/setup-bun@v2
-        if: steps.pr.outputs.branch != ''
-        with:
-          bun-version: 1.4.0
       - name: Synchronize Bun lock in the release PR
         if: steps.pr.outputs.branch != ''
         id: lock
         run: |
-          bun install --lockfile-only --ignore-scripts
-          bun "$RUNNER_TEMP/release-tools/sync-release-lock.ts"
+          node "$RUNNER_TEMP/release-tools/sync-release-lock.ts" "$GITHUB_WORKSPACE"
           if ! git diff --quiet -- package.json packages/promptfoo-integration/package.json; then
             echo 'Bun unexpectedly modified a package manifest' >&2
             exit 1
@@ -156,3 +207,174 @@ jobs:
           if [ "$(gh pr view "$RELEASE_PR" --json isDraft --jq .isDraft)" = true ]; then
             gh pr ready "$RELEASE_PR"
           fi
+  preview:
+    needs: release-please
+    if: needs.release-please.outputs.current_released == 'true' && needs.release-please.outputs.pending_pr != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: npm
+    concurrency:
+      group: release-please-preview
+      cancel-in-progress: false
+      queue: max
+    permissions:
+      contents: write
+      pull-requests: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          registry-url: https://registry.npmjs.org
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+      - name: Install npm with trusted publishing support
+        run: npm install --global npm@11.6.2
+      - name: Read the pending release version
+        id: preview
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_PR: ${{ needs.release-please.outputs.pending_pr }}
+        run: |
+          node --input-type=module <<'JS'
+          import { execFileSync } from 'node:child_process';
+          import { appendFileSync, readFileSync } from 'node:fs';
+          const gh = args => execFileSync('gh', args, { encoding: 'utf8' }).trim();
+          const repo = process.env.GITHUB_REPOSITORY;
+          const sha = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+          if (sha !== process.env.GITHUB_SHA) throw Error('Preview must use the triggering main commit');
+          const pr = JSON.parse(gh(['pr', 'view', process.env.RELEASE_PR, '--json', 'state,isDraft,title,headRefName,headRefOid,headRepositoryOwner,baseRefName']));
+          const expected = 'release-please--branches--main--components--promptfoo-integration';
+          if (pr.state !== 'OPEN' || pr.isDraft || pr.baseRefName !== 'main' || pr.headRefName !== expected || pr.headRepositoryOwner?.login !== repo.split('/')[0])
+            throw Error('Expected an open, synchronized Release Please pull request on main');
+          if (!/^[a-f0-9]{40}$/.test(pr.headRefOid)) throw Error('Invalid release pull request head');
+          const fromPr = path => JSON.parse(Buffer.from(JSON.parse(gh(['api', '-X', 'GET', `repos/${repo}/contents/${path}`, '-f', `ref=${pr.headRefOid}`])).content, 'base64').toString('utf8'));
+          const root = JSON.parse(readFileSync('package.json', 'utf8'));
+          const manifest = JSON.parse(readFileSync('packages/promptfoo-integration/package.json', 'utf8'));
+          const nextRoot = fromPr('package.json');
+          const nextManifest = fromPr('packages/promptfoo-integration/package.json');
+          const parseVersion = value => {
+            const match = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.exec(value ?? '');
+            if (!match) throw Error(`Expected a stable package version, got ${value}`);
+            return match.slice(1).map(Number);
+          };
+          if (root.version !== manifest.version || nextRoot.version !== nextManifest.version || manifest.name !== nextManifest.name || manifest.name !== '@allagents/promptfoo-integration')
+            throw Error('Release Please must update matching versions of the expected public package');
+          const current = parseVersion(manifest.version);
+          const pending = parseVersion(nextManifest.version);
+          const changed = pending.findIndex((part, index) => part !== current[index]);
+          if (changed < 0 || pending[changed] < current[changed])
+            throw Error('Pending release version must exceed the current version');
+          if (pr.title !== `chore(release): release ${nextManifest.version}`) throw Error('Release PR title does not match its version');
+          const run = process.env.GITHUB_RUN_NUMBER;
+          if (!/^[1-9]\d*$/.test(run ?? '')) throw Error('Expected a numeric workflow run number');
+          appendFileSync(process.env.GITHUB_OUTPUT, `version=${nextManifest.version}-next.${run}\npr_sha=${pr.headRefOid}\n`);
+          JS
+      - name: Install dependencies and stamp preview manifests
+        env:
+          PREVIEW_VERSION: ${{ steps.preview.outputs.version }}
+        run: |
+          bun install --frozen-lockfile
+          node --input-type=module <<'JS'
+          import { readFileSync, writeFileSync } from 'node:fs';
+          for (const path of ['package.json', 'packages/promptfoo-integration/package.json']) {
+            const manifest = JSON.parse(readFileSync(path, 'utf8'));
+            manifest.version = process.env.PREVIEW_VERSION;
+            writeFileSync(path, `${JSON.stringify(manifest, null, 2)}\n`);
+          }
+          JS
+      - name: Validate source and packed preview
+        run: bun run typecheck && bun run lint && bun test && bun run build && bun run pack:check && bun run e2e
+      - name: Recheck pending release PR and main source
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_PR: ${{ needs.release-please.outputs.pending_pr }}
+          RELEASE_PR_SHA: ${{ steps.preview.outputs.pr_sha }}
+        run: |
+          node --input-type=module <<'JS'
+          import { execFileSync } from 'node:child_process';
+          const pr = JSON.parse(execFileSync('gh', ['pr', 'view', process.env.RELEASE_PR, '--json', 'state,headRefOid'], { encoding: 'utf8' }));
+          if (pr.state !== 'OPEN' || pr.headRefOid !== process.env.RELEASE_PR_SHA)
+            throw Error('Pending release PR changed during preview validation');
+          execFileSync('git', ['fetch', '--no-tags', 'origin', 'main'], { stdio: 'pipe' });
+          execFileSync('git', ['merge-base', '--is-ancestor', 'HEAD', 'FETCH_HEAD'], { stdio: 'pipe' });
+          JS
+      - name: Publish preview under next
+        env:
+          PREVIEW_VERSION: ${{ steps.preview.outputs.version }}
+        run: |
+          node --input-type=module <<'JS'
+          import { spawnSync } from 'node:child_process';
+          const name = '@allagents/promptfoo-integration';
+          const version = process.env.PREVIEW_VERSION;
+          const view = (selector, field) => {
+            const result = spawnSync('npm', ['view', selector, field, '--json', '--registry=https://registry.npmjs.org'], { encoding: 'utf8' });
+            if (result.error) throw result.error;
+            if (result.status === 0) return JSON.parse(result.stdout);
+            if (/\b(?:E404|ETARGET)\b/.test(`${result.stdout}\n${result.stderr}`)) return undefined;
+            throw Error(`npm view failed (${result.status}): ${result.stderr}`);
+          };
+          const previous = view(`${name}@next`, 'version');
+          if (previous && previous !== version) {
+            const parse = value => /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-(next|rc)\.([1-9]\d*))?$/.exec(value);
+            const prior = parse(previous);
+            const pending = parse(version);
+            if (!prior || !pending) throw Error('Unexpected npm next version');
+            const baseOrder = [1, 2, 3].map(index => BigInt(prior[index]) - BigInt(pending[index])).find(delta => delta !== 0n) ?? 0n;
+            if (baseOrder > 0n || (baseOrder === 0n && (prior[4] !== 'next' || BigInt(prior[5]) >= BigInt(pending[5]))))
+              throw Error('Publishing this preview would move the npm next tag backward');
+          }
+          const existing = view(`${name}@${version}`, 'version');
+          if (existing !== undefined && existing !== version) throw Error('Unexpected npm preview version');
+          if (existing === version) {
+            if (previous !== version || view(`${name}@${version}`, 'gitHead') !== process.env.GITHUB_SHA)
+              throw Error('Published preview must match this commit and the npm next tag');
+          } else {
+            const result = spawnSync('npm', ['publish', '--tag', 'next', '--provenance', '--access', 'public', '--registry=https://registry.npmjs.org'], { cwd: 'packages/promptfoo-integration', stdio: 'inherit' });
+            if (result.error) throw result.error;
+            if (result.status !== 0) throw Error(`npm publish failed (${result.status ?? result.signal})`);
+          }
+          if (view(`${name}@next`, 'version') !== version || view(`${name}@${version}`, 'gitHead') !== process.env.GITHUB_SHA)
+            throw Error('Published npm next preview differs from the source commit');
+          JS
+      - name: Verify registry consumers and Promptfoo E2E
+        env:
+          PREVIEW_VERSION: ${{ steps.preview.outputs.version }}
+        run: |
+          bun scripts/smoke-packed-package.ts --registry "$PREVIEW_VERSION"
+          bun scripts/e2e.ts --registry "$PREVIEW_VERSION"
+      - name: Tag and announce verified preview
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PREVIEW_VERSION: ${{ steps.preview.outputs.version }}
+        run: |
+          node --input-type=module <<'JS'
+          import { spawnSync, execFileSync } from 'node:child_process';
+          const repo = process.env.GITHUB_REPOSITORY;
+          const tag = `v${process.env.PREVIEW_VERSION}`;
+          const gh = args => execFileSync('gh', args, { encoding: 'utf8' }).trim();
+          const remote = (path) => {
+            const result = spawnSync('gh', ['api', path], { encoding: 'utf8' });
+            if (result.error) throw result.error;
+            if (result.status === 0) return JSON.parse(result.stdout);
+            if (/HTTP 404\b/.test(result.stderr)) return null;
+            throw Error(`GitHub lookup failed (${result.status}): ${result.stderr}`);
+          };
+          const path = `repos/${repo}/git/ref/tags/${tag}`;
+          const ref = remote(path);
+          if (ref && (ref.ref !== `refs/tags/${tag}` || ref.object.type !== 'commit' || ref.object.sha !== process.env.GITHUB_SHA))
+            throw Error('Preview tag points at another source commit');
+          if (!ref) gh(['api', `repos/${repo}/git/refs`, '-f', `ref=refs/tags/${tag}`, '-f', `sha=${process.env.GITHUB_SHA}`]);
+          const release = remote(`repos/${repo}/releases/tags/${tag}`);
+          if (release) {
+            if (release.tag_name !== tag || release.draft || !release.prerelease || release.target_commitish !== process.env.GITHUB_SHA)
+              throw Error('Existing GitHub preview release does not match the verified source');
+          } else {
+            gh(['release', 'create', tag, '--verify-tag', '--target', process.env.GITHUB_SHA, '--title', tag, '--prerelease', '--notes', `Validated preview of ${process.env.GITHUB_SHA} published as ${process.env.PREVIEW_VERSION} under npm next.`]);
+          }
+          JS
