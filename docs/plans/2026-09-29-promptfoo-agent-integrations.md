@@ -9,7 +9,7 @@ status: proposed
 
 ## Goal
 
-Publish `@allagents/promptfoo-integration` from `allagentsdev/promptfoo-integrations`. The package provides:
+Publish `@allagents/promptfoo-integration` from `allagentsdev/promptfoo-integration`. The package provides:
 
 - `Provider`, a workspace-owning provider that delegates to Promptfoo's Codex and Claude providers or the package's Copilot provider, retains each row's workspace lease through assertions, and optionally returns bounded file changes;
 - `CopilotSdkProvider`, a lower-level provider that executes the public GitHub Copilot SDK in an existing working directory; and
@@ -233,7 +233,7 @@ Each `workspace.sources[]` entry defaults to `permissions: all`: a private writa
 ```yaml
 providers:
   - id: package:@allagents/promptfoo-integration:Provider
-    label: cargowise-repo-readonly
+    label: project-readonly
     config:
       delegate:
         id: openai:codex-sdk
@@ -242,12 +242,12 @@ providers:
       workspace:
         sources:
           - type: git
-            repository: https://github.com/WiseTechGlobal/CargoWise.git
-            ref: 953adb94d49ae392c08082dc68717eefac0526cc
-            destination: CargoWise
+            repository: https://github.com/example/project.git
+            ref: 0123456789abcdef0123456789abcdef01234567
+            destination: project
             permissions: read-only
   - id: package:@allagents/promptfoo-integration:Provider
-    label: cargowise-repo-writable
+    label: project-writable
     config:
       delegate:
         id: openai:codex-sdk
@@ -256,21 +256,21 @@ providers:
       workspace:
         sources:
           - type: git
-            repository: https://github.com/WiseTechGlobal/CargoWise.git
-            ref: 953adb94d49ae392c08082dc68717eefac0526cc
-            destination: CargoWise
+            repository: https://github.com/example/project.git
+            ref: 0123456789abcdef0123456789abcdef01234567
+            destination: project
             permissions: all
 defaultTest:
-  providers: [cargowise-repo-readonly]
+  providers: [project-readonly]
 tests:
   - vars:
-      task: Inspect CargoWise and write notes outside its repository.
-  - providers: [cargowise-repo-writable]
+      task: Inspect the project and write notes outside its repository.
+  - providers: [project-writable]
     vars:
-      task: Fix the data transformation bug in CargoWise.
+      task: Fix the data transformation bug in the project.
 ```
 
-Without `defaultTest.providers` or a test's own filter, Promptfoo runs the test against **both** provider configurations. The default filter selects a read-only **repository**, and the writable test overrides it. Both delegates can write to their own workspace outside `CargoWise`; ordinary writes through the protected source link fail. The row can remove that link because its workspace root is writable; doing so leaves the destination absent, without copying or modifying the shared checkout. Codex's native `sandbox_mode` applies to the whole working directory and cannot enforce a per-source restriction; it remains `workspace-write` here. Same-UID file modes are cooperative, not a hostile-agent security boundary. The consumer may resolve the Git pin to a release-backed source before provider execution; acquisition does not choose permissions.
+Without `defaultTest.providers` or a test's own filter, Promptfoo runs the test against **both** provider configurations. The default filter selects a read-only **repository**, and the writable test overrides it. Both delegates can write to their own workspace outside `project`; ordinary writes through the protected source link fail. The row can remove that link because its workspace root is writable; doing so leaves the destination absent, without copying or modifying the shared checkout. Codex's native `sandbox_mode` applies to the whole working directory and cannot enforce a per-source restriction; it remains `workspace-write` here. Same-UID file modes are cooperative, not a hostile-agent security boundary. The consumer may resolve the Git pin to a release-backed source before provider execution; acquisition does not choose permissions.
 
 ### Native response and workspace metadata
 
@@ -402,13 +402,13 @@ There are three real adapters:
 2. overlay (copy-on-write) using an immutable lower layer and private upper/work directories, with mount privileges or a narrowly privileged mount/unmount helper where unprivileged mounting is unavailable; and
 3. recursive full copy (not copy-on-write) as a disk-admitted correctness fallback requiring ordinary file read/write access.
 
-Select for each writable source in that order. Startup probes create throwaway views, mutate them, and prove seed and sibling bytes remain unchanged. An overlay probe must run in the provider/delegate's mount namespace; an isolated privileged namespace is insufficient. Only probes whose state is fully cleaned may fall through; an unknown mount or failed detach blocks fallback. Copy admission must account for a conservative full-copy estimate per retained writable source view, current free space, headroom, and concurrent admissions; reject before a copy that cannot fit. It may be used for smaller workloads, but never silently replace CoW for CargoWise-scale writable evaluation.
+Select for each writable source in that order. Startup probes create throwaway views, mutate them, and prove seed and sibling bytes remain unchanged. An overlay probe must run in the provider/delegate's mount namespace; an isolated privileged namespace is insufficient. Only probes whose state is fully cleaned may fall through; an unknown mount or failed detach blocks fallback. Copy admission must account for a conservative full-copy estimate per retained writable source view, current free space, headroom, and concurrent admissions; reject before a copy that cannot fit. It may be used for smaller workloads, but never silently replace CoW for a large private repository.
 
 A plain symlink, writable bind mount, or writable hardlink never satisfies this interface. Those mechanisms expose shared inodes and violate row isolation.
 
 Reflink and overlay allocation should approach one seed plus changed blocks and any protected read-only source checkouts even with a thousand mostly unchanged writable views. Recursive copy may allocate a full multi-gigabyte source per row. The selected adapter stays implementation metadata and does not alter provider configuration.
 
-On the actual WTG.AI.Prompts `wtg-use-linux-x64` runner, neither reflinks nor unprivileged OverlayFS mounts work. An initial `sudo` benchmark used a private mount namespace whose views were invisible to the parent provider process. A follow-up direct `sudo mount` in the job's namespace was visible and writable to an ordinary Node process, so a provider running as that user can use the mounted view **after privileged setup**. This still requires a separately designed, narrowly privileged mount/unmount lifecycle with validated paths, recovery records, and tests of the actual provider and delegate; do not silently invoke unrestricted `sudo` from the provider or count the filesystem probes as a completed rollout gate.
+The target private runner requires privileged OverlayFS mounting. A mount in an isolated namespace is invisible to the provider; the mount must be visible in the provider/delegate's namespace. A narrowly privileged mount/unmount lifecycle requires validated paths, recovery records, and tests of the actual provider and delegate. Filesystem probes alone do not clear the private rollout gate. Runner-specific evidence is retained in the private `allagents-research` repository.
 
 ### Tracing and assertion compatibility
 
@@ -545,9 +545,9 @@ Implement Git acquisition without a shell:
 
 Git writes into capacity-controlled staging. Reserve and enforce its physical footprint before launching Git, in addition to the configured download and extracted-content limits. If this cannot be enforced on the current filesystem, fail before acquisition rather than letting an unconstrained child fill the cache or host disk.
 
-The **consumer**, not the generic provider, owns source resolution. WTG.AI.Prompts evals already reference workspace YAML (for example, `workspace: ../.templates/eval-workspace-2026.yaml`); the template names `repos[].repo`, `repos[].commit`, and an environment-expanded `path`. A consumer adapter can read those pins and produce the provider's existing Git-source descriptors without adding AgentV YAML, its `hooks`, or release-specific fields to the provider interface. A template containing only a remote Git URL and commit does **not** remove the need for acquisition: without a release/image resolver it uses the provider's ordinary authenticated Git source.
+The **consumer**, not the generic provider, owns source resolution. A consumer adapter can read pinned repository descriptors and produce the provider's existing Git-source descriptors without adding consumer-specific YAML or release-specific fields to the provider interface. A template containing only a remote Git URL and commit does **not** remove the need for acquisition: without a release/image resolver it uses the provider's ordinary authenticated Git source.
 
-To use release artifacts rather than remote Git, keep `repo + commit` → snapshot chunk / OCI image lookup in the consumer, following [ai-evals' repository resolver](https://github.com/WiseTechGlobal/ai-evals/blob/d42496bc03c57bc640cd768cfc7ea90b46ed2158/apps/aievals/src/environment/repository-resolver.ts). WTG.AI.Prompts already maps pinned commits through `CargoWise.manifest.txt` to yearly `.git` release assets; the consumer may stage one as a local Git repository and pass a verified `file://` URL plus immutable commit, or pass an OCI image by digest if it has an image resolver. The provider prepares and validates its own immutable seed; the existing shared checkout symlinks remain read-only and cannot serve as private writable views. Do not implement a second release resolver inside the provider.
+To use release artifacts rather than remote Git, keep `repo + commit` → snapshot chunk / OCI image lookup in the consumer. The consumer may stage a verified release asset as a local Git repository and pass a `file://` URL plus immutable commit, or pass an OCI image by digest if it has an image resolver. The provider prepares and validates its own immutable seed; shared checkout symlinks cannot serve as private writable views. Do not implement a second release resolver inside the provider. Private release mappings and source identifiers are retained in `allagents-research`.
 
 ### Verification
 
@@ -619,8 +619,8 @@ Implement the three checkout adapters and ownership-marked provider roots.
 - Give every writable view a unique ID and private state.
 - Require reflink and overlay adapters to pass write-isolation probes before selection.
 - Keep recursive copy as a correctness fallback when the projected full per-row allocation fits available disk, including already retained views and concurrent copy admissions; fail explicitly before an unaffordable copy rather than exhausting the runner.
-- Implement and verify a narrowly privileged OverlayFS mount/unmount lifecycle on `wtg-use-linux-x64`, with mounts visible to the provider and delegate, path containment, teardown records, and crash recovery. If it or reflink is unavailable, try bounded copy for affordable writable workloads. CargoWise-scale **writable** rollout still requires a working CoW adapter on that runner; a recursive-copy result or an isolated mount-namespace probe does not clear the gate.
-- Implement `permissions: read-only` per source: attach a separate package-owned protected checkout inside each private writable workspace via a row-owned destination link, and allow ordinary writes elsewhere in the workspace. Setup that changes the source must be prepared in the immutable source or use a private `all` source view. Detect unexpected shared-content mutation, invalidate the prepared checkout, and fail rather than reset it in place; same-UID bypass remains outside the security guarantee. This adapts [ai-evals' cooperative read-only guardrail](https://github.com/WiseTechGlobal/ai-evals/blob/d42496bc03c57bc640cd768cfc7ea90b46ed2158/docs/adr/0006-use-test-scoped-workspaces-for-coding-agent-evaluations.md#read-only-workspaces) without making the whole workspace read-only.
+- Implement and verify a narrowly privileged OverlayFS mount/unmount lifecycle on the target private runner, with mounts visible to the provider and delegate, path containment, teardown records, and crash recovery. If it or reflink is unavailable, try bounded copy for affordable writable workloads. Large-repository **writable** rollout still requires a working CoW adapter on that runner; a recursive-copy result or an isolated mount-namespace probe does not clear the gate.
+- Implement `permissions: read-only` per source: attach a separate package-owned protected checkout inside each private writable workspace via a row-owned destination link, and allow ordinary writes elsewhere in the workspace. Setup that changes the source must be prepared in the immutable source or use a private `all` source view. Detect unexpected shared-content mutation, invalidate the prepared checkout, and fail rather than reset it in place; same-UID bypass remains outside the security guarantee.
 - Reject symlink and hardlink sharing of writable content, and writable bind sharing of a seed. Package-created links to protected read-only source checkouts never expose the seed.
 - Reserve the workspace ID and contained adapter paths, then atomically publish a pending recovery record before creating a lease, inode tree, or mount.
 - Require each adapter to persist enough teardown state before every irreversible resource-creation step and transition the record to active only after the view is complete.
@@ -637,17 +637,15 @@ Implement the three checkout adapters and ownership-marked provider roots.
 - Recursive-copy tests document full allocation cost, select it when CoW probes fail and space permits, and reject under concurrent disk pressure before copying when the per-view reserve cannot fit.
 - Matching read-only source rows share only protected source contents, not `metadata.workspace.path`, writable root files, scratch, or leases; ordinary source-file/Git writes fail while workspace-root writes succeed. Unlinking a row's source destination leaves it absent without copying or changing the shared checkout; a replacement is row-owned and visible to assertions as such. A changed shared checkout is invalidated and never reused; same-UID `chmod` is documented as outside the guardrail.
 - A 2 GiB sparse/fixture seed scale test records allocated blocks for the seed plus one thousand views and enforces adapter-specific ceilings.
-- On WTG.AI.Prompts' actual `wtg-use-linux-x64` evaluation runner, materialize CargoWise commit `769187bbb4d2f2add3fe11131ce3aedc696145f0` from [ai-evals' representative proof](https://github.com/WiseTechGlobal/ai-evals/blob/d42496bc03c57bc640cd768cfc7ea90b46ed2158/docs/solutions/architecture-patterns/measuring-representative-workspace-costs.md): 245,828 files and 1,814,049,455 logical bytes. Prove that two concurrent writable views select a working copy-on-write adapter and share unchanged blocks while writes remain private. The existing sparse 2 GiB fixture does not replace this real-tree proof.
-- Report the selected adapter, seed acquisition time, per-view preparation time, allocated disk space, optional file-change baseline time, and cleanup time separately on that runner. The ai-evals timings were measured on an ext4 VPS, not GitHub Actions, and did not exercise overlay; they are not CI performance guarantees.
+- On the target private evaluation runner, materialize the exact representative private commit specified in `allagents-research` from permitted release packages. Prove that two concurrent writable views select a working copy-on-write adapter and share unchanged blocks while writes remain private. The sparse 2 GiB fixture does not replace this real-tree proof.
+- Report the selected adapter, seed acquisition time, per-view preparation time, allocated disk space, optional file-change baseline time, and cleanup time separately on that runner.
 - A failed capability probe selects the next safe adapter only after complete cleanup; a failed unmount or unknown mount blocks fallback.
 - Live, unmarked, escaping, symlinked, incompatible, and unknown-mount roots are never reaped.
 - Dead-owner recovery handles PID reuse, unmounts overlay views before lease release, and never exposes a lower-layer deletion race.
 - Process death at every boundary from pending-record publication through active-view transition leaves a recoverable record and no unknown mount.
 - A failed detach retains both recovery record and seed lease; other workspace teardown chains still complete.
 
-**Runner evidence (2026-09-29):** [WTG.AI.Prompts Actions run 36551124238](https://github.com/WiseTechGlobal/WTG.AI.Prompts/actions/runs/36551124238) used `wtg-use-linux-x64` (Ubuntu 24.04, ext-family filesystem, ~17.95 GB free), fetched and checked out the fixed 245,828-file / 1,814,049,455-logical-byte commit, and tested two concurrent views. Reflink returned `EOPNOTSUPP`; unprivileged OverlayFS mount returned “must be superuser”; privileged OverlayFS mounted inside an isolated namespace. Git fetch took 5,424 ms and checkout 206,687 ms. Two privileged OverlayFS views mounted in 6 ms and allocated 40,960 observed bytes; changing one file and running `git add` took 588 ms and allocated another 47,050,752 observed bytes. Seed and sibling file contents and Git status stayed unchanged; view unmount/removal took 1,359 ms. Free-space deltas are whole-filesystem observations, not exclusive accounting. The experiment ran all view operations inside the privileged namespace and did not exercise the future provider, so the writable rollout gate remains blocked. The current `snapshot/v1.1.0` CargoWise manifest does not include this older benchmark commit; release-backed acquisition should be tested separately with a mapped commit and cannot substitute for view isolation.
-
-**Provider-process visibility (2026-09-29):** [WTG.AI.Prompts Actions run 36553859211](https://github.com/WiseTechGlobal/WTG.AI.Prompts/actions/runs/36553859211) directly mounted a small OverlayFS view with `sudo` in the job's mount namespace. A separate unprivileged Node child (UID 1001, same namespace) saw the mount, read the lower-layer file, changed it, created a new file, and staged both with Git. The seed's file contents and Git status remained unchanged. `sudo umount` and deletion of the probe-owned directories completed. This proves visibility and ordinary-process write access on the target runner, not the safety or crash recovery of a production privilege helper.
+Private runner probes and provider integration runs are recorded in `allagents-research`. Those records distinguish namespace visibility checks from the production helper lifecycle and retain the exact private commit gate.
 
 ## Phase 6: Optional file changes
 
@@ -821,7 +819,7 @@ Release-candidate gates additionally cover:
 - stale-root and seed-lease recovery after forced process death;
 - thousand-view copy-on-write isolation, 2 GiB allocated-space ceilings, and cross-evaluation seed reuse;
 - per-source read-only provider selection, private writable workspace paths with protected shared sources, mutation invalidation, cache accounting, and cleanup without deleting a live reader;
-- On WTG.AI.Prompts' target `wtg-use-linux-x64` runner, the representative CargoWise-scale proof selects a provider-visible working copy-on-write adapter through the real mount lifecycle, demonstrates private writes and shared unchanged blocks, and reports phase timings and allocated disk use; a recursive-copy result does not clear the large-repo rollout gate.
+- On the target private runner, the exact representative large-repository proof selects a provider-visible working copy-on-write adapter through the real mount lifecycle, demonstrates private writes and shared unchanged blocks, and reports phase timings and allocated disk use; a recursive-copy result does not clear the large-repo rollout gate.
 - age/size/default/all cache pruning under concurrent leases;
 - optional file-change exactness and bounds;
 - Git provenance and OCI authentication against disposable fixtures;
@@ -833,7 +831,7 @@ Release-candidate gates additionally cover:
 - Stock Promptfoo loads both provider exports from the published package.
 - Git and OCI inputs produce immutable provenance and one persistent cached seed per resolved manifest.
 - One thousand private reflink/overlay views share immutable blocks without sharing writable state; recursive copy remains a correct, disk-admitted fallback for affordable workloads and fails explicitly when admission cannot fit.
-- CargoWise-scale **writable source** rollout on the target runner requires proven provider-visible copy-on-write; without it, that rollout is blocked even if a smaller job can use recursive copy. Explicit source `permissions: read-only` permits matching evaluations to share a protected repository checkout inside private writable workspaces without claiming writable source isolation.
+- Large-repository **writable source** rollout on the target runner requires proven provider-visible copy-on-write; without it, that rollout is blocked even if a smaller job can use recursive copy. Explicit source `permissions: read-only` permits matching evaluations to share a protected repository checkout inside private writable workspaces without claiming writable source isolation.
 - Workspace paths remain available through Promptfoo assertions.
 - Best-effort provider cleanup and safe later stale-root recovery are explicit and verified.
 - Workspace cleanup removes private writable roots and source views and releases leases without deleting reusable seeds or live protected source checkouts.

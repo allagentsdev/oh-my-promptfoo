@@ -1,0 +1,22 @@
+prompts: ["{{task}}"]
+providers:
+  - id: package:@allagents/promptfoo-integration:Provider
+    config:
+      delegate:
+        id: anthropic:claude-agent-sdk
+        config:
+          permission_mode: acceptEdits
+          max_turns: 10
+        env:
+          ANTHROPIC_API_KEY: "{{env.ANTHROPIC_API_KEY}}"
+      workspace:
+        sources: []
+      fileChanges: true
+tests:
+  - vars:
+      task: Write hello.txt containing Hello world.
+    assert:
+      - type: javascript
+        value: |
+          const changes = context.providerResponse.metadata.fileChanges;
+          return changes.status === 'complete' && Buffer.from(changes.generatedFiles['hello.txt'].content, 'base64').toString().includes('Hello world');

@@ -1,0 +1,42 @@
+prompts: ["{{task}}"]
+providers:
+  - id: package:@allagents/promptfoo-integration:Provider
+    label: repo-readonly
+    config:
+      delegate:
+        id: openai:codex-sdk
+        config:
+          sandbox_mode: workspace-write
+        env:
+          OPENAI_API_KEY: "{{env.OPENAI_API_KEY}}"
+      workspace:
+        sources:
+          - type: git
+            repository: https://github.com/allagentsdev/promptfoo-integration.git
+            ref: main
+            destination: project
+            permissions: read-only
+  - id: package:@allagents/promptfoo-integration:Provider
+    label: repo-writable
+    config:
+      delegate:
+        id: openai:codex-sdk
+        config:
+          sandbox_mode: workspace-write
+        env:
+          OPENAI_API_KEY: "{{env.OPENAI_API_KEY}}"
+      workspace:
+        sources:
+          - type: git
+            repository: https://github.com/allagentsdev/promptfoo-integration.git
+            ref: main
+            destination: project
+            permissions: all
+defaultTest:
+  providers: [repo-readonly]
+tests:
+  - vars:
+      task: Read project/README.md and write notes.txt at the workspace root.
+  - providers: [repo-writable]
+    vars:
+      task: Append a short example to project/README.md.

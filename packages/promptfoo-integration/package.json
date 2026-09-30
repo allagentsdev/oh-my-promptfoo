@@ -1,0 +1,46 @@
+{
+  "name": "@allagents/promptfoo-integration",
+  "version": "1.0.0",
+  "description": "Workspace-owning coding agent providers for Promptfoo",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "bin": {
+    "allagents-promptfoo": "./dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=22.22.0"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/allagentsdev/promptfoo-integration.git",
+    "directory": "packages/promptfoo-integration"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "peerDependencies": {
+    "promptfoo": "0.122.x",
+    "@github/copilot-sdk": "1.0.6"
+  },
+  "peerDependenciesMeta": {
+    "@github/copilot-sdk": {
+      "optional": true
+    }
+  }
+}

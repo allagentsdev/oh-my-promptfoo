@@ -19,7 +19,7 @@ Keeping a physical copy of a multi-gigabyte repository for every row would use t
 
 ## Decision
 
-Create the public repository `allagentsdev/promptfoo-integrations` as a Bun workspace that publishes independently versioned npm integrations.
+Create the public repository `allagentsdev/promptfoo-integration` as a Bun workspace that publishes the Promptfoo npm integration.
 
 The initial public package is `@allagents/promptfoo-integration`. The name identifies a third-party integration rather than a Promptfoo fork and leaves room for later Promptfoo-facing modules. `@allagents/promptfoo-plugins` is not used because Promptfoo already uses plugin terminology for red-team plugins.
 
@@ -158,7 +158,7 @@ Lease creation, release, and eviction take the per-digest mutation lock under th
 
 Writable source views use three internal checkout adapters:
 
-1. **Reflink/clone adapter** — uses verified filesystem copy-on-write cloning such as Linux `FICLONE` or macOS `clonefile`; each writable source view has private inodes while unchanged data blocks remain shared. It needs ordinary source-read and destination-write access, not mount privileges, but only works when the backing filesystem supports cloning these files; the target WTG runner returned `EOPNOTSUPP`.
+1. **Reflink/clone adapter** — uses verified filesystem copy-on-write cloning such as Linux `FICLONE` or macOS `clonefile`; each writable source view has private inodes while unchanged data blocks remain shared. It needs ordinary source-read and destination-write access, not mount privileges, but only works when the backing filesystem supports cloning these files.
 2. **Overlay adapter** — also provides copy-on-write, using the source subtree in the immutable seed as a read-only lower layer with one private upper and work directory per writable source view; its merged mount occupies that source's destination inside the row's writable workspace. Its mount operation needs permission on the runner. Where unprivileged mounting is denied, a separately designed, narrowly privileged mount/unmount helper may create a view in the provider's mount namespace. The provider and delegate then access it as ordinary users; no unrestricted or implicit `sudo` invocation is part of the provider interface.
 3. **Recursive-copy adapter** — a full independent copy of the writable source, **not** copy-on-write; portable when ordinary file reads and writes are permitted, but it may allocate the full source size per row. Admit each view only after a conservative full-copy estimate, headroom, currently retained views, concurrent admissions, and available disk are accounted for. Otherwise fail explicitly before that copy rather than exhaust the runner.
 
@@ -168,7 +168,7 @@ Writable symlinks, bind mounts of a writable seed, and writable hardlinks are pr
 
 Copy-on-write allocation is approximately one seed plus each writable row's changed blocks and any protected read-only prepared checkouts, rather than one full repository per row. This is not a universal guarantee: reflink metadata, overlay upper layers, agent-generated dependencies, and recursive-copy fallback can still consume substantial disk. Concurrency and free-space behavior require a thousand-view scale test with a multi-gigabyte seed.
 
-On WTG.AI.Prompts' [`wtg-use-linux-x64` runner](https://github.com/WiseTechGlobal/WTG.AI.Prompts/actions/runs/36551124238), reflinks and unprivileged OverlayFS mounts failed, but two CargoWise-sized OverlayFS views mounted under `sudo` in a private namespace shared unchanged data and isolated writes. A [separate direct-mount probe](https://github.com/WiseTechGlobal/WTG.AI.Prompts/actions/runs/36553859211) showed that an ordinary Node child could see and modify a `sudo`-mounted view in the job's namespace while the seed remained unchanged. These prove filesystem and process visibility, not a production privilege helper, crash recovery, actual provider integration, or thousand-view scale. CargoWise-scale writable rollout still requires a working adapter and those gates; recursive copy is not an acceptable silent replacement at that scale.
+On the target private runner, privileged OverlayFS views must be visible to the provider and delegate in their actual mount namespace. A namespace-isolated probe does not clear that requirement. Large-repository writable rollout also requires the production privilege helper, crash recovery, provider integration, and scale gates; recursive copy is not an acceptable silent replacement at that scale. Private runner measurements are retained in `allagents-research`.
 
 ### Explicit read-only sources in writable workspaces
 
@@ -309,7 +309,7 @@ Every source request has a contained, non-overlapping destination and an indepen
 
 Source permissions are orthogonal to Git/OCI acquisition: a release-backed commit still materializes the immutable seed, and `read-only` controls whether that particular source may use a shared protected checkout. `all` means a private writable source view; neither value is a delegate security policy.
 
-The consuming eval project owns its own workspace-YAML interpretation and `repo + commit` resolution to a GitHub release chunk or OCI image. The generic provider accepts only the resolved Git/OCI source descriptors and materializes its own immutable seed; it does not embed WTG-specific release manifests, AgentV hooks, or a second release resolver. A YAML template containing only a Git URL and commit still needs Git acquisition unless the consumer supplies a resolved local release-backed repository or image digest. Links to shared read-only source checkouts do not satisfy private writable source views.
+The consuming eval project owns its own workspace-YAML interpretation and `repo + commit` resolution to a GitHub release chunk or OCI image. The generic provider accepts only the resolved Git/OCI source descriptors and materializes its own immutable seed; it does not embed consumer-specific release manifests or a second release resolver. A YAML template containing only a Git URL and commit still needs Git acquisition unless the consumer supplies a resolved local release-backed repository or image digest. Links to shared read-only source checkouts do not satisfy private writable source views.
 
 The initial Git adapter accepts `https://` and `file://` repositories and rejects SSH URLs. HTTPS acquisition reads fixed `ALLAGENTS_GIT_USERNAME` and `ALLAGENTS_GIT_TOKEN` channels and scopes them only to Git. OCI acquisition reads `ALLAGENTS_ORAS_PATH` and `ALLAGENTS_ORAS_AUTH_FILE`, copies registry configuration to private temporary state for one acquisition, and deletes it in `finally`. `ALLAGENTS_WORKSPACE_ROOT` optionally selects the owned runtime parent; `ALLAGENTS_CACHE_ROOT` optionally selects the separate package-owned seed-cache root. All six names are reserved from delegates.
 
@@ -329,7 +329,7 @@ For bring-your-own-key use, `provider` is a closed object containing a required 
 
 ### Repository and release policy
 
-The repository is named `promptfoo-integrations`, not `promptfoo-recipes`, because downstream projects execute its packages as production dependencies. Copyable configurations belong under `examples/`.
+The repository is named `promptfoo-integration`, not `promptfoo-recipes`, because downstream projects install its package as a production dependency. Copyable configurations belong under `examples/`.
 
 The package targets Node.js 22.22.0 or newer on Linux and macOS. Bun manages workspaces, tests, builds, and release scripts. The package ships ESM, CommonJS, and declaration entrypoints. It bundles private workspace implementation while externalizing `promptfoo` and optional `@github/copilot-sdk`. Releases use GitHub trusted publishing with npm provenance.
 

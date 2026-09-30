@@ -1,0 +1,19 @@
+prompts: ['{{task}}']
+providers:
+  - id: package:@allagents/promptfoo-integration:Provider
+    config:
+      delegate:
+        id: openai:codex-sdk
+        config:
+          sandbox_mode: workspace-write
+        env:
+          OPENAI_API_KEY: '{{env.OPENAI_API_KEY}}'
+      workspace:
+        sources:
+          - type: git
+            repository: '{{env.ALLAGENTS_SCALE_REPOSITORY}}'
+            ref: '{{env.ALLAGENTS_SCALE_COMMIT}}'
+            destination: project
+tests: file://cases.mjs
+evaluateOptions:
+  maxConcurrency: 16

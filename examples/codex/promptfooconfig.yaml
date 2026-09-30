@@ -1,0 +1,26 @@
+prompts: ["{{task}}"]
+providers:
+  - id: package:@allagents/promptfoo-integration:Provider
+    config:
+      delegate:
+        id: openai:codex-sdk
+        config:
+          model: gpt-5.3-codex
+          sandbox_mode: workspace-write
+        env:
+          OPENAI_API_KEY: "{{env.OPENAI_API_KEY}}"
+      workspace:
+        sources:
+          - type: git
+            repository: https://github.com/allagentsdev/promptfoo-integration.git
+            ref: main
+            destination: project
+tests:
+  - vars:
+      task: Read project/README.md and write a summary to summary.txt at the workspace root.
+    assert:
+      - type: javascript
+        value: |
+          return import('node:fs').then(fs => {
+          return fs.readFileSync(context.providerResponse.metadata.workspace.path + '/summary.txt', 'utf8').length > 0;
+          });

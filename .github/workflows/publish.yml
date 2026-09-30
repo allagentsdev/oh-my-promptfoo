@@ -1,0 +1,112 @@
+name: Publish
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Release tag to publish (v1.0.0-rc.1 or v1.0.0)
+        required: true
+        type: string
+concurrency:
+  group: publish-${{ inputs.ref }}
+  cancel-in-progress: false
+permissions: {}
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: npm
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref }}
+          fetch-depth: 0
+          fetch-tags: true
+      - name: Validate checked release tag
+        id: release
+        env:
+          RELEASE_REF: ${{ inputs.ref }}
+        run: |
+          node --input-type=module <<'JS'
+          import { execFileSync } from 'node:child_process';
+          import { appendFileSync, readFileSync } from 'node:fs';
+          const ref = process.env.RELEASE_REF;
+          const match = /^v(\d+\.\d+\.\d+)(?:-rc\.([1-9]\d*))?$/.exec(ref);
+          if (!match) throw Error('Expected v<version> or v<version>-rc.<number>');
+          const manifest = JSON.parse(readFileSync('packages/promptfoo-integration/package.json', 'utf8'));
+          if (manifest.version !== match[1]) throw Error('Release tag does not match package version');
+          const tags = execFileSync('git', ['tag', '--points-at', 'HEAD'], { encoding: 'utf8' }).split(/\r?\n/);
+          if (!tags.includes(ref)) throw Error('Requested release tag does not point at checked-out HEAD');
+          appendFileSync(process.env.GITHUB_OUTPUT, `tag=${match[2] ? 'next' : 'latest'}\n`);
+          JS
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          registry-url: https://registry.npmjs.org
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+      - name: Install npm with trusted publishing support
+        run: npm install --global npm@11.6.2
+      - run: bun install --frozen-lockfile
+      - name: Validate source and packed package
+        run: bun run typecheck && bun run lint && bun test && bun run build && bun run pack:check && bun run e2e
+      - name: Preserve packed-package E2E evidence
+        run: |
+          mkdir -p release-evidence
+          cp docs/evidence/promptfoo-e2e.json release-evidence/local-promptfoo-e2e.json
+      - name: Verify matching release candidate before stable publish
+        if: steps.release.outputs.tag == 'latest'
+        id: candidate
+        run: |
+          node --input-type=module <<'JS'
+          import { execFileSync } from 'node:child_process';
+          import { appendFileSync, readFileSync } from 'node:fs';
+          const manifest = JSON.parse(readFileSync('packages/promptfoo-integration/package.json', 'utf8'));
+          const version = execFileSync('npm', ['view', `${manifest.name}@next`, 'version'], { encoding: 'utf8' }).trim();
+          if (!version.startsWith(`${manifest.version}-rc.`) || !/^[1-9]\d*$/.test(version.slice(`${manifest.version}-rc.`.length)))
+            throw Error('The next tag must identify a prerelease of the current stable version');
+          appendFileSync(process.env.GITHUB_OUTPUT, `version=${version}\n`);
+          JS
+      - name: Verify registry release candidate
+        if: steps.release.outputs.tag == 'latest'
+        env:
+          CANDIDATE_VERSION: ${{ steps.candidate.outputs.version }}
+        run: |
+          bun scripts/smoke-packed-package.ts --registry "$CANDIDATE_VERSION"
+          bun scripts/e2e.ts --registry "$CANDIDATE_VERSION"
+          cp docs/evidence/promptfoo-e2e.json release-evidence/candidate-promptfoo-e2e.json
+      - name: Publish from verified tag
+        id: publish
+        env:
+          RELEASE_REF: ${{ inputs.ref }}
+        run: bun scripts/publish.ts
+      - name: Verify published registry consumers and Promptfoo E2E
+        env:
+          PUBLISHED_VERSION: ${{ steps.publish.outputs.version }}
+        run: |
+          bun scripts/smoke-packed-package.ts --registry "$PUBLISHED_VERSION"
+          bun scripts/e2e.ts --registry "$PUBLISHED_VERSION"
+          cp docs/evidence/promptfoo-e2e.json release-evidence/published-promptfoo-e2e.json
+      - name: Ensure matching GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_REF: ${{ inputs.ref }}
+          NPM_TAG: ${{ steps.publish.outputs.npm_tag }}
+        run: |
+          if gh release view "$RELEASE_REF" >/dev/null 2>&1; then exit 0; fi
+          if [ "$NPM_TAG" = next ]; then
+            gh release create "$RELEASE_REF" --generate-notes --prerelease
+          else
+            gh release create "$RELEASE_REF" --generate-notes
+          fi
+      - name: Upload release validation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-validation-${{ github.run_number }}
+          path: |
+            docs/evidence/*.json
+            release-evidence/

@@ -1,0 +1,3 @@
+Run stock `promptfoo eval --config ../codex/promptfooconfig.yaml` after installing the public package and its peers. On a long-lived runner, run `allagents-promptfoo cache prune` before reporting or backing up cache usage. `--all` removes all unleased entries. Run it after dead-owner workspace recovery when reclaiming abandoned leases.
+
+GitHub-hosted runners require no cross-job workspace cleanup because the runner is disposed. An Actions cache may save only `published` and their verification metadata. Initialize a fresh cache root before restoring that subtree; never restore mutable cache state or overwrite a live self-hosted cache.

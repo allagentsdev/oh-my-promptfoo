@@ -1,0 +1,80 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-09-29T21:24:48.536Z",
+  "node": "v22.22.1",
+  "promptfoo": "0.122.0",
+  "package": "1.0.0",
+  "surface": "npm-packed package loaded by stock promptfoo eval",
+  "sdkMode": "deterministic SDK fixtures; independently npm-installed Promptfoo, native Codex/Claude adapters and real integration runtime",
+  "stats": {
+    "successes": 3,
+    "failures": 0,
+    "errors": 0,
+    "tokenUsage": {
+      "prompt": 33,
+      "completion": 21,
+      "cached": 2,
+      "total": 54,
+      "numRequests": 3,
+      "completionDetails": {
+        "reasoning": 0,
+        "acceptedPrediction": 0,
+        "rejectedPrediction": 0,
+        "cacheReadInputTokens": 0,
+        "cacheCreationInputTokens": 0
+      },
+      "assertions": {
+        "total": 0,
+        "prompt": 0,
+        "completion": 0,
+        "cached": 0,
+        "numRequests": 0,
+        "completionDetails": {
+          "reasoning": 0,
+          "acceptedPrediction": 0,
+          "rejectedPrediction": 0,
+          "cacheReadInputTokens": 0,
+          "cacheCreationInputTokens": 0
+        }
+      }
+    },
+    "durationMs": 5385,
+    "evaluationDurationMs": 5385
+  },
+  "verifiedAssertions": [
+    "contains",
+    "regex",
+    "is-json",
+    "llm-rubric",
+    "javascript",
+    "skill-used",
+    "trajectory:tool-used",
+    "trajectory:tool-args-match",
+    "trajectory:tool-sequence",
+    "trajectory:step-count"
+  ],
+  "additionalGates": {
+    "unfilteredRows": 3,
+    "directCopilot": 1,
+    "nativeErrors": 1,
+    "normalCleanup": true,
+    "skippedCleanupRecovery": true,
+    "storageOutsideConsumer": true
+  },
+  "assertions": [
+    "contains",
+    "regex",
+    "is-json",
+    "filesystem JavaScript",
+    "async workspace assertion",
+    "exact durable file bytes",
+    "labeled source policy selection",
+    "llm-rubric with live workspace",
+    "skill-used",
+    "trajectory:tool-used",
+    "trajectory:tool-args-match",
+    "trajectory:tool-sequence",
+    "trajectory:step-count"
+  ],
+  "stdout": "Cache is disabled.\n[OtelSdk] OpenTelemetry SDK initialized successfully\nStarting evaluation eval-x9k-2026-09-29T21:24:18\nRunning 3 test cases (up to 4 at a time)...\n[OtelSdk] OpenTelemetry SDK shut down successfully\n\n\u001b[90m┌────────────────────────\u001b[39m\u001b[90m┬────────────────────────\u001b[39m\u001b[90m┬────────────────────────\u001b[39m\u001b[90m┬────────────────────────\u001b[39m\u001b[90m┬────────────────────────┐\u001b[39m\n\u001b[90m│\u001b[39m\u001b[1m\u001b[34m task                   \u001b[39m\u001b[22m\u001b[90m│\u001b[39m\u001b[1m\u001b[34m sessionId              \u001b[39m\u001b[22m\u001b[90m│\u001b[39m\u001b[1m\u001b[34m [readonly] {{task}}    \u001b[39m\u001b[22m\u001b[90m│\u001b[39m\u001b[1m\u001b[34m [writable] {{task}}    \u001b[39m\u001b[22m\u001b[90m│\u001b[39m\u001b[1m\u001b[34m [claude] {{task}}      \u001b[39m\u001b[22m\u001b[90m│\u001b[39m\n\u001b[90m├────────────────────────\u001b[39m\u001b[90m┼────────────────────────\u001b[39m\u001b[90m┼────────────────────────\u001b[39m\u001b[90m┼────────────────────────┴────────────────────────┤\u001b[39m\n\u001b[90m│\u001b[39m readonly-row           \u001b[90m│\u001b[39m fixture-thread         \u001b[90m│\u001b[39m [PASS]                 \u001b[90m│\u001b[39m                                                 \u001b[90m│\u001b[39m\n\u001b[90m│\u001b[39m                        \u001b[90m│\u001b[39m                        \u001b[90m│\u001b[39m {\"task\":\"readonly-row… \u001b[90m│\u001b[39m                                                 \u001b[90m│\u001b[39m\n\u001b[90m├────────────────────────\u001b[39m\u001b[90m┼────────────────────────\u001b[39m\u001b[90m┼────────────────────────\u001b[39m\u001b[90m┼────────────────────────\u001b[39m\u001b[90m┬────────────────────────┤\u001b[39m\n\u001b[90m│\u001b[39m writable-row           \u001b[90m│\u001b[39m                        \u001b[90m│\u001b[39m                        \u001b[90m│\u001b[39m [PASS]                 \u001b[90m│\u001b[39m                        \u001b[90m│\u001b[39m\n\u001b[90m│\u001b[39m                        \u001b[90m│\u001b[39m                        \u001b[90m│\u001b[39m                        \u001b[90m│\u001b[39m {\"task\":\"writable-row… \u001b[90m│\u001b[39m                        \u001b[90m│\u001b[39m\n\u001b[90m├────────────────────────\u001b[39m\u001b[90m┼────────────────────────\u001b[39m\u001b[90m┼────────────────────────\u001b[39m\u001b[90m┼────────────────────────\u001b[39m\u001b[90m┼────────────────────────┤\u001b[39m\n\u001b[90m│\u001b[39m claude-row             \u001b[90m│\u001b[39m fixture-claude         \u001b[90m│\u001b[39m                        \u001b[90m│\u001b[39m                        \u001b[90m│\u001b[39m [PASS]                 \u001b[90m│\u001b[39m\n\u001b[90m│\u001b[39m                        \u001b[90m│\u001b[39m                        \u001b[90m│\u001b[39m                        \u001b[90m│\u001b[39m                        \u001b[90m│\u001b[39m {\"task\":\"claude-row\",… \u001b[90m│\u001b[39m\n\u001b[90m└────────────────────────\u001b[39m\u001b[90m┴────────────────────────\u001b[39m\u001b[90m┴────────────────────────\u001b[39m\u001b[90m┴────────────────────────\u001b[39m\u001b[90m┴────────────────────────┘\u001b[39m\n✓ Eval complete (ID: eval-x9k-2026-09-29T21:24:18)\n\n» View results: promptfoo view\n» Share with your team: https://promptfoo.app\n» Feedback: https://promptfoo.dev/feedback\n\nTotal Tokens: 54\n  Eval: 54 (33 prompt, 21 completion, 2 cached)\n\nResults:\n  ✓ 3 passed (100%)\n  0 failed (0%)\n  0 errors (0%)\nDuration: 6s (concurrency: 4)\n\nWriting output to results.json\n"
+}

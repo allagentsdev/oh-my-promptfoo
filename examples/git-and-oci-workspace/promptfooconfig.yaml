@@ -1,0 +1,31 @@
+prompts: ["{{task}}"]
+providers:
+  - id: package:@allagents/promptfoo-integration:Provider
+    config:
+      delegate:
+        id: copilot-sdk
+        config:
+          permissions:
+            filesystem: write
+            shell: allow
+        env:
+          COPILOT_GITHUB_TOKEN: "{{env.COPILOT_GITHUB_TOKEN}}"
+      workspace:
+        sources:
+          - type: git
+            repository: https://github.com/allagentsdev/promptfoo-integration.git
+            ref: main
+            destination: project
+          - type: oci
+            repository: "{{env.OCI_REPOSITORY}}"
+            digest: "{{env.OCI_DIGEST}}"
+            destination: .agents/skills
+            permissions: read-only
+      fileChanges: true
+tests:
+  - vars:
+      task: Read the provided skills and write notes.txt outside the source repositories.
+    assert:
+      - type: javascript
+        value: |
+          return context.providerResponse.metadata.fileChanges.status === 'complete';
