@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { channel } from "node:diagnostics_channel";
 import { cp, lstat, mkdir, readdir, readlink, realpath, rm, writeFile } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -26,6 +27,19 @@ const safeGitArgs = [
   "core.untrackedCache=false",
 ];
 const hexObject = /^[a-f0-9]{40}(?:[a-f0-9]{24})?$/;
+const preparationPhases = channel("allagents.workspace.preparation");
+async function measuredGitPhase<T>(phase: string, work: () => Promise<T>): Promise<T> {
+  if (!preparationPhases.hasSubscribers) return work();
+  const start = process.hrtime.bigint();
+  try {
+    return await work();
+  } finally {
+    preparationPhases.publish({
+      phase,
+      elapsedMs: Number(process.hrtime.bigint() - start) / 1_000_000,
+    });
+  }
+}
 
 export function containedPath(root: string, path: string): string {
   if (
@@ -437,20 +451,22 @@ async function materializeBoundedGit(
         privatePaths: [root, bounded, ...(repository ? [repository] : [])],
       };
       const checkout = join(bounded, "repository");
-      await runSource(
-        "git",
-        [
-          ...safeGitArgs,
-          "clone",
-          "--no-checkout",
-          ...(localShared
-            ? ["--shared"]
-            : ["--no-local", "--no-hardlinks", ...(local ? [] : ["--depth=1"])]),
-          "--",
-          localShared ? repository! : source.repository,
-          checkout,
-        ],
-        options,
+      await measuredGitPhase("git-clone", () =>
+        runSource(
+          "git",
+          [
+            ...safeGitArgs,
+            "clone",
+            "--no-checkout",
+            ...(localShared
+              ? ["--shared"]
+              : ["--no-local", "--no-hardlinks", ...(local ? [] : ["--depth=1"])]),
+            "--",
+            localShared ? repository! : source.repository,
+            checkout,
+          ],
+          options,
+        ),
       );
       if (local) {
         try {
@@ -502,24 +518,26 @@ async function materializeBoundedGit(
         { ...options, limit: limits.maxDownloadBytes },
       );
       parseTreeListing(listing, checkout);
-      await runSource(
-        "git",
-        [
-          ...safeGitArgs,
-          "-c",
-          "checkout.workers=8",
-          "-c",
-          "checkout.thresholdForParallelism=100",
-          "-C",
-          checkout,
-          "checkout",
-          "--detach",
-          "--force",
-          source.commit,
-        ],
-        options,
+      await measuredGitPhase("git-checkout", () =>
+        runSource(
+          "git",
+          [
+            ...safeGitArgs,
+            "-c",
+            "checkout.workers=8",
+            "-c",
+            "checkout.thresholdForParallelism=100",
+            "-C",
+            checkout,
+            "checkout",
+            "--detach",
+            "--force",
+            source.commit,
+          ],
+          options,
+        ),
       );
-      await validateGitTree(checkout, limits);
+      await measuredGitPhase("git-validate-tree", () => validateGitTree(checkout, limits));
       if (localShared) {
         const git = join(checkout, ".git");
         // Keep only the pinned commit reachable while Git repacks objects from
@@ -528,27 +546,31 @@ async function materializeBoundedGit(
           await rm(join(git, name), { recursive: true, force: true });
         await mkdir(join(git, "refs"));
         await writeFile(join(git, "shallow"), `${source.commit}\n`);
-        await runSource(
-          "git",
-          [
-            ...safeGitArgs,
-            "-C",
-            checkout,
-            "repack",
-            "-a",
-            "-d",
-            "--window=0",
-            "--depth=0",
-            "--no-local",
-            "-q",
-          ],
-          options,
+        await measuredGitPhase("git-repack", () =>
+          runSource(
+            "git",
+            [
+              ...safeGitArgs,
+              "-C",
+              checkout,
+              "repack",
+              "-a",
+              "-d",
+              "--window=0",
+              "--depth=0",
+              "--no-local",
+              "-q",
+            ],
+            options,
+          ),
         );
         await rm(join(git, "objects", "info", "alternates"), { force: true });
-        await runSource(
-          "git",
-          [...safeGitArgs, "-C", checkout, "fsck", "--connectivity-only", "--no-reflogs"],
-          options,
+        await measuredGitPhase("git-fsck", () =>
+          runSource(
+            "git",
+            [...safeGitArgs, "-C", checkout, "fsck", "--connectivity-only", "--no-reflogs"],
+            options,
+          ),
         );
         downloaded = 0;
         await count(git);
@@ -567,7 +589,9 @@ async function materializeBoundedGit(
         await rm(join(checkout, ".git", name), { recursive: true, force: true });
       await writeDetachedGit(checkout, source.commit);
       // External Git is now quiescent; only bounded, already verified parent copying remains.
-      await copyVerifiedTree(checkout, destination, writer);
+      await measuredGitPhase("git-seed-copy", () =>
+        copyVerifiedTree(checkout, destination, writer),
+      );
       return downloaded;
     });
   } catch (error) {
@@ -624,24 +648,26 @@ async function copyVerifiedTree(
       }
     }
   }
-  await plan(source, destination);
+  await measuredGitPhase("git-seed-copy-plan", () => plan(source, destination));
   let cursor = 0;
   let failed = false;
   let failure: unknown;
-  await Promise.all(
-    Array.from({ length: Math.min(32, files.length) }, async () => {
-      while (!failed && cursor < files.length) {
-        const file = files[cursor++];
-        try {
-          if (file.target === undefined)
-            await cp(file.input, file.output, { preserveTimestamps: true });
-          else await writer.link(file.output, file.target);
-        } catch (error) {
-          failed = true;
-          failure = error;
+  await measuredGitPhase("git-seed-copy-files", () =>
+    Promise.all(
+      Array.from({ length: Math.min(32, files.length) }, async () => {
+        while (!failed && cursor < files.length) {
+          const file = files[cursor++];
+          try {
+            if (file.target === undefined)
+              await cp(file.input, file.output, { preserveTimestamps: true });
+            else await writer.link(file.output, file.target);
+          } catch (error) {
+            failed = true;
+            failure = error;
+          }
         }
-      }
-    }),
+      }),
+    ),
   );
   if (failed) throw failure;
 }
