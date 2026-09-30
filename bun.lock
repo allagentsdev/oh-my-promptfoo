@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "promptfoo-integrations",
+      "name": "promptfoo-integration",
       "devDependencies": {
         "@biomejs/biome": "2.4.6",
         "@changesets/cli": "2.29.8",

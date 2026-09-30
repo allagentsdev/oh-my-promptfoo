@@ -19,7 +19,7 @@ Keeping a physical copy of a multi-gigabyte repository for every row would use t
 
 ## Decision
 
-Create the public repository `allagentsdev/promptfoo-integrations` as a Bun workspace that publishes independently versioned npm integrations.
+Create the public repository `allagentsdev/promptfoo-integration` as a Bun workspace that publishes the Promptfoo npm integration.
 
 The initial public package is `@allagents/promptfoo-integration`. The name identifies a third-party integration rather than a Promptfoo fork and leaves room for later Promptfoo-facing modules. `@allagents/promptfoo-plugins` is not used because Promptfoo already uses plugin terminology for red-team plugins.
 
@@ -329,7 +329,7 @@ For bring-your-own-key use, `provider` is a closed object containing a required 
 
 ### Repository and release policy
 
-The repository is named `promptfoo-integrations`, not `promptfoo-recipes`, because downstream projects execute its packages as production dependencies. Copyable configurations belong under `examples/`.
+The repository is named `promptfoo-integration`, not `promptfoo-recipes`, because downstream projects install its package as a production dependency. Copyable configurations belong under `examples/`.
 
 The package targets Node.js 22.22.0 or newer on Linux and macOS. Bun manages workspaces, tests, builds, and release scripts. The package ships ESM, CommonJS, and declaration entrypoints. It bundles private workspace implementation while externalizing `promptfoo` and optional `@github/copilot-sdk`. Releases use GitHub trusted publishing with npm provenance.
 

@@ -12,7 +12,7 @@ providers:
       workspace:
         sources:
           - type: git
-            repository: https://github.com/allagentsdev/promptfoo-integrations.git
+            repository: https://github.com/allagentsdev/promptfoo-integration.git
             ref: main
             destination: project
             permissions: read-only
@@ -28,7 +28,7 @@ providers:
       workspace:
         sources:
           - type: git
-            repository: https://github.com/allagentsdev/promptfoo-integrations.git
+            repository: https://github.com/allagentsdev/promptfoo-integration.git
             ref: main
             destination: project
             permissions: all

@@ -9,7 +9,7 @@ status: proposed
 
 ## Goal
 
-Publish `@allagents/promptfoo-integration` from `allagentsdev/promptfoo-integrations`. The package provides:
+Publish `@allagents/promptfoo-integration` from `allagentsdev/promptfoo-integration`. The package provides:
 
 - `Provider`, a workspace-owning provider that delegates to Promptfoo's Codex and Claude providers or the package's Copilot provider, retains each row's workspace lease through assertions, and optionally returns bounded file changes;
 - `CopilotSdkProvider`, a lower-level provider that executes the public GitHub Copilot SDK in an existing working directory; and
