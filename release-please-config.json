@@ -1,0 +1,22 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "release-type": "node",
+  "packages": {
+    ".": {
+      "extra-files": [
+        {
+          "type": "json",
+          "path": "packages/promptfoo-integration/package.json",
+          "jsonpath": "$.version"
+        }
+      ]
+    }
+  },
+  "include-component-in-tag": false,
+  "include-v-in-tag": true,
+  "skip-github-release": true,
+  "draft-pull-request": true,
+  "separate-pull-requests": true,
+  "pull-request-title-pattern": "chore(release): release ${version}",
+  "pull-request-header": "Merging this PR updates the version and changelog. Create an RC tag at the merged commit and publish it through publish.yml; publish the stable tag at that same commit only after the registry consumer and Promptfoo E2E checks pass. The publish workflow creates the GitHub release after registry validation."
+}

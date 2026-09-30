@@ -501,7 +501,7 @@ Normal output assertions consume unchanged delegate output. JavaScript assertion
 2. Configure Promptfoo as a peer and Copilot SDK as optional peer plus exact development dependency.
 3. Pin Bun and Node; configure strict TypeScript, Biome, Bun tests, dual ESM/CommonJS builds, and the cache-maintenance bin.
 4. Bundle workspace core while externalizing both peers.
-5. Add Changesets, build/typecheck/lint/test/pack commands, validation CI, packed-package smoke tests, trusted publishing, and dependency update automation.
+5. Add Release Please version PRs after the first stable release, build/typecheck/lint/test/pack commands, validation CI, packed-package smoke tests, trusted publishing, and dependency update automation.
 6. Confirm maintainers control the `@allagents` npm scope.
 
 ### Verification

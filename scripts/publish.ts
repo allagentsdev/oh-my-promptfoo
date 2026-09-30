@@ -15,6 +15,11 @@ if (
 const manifestPath = "packages/promptfoo-integration/package.json";
 const original = await readFile(manifestPath, "utf8");
 const manifest = JSON.parse(original);
+const rootManifest = JSON.parse(await readFile("package.json", "utf8"));
+if (rootManifest.version !== manifest.version)
+  throw new Error(
+    `Root version ${rootManifest.version} differs from package version ${manifest.version}`,
+  );
 const [, baseVersion, candidateNumber] = match;
 if (manifest.version !== baseVersion)
   throw new Error(`Release tag ${releaseRef} does not match package version ${manifest.version}`);

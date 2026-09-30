@@ -30,6 +30,10 @@ async function fixture() {
   const manifestPath = join(root, "packages", "promptfoo-integration", "package.json");
   const original = `${JSON.stringify({ name: "@allagents/promptfoo-integration", version: "1.0.0" })}\n`;
   await writeFile(manifestPath, original);
+  await writeFile(
+    join(root, "package.json"),
+    `${JSON.stringify({ version: "1.0.0", private: true })}\n`,
+  );
   return {
     root,
     manifestPath,
@@ -89,6 +93,20 @@ describe("trusted release publish", () => {
     try {
       const result = run(f.root, f.marker, f.output, "wrong-tag");
       expect(result.status).not.toBe(0);
+      expect(await Bun.file(f.marker).exists()).toBe(false);
+      expect(await Bun.file(f.output).exists()).toBe(false);
+    } finally {
+      await rm(f.root, { recursive: true, force: true });
+    }
+  });
+
+  test("rejects a release when root and public package versions disagree", async () => {
+    const f = await fixture();
+    try {
+      await writeFile(join(f.root, "package.json"), JSON.stringify({ version: "1.1.0" }));
+      const result = run(f.root, f.marker, f.output, "missing");
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain("Root version 1.1.0 differs from package version 1.0.0");
       expect(await Bun.file(f.marker).exists()).toBe(false);
       expect(await Bun.file(f.output).exists()).toBe(false);
     } finally {
