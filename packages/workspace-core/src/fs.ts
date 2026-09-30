@@ -11,6 +11,7 @@ import {
   rename,
   rm,
   rmdir,
+  unlink,
   writeFile,
 } from "node:fs/promises";
 import { hostname } from "node:os";
@@ -513,17 +514,34 @@ export async function protect(
       if (result.status === "fulfilled") for (const child of result.value) pending.push(child);
   }
 }
-export async function removeTree(path: string): Promise<void> {
-  if (!(await exists(path))) return;
-  if (process.platform === "win32" && (await lstat(path)).isSymbolicLink()) {
-    await rm(path, { recursive: true, force: true, maxRetries: 8, retryDelay: 125 });
+async function removeWindowsEntry(path: string): Promise<void> {
+  const info = await lstat(path);
+  if (info.isSymbolicLink()) {
+    try {
+      await unlink(path);
+    } catch (error) {
+      if (!["EPERM", "EISDIR"].includes((error as NodeJS.ErrnoException).code ?? "")) throw error;
+      // Directory junctions need RemoveDirectory, never traversal into their target.
+      await rmdir(path);
+    }
     return;
   }
+  if (info.isDirectory()) {
+    for (const name of await readdir(path)) await removeWindowsEntry(join(path, name));
+    await rmdir(path);
+    return;
+  }
+  if (info.isFile()) {
+    await unlink(path);
+    return;
+  }
+  throw new Error("Refusing special inode during Windows workspace removal");
+}
+export async function removeTree(path: string): Promise<void> {
+  if (!(await exists(path))) return;
   if (process.platform === "win32") {
-    await windowsTreeAccess(path, true);
-    // Git and agent subprocess handles can outlive their close notification briefly on NTFS.
-    // Retry Windows sharing violations, but retain any tree that stays inaccessible.
-    await rm(path, { recursive: true, force: true, maxRetries: 8, retryDelay: 125 });
+    if (!(await lstat(path)).isSymbolicLink()) await windowsTreeAccess(path, true);
+    await removeWindowsEntry(path);
     return;
   }
   if (process.platform === "linux") {
