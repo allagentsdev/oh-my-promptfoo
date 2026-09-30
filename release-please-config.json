@@ -14,9 +14,10 @@
   },
   "include-component-in-tag": false,
   "include-v-in-tag": true,
-  "skip-github-release": true,
+  "draft": true,
+  "force-tag-creation": true,
   "draft-pull-request": true,
   "separate-pull-requests": true,
   "pull-request-title-pattern": "chore(release): release ${version}",
-  "pull-request-header": "Merging this PR updates the version and changelog. Create an RC tag at the merged commit and publish it through publish.yml; publish the stable tag at that same commit only after the registry consumer and Promptfoo E2E checks pass. The publish workflow creates the GitHub release after registry validation."
+  "pull-request-header": "Each main push while this PR is pending can publish a source-commit preview under npm next after validation. Merging this PR creates a draft stable GitHub release and tag; the publish workflow dispatches on that tag, verifies stable npm latest and registry consumers, then publishes the GitHub release. The first 1.0.0 release remains manual."
 }
