@@ -118,6 +118,25 @@ test("large protection walks retain file modes and never follow source symlinks"
   expect((await lstat(nested)).mode & 0o777).toBe(0o700);
   expect((await lstat(outside)).mode & 0o777).toBe(0o600);
 });
+test("writable Git views retain immutable objects while allowing new Git objects", async () => {
+  const root = await mkdtemp(join(realpathSync(tmpdir()), "allagents-git-object-modes-"));
+  temporary.push(root);
+  const tree = join(root, "tree");
+  const objects = join(tree, ".git", "objects", "ab");
+  await mkdir(objects, { recursive: true });
+  await writeFile(join(objects, "existing"), "immutable object");
+  await writeFile(join(tree, ".git", "index"), "index");
+  await writeFile(join(tree, "source.txt"), "source");
+
+  await protect(tree, false);
+  await protect(tree, true, true);
+  expect((await lstat(join(objects, "existing"))).mode & 0o777).toBe(0o444);
+  expect((await lstat(objects)).mode & 0o777).toBe(0o700);
+  expect((await lstat(join(tree, ".git", "index"))).mode & 0o777).toBe(0o644);
+  expect((await lstat(join(tree, "source.txt"))).mode & 0o777).toBe(0o644);
+  await writeFile(join(objects, "new"), "new object");
+  expect(await readFile(join(objects, "new"), "utf8")).toBe("new object");
+});
 describe("workspace configuration", () => {
   test("canceling a native lock waiter preserves its reason and the current holder", async () => {
     const root = await mkdtemp(join(realpathSync(tmpdir()), "allagents-lock-cancel-"));

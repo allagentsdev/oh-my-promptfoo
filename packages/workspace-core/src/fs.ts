@@ -213,11 +213,16 @@ export async function allocated(root: string): Promise<number> {
     for (const name of await readdir(root)) bytes += await allocated(join(root, name));
   return bytes;
 }
-export async function protect(root: string, writable: boolean): Promise<void> {
+export async function protect(
+  root: string,
+  writable: boolean,
+  preserveGitObjects = false,
+): Promise<void> {
   // Protecting a large checkout is dominated by filesystem round trips. Walk
   // independent entries concurrently while bounding the number of in-flight
   // operations; every descendant is still visited and symlinks are not followed.
   const pending = [root];
+  const gitObjects = join(root, ".git", "objects");
   for (let cursor = 0; cursor < pending.length; ) {
     const end = Math.min(cursor + 32, pending.length);
     const batch = pending.slice(cursor, end);
@@ -230,6 +235,10 @@ export async function protect(root: string, writable: boolean): Promise<void> {
           await chmod(path, writable ? 0o700 : 0o555);
           return (await readdir(path)).map((name) => join(path, name));
         }
+        // Git never edits an existing loose object or pack file. Its object
+        // directories remain writable for newly created objects, while keeping
+        // existing object bytes read-only avoids OverlayFS metadata copy-ups.
+        if (writable && preserveGitObjects && path.startsWith(`${gitObjects}${sep}`)) return [];
         await chmod(path, (stat.mode & 0o111 ? 0o555 : 0o444) | (writable ? 0o200 : 0));
         return [];
       }),

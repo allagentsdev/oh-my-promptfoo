@@ -217,7 +217,7 @@ export class WorkspaceManager {
           };
           record.views.push(view);
           await this.save(record);
-          await this.factory.create(view);
+          await this.factory.create(view, source.type === "git");
         }
       }
       record.status = "active";

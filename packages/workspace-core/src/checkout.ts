@@ -283,7 +283,7 @@ export class CheckoutFactory {
     await removeTree(state);
     return "copy";
   }
-  async create(view: SourceView): Promise<void> {
+  async create(view: SourceView, gitSource = false): Promise<void> {
     contained(this.runtime, view.path);
     await mkdir(dirname(view.path), { recursive: true, mode: 0o700 });
     if (view.adapter === "overlay") {
@@ -299,7 +299,7 @@ export class CheckoutFactory {
       }
       if (!(await isMounted(view.path))) throw new Error("Overlay view is invisible to provider");
       // metacopy changes permissions without duplicating lower file bytes.
-      await protect(view.path, true);
+      await protect(view.path, true, gitSource);
       return;
     }
     const operation = async () => {
@@ -313,7 +313,7 @@ export class CheckoutFactory {
           );
       }
       await copyTree(view.seedSource, view.path, view.adapter === "reflink");
-      await protect(view.path, true);
+      await protect(view.path, true, gitSource);
     };
     if (view.adapter === "copy")
       await withLock(
