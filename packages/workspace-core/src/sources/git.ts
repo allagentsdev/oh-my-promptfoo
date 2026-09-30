@@ -9,6 +9,7 @@ import {
   readlink,
   realpath,
   rm,
+  stat as statPath,
   utimes,
   writeFile,
 } from "node:fs/promises";
@@ -384,6 +385,10 @@ async function writeGitIndex(
 
 export async function validateGitTree(root: string, limits: SourceLimits): Promise<void> {
   let bytes = 0;
+  const physicalRoot =
+    process.platform === "win32" ? (await realpath(root)).toLowerCase() : root;
+  const rootInfo =
+    process.platform === "win32" ? await statPath(root, { bigint: true }) : undefined;
   async function walk(path: string): Promise<void> {
     for (const name of await readdir(path)) {
       const child = join(path, name);
@@ -398,8 +403,21 @@ export async function validateGitTree(root: string, limits: SourceLimits): Promi
           throw new Error("Git symlink escapes source containment");
         try {
           const actual = await realpath(child);
-          if (actual !== root && !actual.startsWith(`${root}${sep}`))
-            throw new Error("Git symlink escapes realpath containment");
+          const physical = process.platform === "win32" ? actual.toLowerCase() : actual;
+          if (physical !== physicalRoot && !physical.startsWith(`${physicalRoot}${sep}`)) {
+            // NTFS realpath can return 8.3 for the root and long names for
+            // the target. Only matching nonzero inode identity proves safety.
+            if (!rootInfo?.ino) throw new Error("Git symlink escapes realpath containment");
+            let ancestor = dirname(actual);
+            for (;;) {
+              const info = await statPath(ancestor, { bigint: true });
+              if (info.ino !== 0n && info.dev === rootInfo.dev && info.ino === rootInfo.ino)
+                break;
+              const parent = dirname(ancestor);
+              if (parent === ancestor) throw new Error("Git symlink escapes realpath containment");
+              ancestor = parent;
+            }
+          }
         } catch (error) {
           if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
         }

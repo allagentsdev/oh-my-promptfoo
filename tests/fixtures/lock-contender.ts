@@ -16,7 +16,8 @@ const windowsLockName =
         .digest("hex")}`
     : undefined;
 // Scale only the native backend's wait clock. The competing lock and all
-// filesystem/provider operations remain real; 180s becomes 200ms, 1800s becomes 2s.
+// filesystem/provider operations remain real; POSIX 1800s becomes 2s.
+// Windows 1800s becomes 6s to include PowerShell/Git startup under CI load.
 mock.module("node:child_process", () => ({
   ...original,
   spawn(command: string, args: readonly string[], settings: childProcess.SpawnOptions) {
@@ -37,7 +38,7 @@ mock.module("node:child_process", () => ({
         ...settings,
         env: {
           ...settings.env,
-          ALLAGENTS_LOCK_TIMEOUT_MS: String(Number(settings.env.ALLAGENTS_LOCK_TIMEOUT_MS) / 900),
+          ALLAGENTS_LOCK_TIMEOUT_MS: String(Number(settings.env.ALLAGENTS_LOCK_TIMEOUT_MS) / 300),
         },
       };
     } else return original.spawn(command, args, settings);

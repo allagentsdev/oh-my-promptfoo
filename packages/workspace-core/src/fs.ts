@@ -13,7 +13,7 @@ import {
   rmdir,
   writeFile,
 } from "node:fs/promises";
-import { hostname } from "node:os";
+import { hostname, tmpdir } from "node:os";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import type { Ownership, ProcessIdentity, TreeEntry } from "./types.js";
 export const PACKAGE = "@allagents/promptfoo-integration" as const;
@@ -410,9 +410,9 @@ async function windowsTreeAccess(root: string, writable: boolean): Promise<void>
       return sid;
     });
   const sid = await windowsIdentity;
+  // File attributes require FILE_WRITE_ATTRIBUTES even for an RX checkout.
+  // Apply attributes before narrowing ACLs; grant only RX once immutable.
   const grant = `*${sid}:(OI)(CI)${writable ? "F" : "RX"}`;
-  // Give each descendant its own ACE before removing inherited permissions.
-  // /L handles link inodes, never the targets outside the protected tree.
   await run("icacls.exe", [root, "/grant:r", grant, "/T", "/L", "/Q"]);
   await run("icacls.exe", [root, "/inheritance:r", "/T", "/L", "/Q"]);
 }
@@ -421,27 +421,43 @@ async function windowsTreeAccess(root: string, writable: boolean): Promise<void>
 async function windowsFileAttributes(
   root: string,
   readOnly: boolean,
-  gitObjects = "",
+  gitObjects = false,
 ): Promise<void> {
   const { execFile } = await import("node:child_process");
   const script = `
 $ErrorActionPreference = 'Stop'
-$pending = [Collections.Generic.Stack[string]]::new()
-$pending.Push($env:ALLAGENTS_TREE_ROOT)
-$objects = $env:ALLAGENTS_GIT_OBJECTS
+Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public static class NativeFileAttributes {
+  [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+  [return: MarshalAs(UnmanagedType.Bool)]
+  public static extern bool SetFileAttributes(string path, uint attributes);
+}
+'@
+$pending = [Collections.Generic.Stack[object[]]]::new()
+$pending.Push(@($env:ALLAGENTS_TREE_ROOT, 0))
+$objects = $env:ALLAGENTS_GIT_OBJECTS -eq '1'
 while ($pending.Count -gt 0) {
-  foreach ($child in [IO.Directory]::GetFileSystemEntries($pending.Pop())) {
+  $entry = $pending.Pop()
+  $directory = [string]$entry[0]
+  $state = [int]$entry[1]
+  foreach ($child in [IO.Directory]::GetFileSystemEntries($directory)) {
     $attributes = [IO.File]::GetAttributes($child)
     if (($attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { continue }
     if (($attributes -band [IO.FileAttributes]::Directory) -ne 0) {
-      $pending.Push($child)
+      $name = [IO.Path]::GetFileName($child)
+      $nextState = if ($state -eq 2) { 2 } elseif ($state -eq 0 -and $name -ieq '.git') { 1 } elseif ($state -eq 1 -and $name -ieq 'objects') { 2 } else { -1 }
+      $pending.Push(@($child, $nextState))
       continue
     }
-    $immutable = $env:ALLAGENTS_READ_ONLY -eq '1' -or ($objects -and $child.StartsWith($objects + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase))
+    $immutable = $env:ALLAGENTS_READ_ONLY -eq '1' -or ($objects -and $state -eq 2)
     $next = if ($immutable) {
       $attributes -bor [IO.FileAttributes]::ReadOnly
     } else { $attributes -band (-bnot [IO.FileAttributes]::ReadOnly) }
-    if ($next -ne $attributes) { [IO.File]::SetAttributes($child, $next) }
+    if ($next -ne $attributes -and -not [NativeFileAttributes]::SetFileAttributes($child, [uint32]$next)) {
+      throw [ComponentModel.Win32Exception]::new([Runtime.InteropServices.Marshal]::GetLastWin32Error())
+    }
   }
 }
 `;
@@ -464,9 +480,11 @@ while ($pending.Count -gt 0) {
       {
         env: {
           SystemRoot: process.env.SystemRoot ?? "C:\\Windows",
+          TEMP: tmpdir(),
+          TMP: tmpdir(),
           ALLAGENTS_TREE_ROOT: root,
           ALLAGENTS_READ_ONLY: readOnly ? "1" : "0",
-          ALLAGENTS_GIT_OBJECTS: gitObjects,
+          ALLAGENTS_GIT_OBJECTS: gitObjects ? "1" : "0",
         },
         windowsHide: true,
       },
@@ -487,7 +505,7 @@ export async function protect(
     await windowsFileAttributes(
       root,
       !writable,
-      writable && preserveGitObjects ? join(root, ".git", "objects") : "",
+      writable && preserveGitObjects,
     );
     if (!writable) await windowsTreeAccess(root, false);
     return;

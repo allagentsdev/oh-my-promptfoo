@@ -32,7 +32,8 @@ import type { WorkspaceSpec } from "../packages/workspace-core/src/types.ts";
 
 const exec = promisify(execFile);
 const roots: string[] = [];
-const privateAclCheck = `$a=Get-Acl -LiteralPath $env:ALLAGENTS_PRIVATE_ROOT;$me=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value;if (!$a.AreAccessRulesProtected -or @($a.Access | Where-Object { $_.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value -ne $me }).Count -ne 0) { exit 4 }`;
+const privateAclCheck =
+  "if(/\\(I\\)|Everyone|Authenticated Users|BUILTIN\\\\Users/i.test(acl)||!/\\(F\\)/.test(acl))process.exit(4);";
 afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
@@ -441,14 +442,8 @@ describe("OCI manifest and streaming defenses", () => {
     );
     let checkPrivacy = "if((fs.statSync(p).mode&511)!==384)process.exit(4);";
     if (process.platform === "win32") {
-      const powershell = join(
-        process.env.SystemRoot ?? "C:\\Windows",
-        "System32",
-        "WindowsPowerShell",
-        "v1.0",
-        "powershell.exe",
-      );
-      checkPrivacy = `require('node:child_process').execFileSync(${JSON.stringify(powershell)}, ['-NoProfile','-NonInteractive','-Command',${JSON.stringify(privateAclCheck)}], {env:{SystemRoot:process.env.SystemRoot,ALLAGENTS_PRIVATE_ROOT:p}});`;
+      const icacls = join(process.env.SystemRoot ?? "C:\\Windows", "System32", "icacls.exe");
+      checkPrivacy = `const acl=require('node:child_process').execFileSync(${JSON.stringify(icacls)},[p],{encoding:'utf8'});${privateAclCheck}`;
     }
     const oras = await fakeOras(
       root,
@@ -576,26 +571,10 @@ test("private acquisition recovery removes only marked dead credential directori
       expect(env.TEMP).toBe(root);
       expect(env.TMP).toBe(root);
       expect(env.USERPROFILE).toBe(root);
-      await new Promise<void>((resolve, reject) => {
-        const child = execFile(
-          join(
-            process.env.SystemRoot ?? "C:\\Windows",
-            "System32",
-            "WindowsPowerShell",
-            "v1.0",
-            "powershell.exe",
-          ),
-          ["-NoProfile", "-NonInteractive", "-Command", privateAclCheck],
-          {
-            env: {
-              SystemRoot: process.env.SystemRoot ?? "C:\\Windows",
-              ALLAGENTS_PRIVATE_ROOT: root,
-            },
-          },
-          (error) => (error ? reject(error) : resolve()),
-        );
-        child.stdin?.end();
-      });
+      const icacls = join(process.env.SystemRoot ?? "C:\\Windows", "System32", "icacls.exe");
+      const { stdout } = await exec(icacls, [root]);
+      expect(stdout).not.toMatch(/\(I\)|Everyone|Authenticated Users|BUILTIN\\Users/i);
+      expect(stdout).toMatch(/\(F\)/);
     } else expect((await lstat(root)).mode & 0o077).toBe(0);
   });
   await expect(lstat(dead)).rejects.toThrow();

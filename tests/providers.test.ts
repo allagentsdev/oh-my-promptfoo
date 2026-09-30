@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { execFile } from "node:child_process";
-import { realpathSync } from "node:fs";
+import { realpathSync, statSync } from "node:fs";
 import { access, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
@@ -401,7 +401,10 @@ describe("direct Copilot provider", () => {
       "approve-once",
       "reject",
     ]);
-    expect(realpathSync(output.directory)).toBe(realpathSync(path));
+    const directory = statSync(output.directory);
+    const fixture = statSync(path);
+    expect(directory.isDirectory()).toBe(true);
+    expect([directory.dev, directory.ino]).toEqual([fixture.dev, fixture.ino]);
     expect(output.discovery).toBe(false);
     expect(response.tokenUsage).toEqual({
       prompt: 4,
