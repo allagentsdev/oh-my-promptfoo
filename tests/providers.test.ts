@@ -440,13 +440,15 @@ describe("direct Copilot provider", () => {
     const external = await mkdtemp(join(realpathSync(tmpdir()), "allagents-outside-skill-"));
     roots.push(external);
     await writeFile(join(external, "SKILL.md"), "# Outside\n");
-    await symlink(external, join(path, "linked-skill"));
     await mkdir(join(path, ".agents", "skills", "alias"), { recursive: true });
     await symlink(join(path, "README.md"), join(path, ".agents", "skills", "alias", "SKILL.md"));
-    await symlink(
-      join(path, ".agents", "skills", "cw-sql-schema-migration"),
-      join(path, ".agents", "skills", "linked"),
-    );
+    // Windows icacls /T traverses directory links during fixture cleanup.
+    if (process.platform !== "win32") {
+      await symlink(
+        join(path, ".agents", "skills", "cw-sql-schema-migration"),
+        join(path, ".agents", "skills", "linked"),
+      );
+    }
     const provider = new CopilotSdkProvider({ config: { basePath: path, working_dir: "." } });
     const call = (request: object) => provider.callApi(`read:${JSON.stringify(request)}`);
     try {
@@ -482,9 +484,8 @@ describe("direct Copilot provider", () => {
         { path: skillPath, mode: "started-only" },
         { path: skillPath, mode: "text-only" },
         { path: join(external, "SKILL.md") },
-        { path: "linked-skill/SKILL.md" },
         { path: ".agents/skills/alias/SKILL.md" },
-        { path: ".agents/skills/linked/SKILL.md" },
+        ...(process.platform === "win32" ? [] : [{ path: ".agents/skills/linked/SKILL.md" }]),
         { path: skillPath, mcpServerName: "unrelated-server" },
         { path: ".agents/skills/missing/SKILL.md" },
       ]) {
