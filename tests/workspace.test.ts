@@ -113,9 +113,7 @@ test("large protection walks retain file modes and never follow source symlinks"
 
   await protect(tree, false);
   if (process.platform === "win32") {
-    // NTFS exposes a read-only attribute, not Unix execute or owner/group bits.
-    for (const path of [join(nested, "file-0"), join(nested, "file-64")])
-      expect((await lstat(path)).mode & 0o222).toBe(0);
+    // NTFS ACLs, not POSIX mode bits, restrict existing and newly created files.
     await expect(writeFile(join(nested, "file-0"), "changed")).rejects.toThrow();
     await expect(writeFile(join(nested, "new-file"), "not allowed")).rejects.toThrow();
     await writeFile(outside, "untouched");
@@ -128,8 +126,6 @@ test("large protection walks retain file modes and never follow source symlinks"
 
   await protect(tree, true);
   if (process.platform === "win32") {
-    for (const path of [join(nested, "file-0"), join(nested, "file-64")])
-      expect((await lstat(path)).mode & 0o222).not.toBe(0);
     await writeFile(join(nested, "new-file"), "allowed");
     expect(await readFile(join(nested, "new-file"), "utf8")).toBe("allowed");
     await writeFile(join(nested, "file-0"), "changed");
@@ -174,12 +170,12 @@ test("writable Git views retain immutable objects while allowing new Git objects
 
   await protect(tree, false);
   await protect(tree, true, true);
-  expect((await lstat(join(objects, "existing"))).mode & 0o222).toBe(0);
   if (process.platform === "win32") {
-    expect((await lstat(objects)).mode & 0o222).not.toBe(0);
-    expect((await lstat(join(tree, ".git", "index"))).mode & 0o222).not.toBe(0);
-    expect((await lstat(join(tree, "source.txt"))).mode & 0o222).not.toBe(0);
+    await expect(writeFile(join(objects, "existing"), "mutation")).rejects.toThrow();
+    await writeFile(join(tree, ".git", "index"), "mutable index");
+    await writeFile(join(tree, "source.txt"), "mutable source");
   } else {
+    expect((await lstat(join(objects, "existing"))).mode & 0o222).toBe(0);
     expect((await lstat(objects)).mode & 0o777).toBe(0o700);
     expect((await lstat(join(tree, ".git", "index"))).mode & 0o777).toBe(0o644);
     expect((await lstat(join(tree, "source.txt"))).mode & 0o777).toBe(0o644);
@@ -643,7 +639,22 @@ describe("workspace lifecycle", () => {
     const owner = manager(f.spec, f.channels);
     const a = await owner.prepare();
     const shared = await readlink(join(a.path, "project"));
-    await chmod(join(shared, "source.txt"), 0o644);
+    if (process.platform === "win32") {
+      const account = execFileSync(
+        join(process.env.SystemRoot ?? "C:\\Windows", "System32", "whoami.exe"),
+        ["/user", "/fo", "csv", "/nh"],
+        { encoding: "utf8" },
+      );
+      const sid = /,"(S-\d+(?:-\d+)+)"\s*$/.exec(account)?.[1];
+      if (!sid) throw new Error("Cannot determine fixture ACL owner");
+      execFileSync(join(process.env.SystemRoot ?? "C:\\Windows", "System32", "icacls.exe"), [
+        join(shared, "source.txt"),
+        "/grant:r",
+        `*${sid}:F`,
+        "/L",
+        "/Q",
+      ]);
+    } else await chmod(join(shared, "source.txt"), 0o644);
     await writeFile(join(shared, "source.txt"), "unexpected");
     await expect(owner.validateProtected(a)).rejects.toThrow("mutated");
     await expect(owner.prepare()).rejects.toThrow("invalidated");

@@ -13,7 +13,7 @@ import {
   rmdir,
   writeFile,
 } from "node:fs/promises";
-import { hostname, tmpdir } from "node:os";
+import { hostname } from "node:os";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import type { Ownership, ProcessIdentity, TreeEntry } from "./types.js";
 export const PACKAGE = "@allagents/promptfoo-integration" as const;
@@ -226,8 +226,17 @@ export async function ownedRoot(path: string, kind: string): Promise<void> {
       try {
         await rename(staging, absolute);
       } catch (error) {
-        if (!["EEXIST", "ENOTEMPTY"].includes((error as NodeJS.ErrnoException).code ?? ""))
+        const code = (error as NodeJS.ErrnoException).code;
+        if (
+          !["EEXIST", "ENOTEMPTY"].includes(code ?? "") &&
+          !(process.platform === "win32" && code === "EPERM")
+        )
           throw error;
+        // On Windows an already published directory causes EPERM, not EEXIST.
+        // Only a complete, owned marker establishes that a publisher won.
+        const winner = await json<Ownership>(join(absolute, MARKER)).catch(() => undefined);
+        if (winner?.package !== PACKAGE || winner.schemaVersion !== 1) throw error;
+        await assertNoSymlinkAncestors(absolute);
       }
     } finally {
       if (await exists(staging)) await removeTree(staging);
@@ -410,88 +419,54 @@ async function windowsTreeAccess(root: string, writable: boolean): Promise<void>
       return sid;
     });
   const sid = await windowsIdentity;
-  // File attributes require FILE_WRITE_ATTRIBUTES even for an RX checkout.
-  // Apply attributes before narrowing ACLs; grant only RX once immutable.
+  // Explicit inheritable owner ACE per inode; no chmod/write-open on Git objects.
   const grant = `*${sid}:(OI)(CI)${writable ? "F" : "RX"}`;
   await run("icacls.exe", [root, "/grant:r", grant, "/T", "/L", "/Q"]);
   await run("icacls.exe", [root, "/inheritance:r", "/T", "/L", "/Q"]);
 }
 
-/** chmod needs a write-open on Bun/Windows; use NTFS attributes and ACLs instead. */
-async function windowsFileAttributes(
-  root: string,
-  readOnly: boolean,
-  gitObjects = false,
-): Promise<void> {
+/** Existing objects stay read-only, while object directories accept new Git objects. */
+async function windowsGitObjectAccess(root: string): Promise<void> {
+  const objects = join(root, ".git", "objects");
+  if (!(await exists(objects))) return;
   const { execFile } = await import("node:child_process");
-  const script = `
-$ErrorActionPreference = 'Stop'
-Add-Type -TypeDefinition @'
-using System;
-using System.Runtime.InteropServices;
-public static class NativeFileAttributes {
-  [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-  [return: MarshalAs(UnmanagedType.Bool)]
-  public static extern bool SetFileAttributes(string path, uint attributes);
-}
-'@
-$pending = [Collections.Generic.Stack[object[]]]::new()
-$pending.Push(@($env:ALLAGENTS_TREE_ROOT, 0))
-$objects = $env:ALLAGENTS_GIT_OBJECTS -eq '1'
-while ($pending.Count -gt 0) {
-  $entry = $pending.Pop()
-  $directory = [string]$entry[0]
-  $state = [int]$entry[1]
-  foreach ($child in [IO.Directory]::GetFileSystemEntries($directory)) {
-    $attributes = [IO.File]::GetAttributes($child)
-    if (($attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { continue }
-    if (($attributes -band [IO.FileAttributes]::Directory) -ne 0) {
-      $name = [IO.Path]::GetFileName($child)
-      $nextState = if ($state -eq 2) { 2 } elseif ($state -eq 0 -and $name -ieq '.git') { 1 } elseif ($state -eq 1 -and $name -ieq 'objects') { 2 } else { -1 }
-      $pending.Push(@($child, $nextState))
-      continue
-    }
-    $immutable = $env:ALLAGENTS_READ_ONLY -eq '1' -or ($objects -and $state -eq 2)
-    $next = if ($immutable) {
-      $attributes -bor [IO.FileAttributes]::ReadOnly
-    } else { $attributes -band (-bnot [IO.FileAttributes]::ReadOnly) }
-    if ($next -ne $attributes -and -not [NativeFileAttributes]::SetFileAttributes($child, [uint32]$next)) {
-      throw [ComponentModel.Win32Exception]::new([Runtime.InteropServices.Marshal]::GetLastWin32Error())
+  const systemRoot = process.env.SystemRoot ?? "C:\\Windows";
+  const identity = await windowsIdentity!;
+  const files: string[] = [];
+  const directories = [objects];
+  for (let index = 0; index < directories.length; index++) {
+    const directory = directories[index];
+    const info = await lstat(directory);
+    if (!info.isDirectory() || info.isSymbolicLink())
+      throw new Error("Unsafe Git object directory");
+    for (const entry of await readdir(directory, { withFileTypes: true })) {
+      const path = join(directory, entry.name);
+      if (entry.isSymbolicLink()) throw new Error("Unsafe Git object link");
+      if (entry.isDirectory()) directories.push(path);
+      else if (entry.isFile()) files.push(path);
+      else throw new Error("Unsafe Git object inode");
     }
   }
-}
-`;
-  await new Promise<void>((resolve, reject) => {
-    const child = execFile(
-      join(
-        process.env.SystemRoot ?? "C:\\Windows",
-        "System32",
-        "WindowsPowerShell",
-        "v1.0",
-        "powershell.exe",
-      ),
-      [
-        "-NoLogo",
-        "-NoProfile",
-        "-NonInteractive",
-        "-EncodedCommand",
-        Buffer.from(script, "utf16le").toString("base64"),
-      ],
-      {
-        env: {
-          SystemRoot: process.env.SystemRoot ?? "C:\\Windows",
-          TEMP: tmpdir(),
-          TMP: tmpdir(),
-          ALLAGENTS_TREE_ROOT: root,
-          ALLAGENTS_READ_ONLY: readOnly ? "1" : "0",
-          ALLAGENTS_GIT_OBJECTS: gitObjects ? "1" : "0",
-        },
-        windowsHide: true,
-      },
-      (error) => (error ? reject(error) : resolve()),
-    );
-    child.stdin?.end();
-  });
+  let cursor = 0;
+  await Promise.all(
+    Array.from({ length: Math.min(files.length, 16) }, async () => {
+      while (cursor < files.length) {
+        const path = files[cursor++];
+        for (const args of [
+          [path, "/grant:r", `*${identity}:RX`, "/L", "/Q"],
+          [path, "/inheritance:r", "/L", "/Q"],
+        ])
+          await new Promise<void>((resolve, reject) =>
+            execFile(
+              join(systemRoot, "System32", "icacls.exe"),
+              args,
+              { env: { SystemRoot: systemRoot }, windowsHide: true },
+              (error) => (error ? reject(error) : resolve()),
+            ),
+          );
+      }
+    }),
+  );
 }
 
 export async function protect(
@@ -501,9 +476,8 @@ export async function protect(
 ): Promise<void> {
   if (process.platform === "win32") {
     if ((await lstat(root)).isSymbolicLink()) throw new Error("Cannot protect symlink root");
-    await windowsTreeAccess(root, true);
-    await windowsFileAttributes(root, !writable, writable && preserveGitObjects);
-    if (!writable) await windowsTreeAccess(root, false);
+    await windowsTreeAccess(root, writable);
+    if (writable && preserveGitObjects) await windowsGitObjectAccess(root);
     return;
   }
   // Protecting a large checkout is dominated by filesystem round trips. Walk
@@ -546,18 +520,9 @@ export async function removeTree(path: string): Promise<void> {
     return;
   }
   if (process.platform === "win32") {
-    try {
-      await rm(path, { recursive: true, force: true });
-      return;
-    } catch (error) {
-      if (!["EPERM", "EACCES"].includes((error as NodeJS.ErrnoException).code ?? "")) throw error;
-      if (!(await exists(path))) return;
-      if ((await lstat(path)).isSymbolicLink()) throw error;
-      await windowsTreeAccess(path, true);
-      await windowsFileAttributes(path, false);
-      await rm(path, { recursive: true, force: true });
-      return;
-    }
+    await windowsTreeAccess(path, true);
+    await rm(path, { recursive: true, force: true });
+    return;
   }
   if (process.platform === "linux") {
     const mounts = (await readFile("/proc/self/mountinfo", "utf8"))
