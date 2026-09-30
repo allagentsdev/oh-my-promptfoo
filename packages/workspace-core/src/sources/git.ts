@@ -544,7 +544,7 @@ async function materializeBoundedGit(
           ],
           options,
         );
-        await rm(join(git, "objects", "info", "alternates"));
+        await rm(join(git, "objects", "info", "alternates"), { force: true });
         await runSource(
           "git",
           [...safeGitArgs, "-C", checkout, "fsck", "--connectivity-only", "--no-reflogs"],
