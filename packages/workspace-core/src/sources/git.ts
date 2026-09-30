@@ -1,6 +1,17 @@
 import { createHash, randomUUID } from "node:crypto";
 import { channel } from "node:diagnostics_channel";
-import { cp, lstat, mkdir, readdir, readlink, realpath, rm, writeFile } from "node:fs/promises";
+import { constants } from "node:fs";
+import {
+  copyFile,
+  lstat,
+  mkdir,
+  readdir,
+  readlink,
+  realpath,
+  rm,
+  utimes,
+  writeFile,
+} from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { deflateSync } from "node:zlib";
@@ -630,7 +641,13 @@ async function copyVerifiedTree(
   destination: string,
   writer: PhysicalWriter,
 ): Promise<void> {
-  const files: { input: string; output: string; target?: string }[] = [];
+  const files: {
+    input: string;
+    output: string;
+    target?: string;
+    atime?: Date;
+    mtime?: Date;
+  }[] = [];
   async function plan(inputDirectory: string, outputDirectory: string): Promise<void> {
     await writer.directory(outputDirectory);
     for (const name of await readdir(inputDirectory)) {
@@ -644,7 +661,7 @@ async function copyVerifiedTree(
         files.push({ input, output, target });
       } else {
         writer.reserveFile(output, stat.size);
-        files.push({ input, output });
+        files.push({ input, output, atime: stat.atime, mtime: stat.mtime });
       }
     }
   }
@@ -658,9 +675,10 @@ async function copyVerifiedTree(
         while (!failed && cursor < files.length) {
           const file = files[cursor++];
           try {
-            if (file.target === undefined)
-              await cp(file.input, file.output, { preserveTimestamps: true });
-            else await writer.link(file.output, file.target);
+            if (file.target === undefined) {
+              await copyFile(file.input, file.output, constants.COPYFILE_EXCL);
+              await utimes(file.output, file.atime!, file.mtime!);
+            } else await writer.link(file.output, file.target);
           } catch (error) {
             failed = true;
             failure = error;

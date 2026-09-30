@@ -187,6 +187,12 @@ test("local Git seed keeps only the pinned commit and remains usable after sourc
   const owner = manager(f.spec, f.channels);
   const view = await owner.prepare();
   const seed = join(view.seedPath, "project");
+  expect((await lstat(join(seed, "executable.sh"))).mode & 0o111).toBe(0o111);
+  expect(
+    execFileSync("git", ["-C", join(view.path, "project"), "status", "--porcelain"], {
+      encoding: "utf8",
+    }),
+  ).toBe("");
   expect(await exists(join(seed, ".git", "objects", "info", "alternates"))).toBe(false);
   expect(() =>
     execFileSync("git", ["-C", seed, "cat-file", "-e", `${later}^{commit}`], {
