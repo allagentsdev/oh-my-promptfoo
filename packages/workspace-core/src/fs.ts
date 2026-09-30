@@ -222,7 +222,7 @@ export async function protect(root: string, writable: boolean): Promise<void> {
     const end = Math.min(cursor + 32, pending.length);
     const batch = pending.slice(cursor, end);
     cursor = end;
-    const children = await Promise.all(
+    const children = await Promise.allSettled(
       batch.map(async (path) => {
         const stat = await lstat(path);
         if (stat.isSymbolicLink()) return [];
@@ -234,7 +234,12 @@ export async function protect(root: string, writable: boolean): Promise<void> {
         return [];
       }),
     );
-    for (const group of children) pending.push(...group);
+    const failures = children.flatMap((result) =>
+      result.status === "rejected" ? [result.reason] : [],
+    );
+    if (failures.length) throw new AggregateError(failures, "Workspace protection failed");
+    for (const result of children)
+      if (result.status === "fulfilled") for (const child of result.value) pending.push(child);
   }
 }
 export async function removeTree(path: string): Promise<void> {
