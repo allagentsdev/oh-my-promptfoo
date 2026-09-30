@@ -3,16 +3,17 @@ import * as childProcess from "node:child_process";
 import { createHash } from "node:crypto";
 import { fstatSync, realpathSync, statSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 
 const original = { ...childProcess };
 const options = JSON.parse(process.argv[3]!);
 const admissionPath = join(options.channels.ALLAGENTS_CACHE_ROOT, "locks", "admission.flock");
 const admission = statSync(admissionPath);
+// Match withLock's canonical parent and basename, not the file's alias spelling.
 const windowsLockName =
   process.platform === "win32"
     ? `Global\\allagents-cache-lock-${createHash("sha256")
-        .update(realpathSync(admissionPath).toLowerCase())
+        .update(join(realpathSync(dirname(admissionPath)), basename(admissionPath)).toLowerCase())
         .digest("hex")}`
     : undefined;
 // Scale only the native backend's wait clock. The competing lock and all
