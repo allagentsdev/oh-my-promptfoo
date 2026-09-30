@@ -25,6 +25,15 @@ mock.module("node:child_process", () => ({
   spawn(command: string, args: readonly string[], settings: childProcess.SpawnOptions) {
     const scaled = [...args];
     let spawnSettings = settings;
+    if (
+      process.platform === "win32" &&
+      settings.env?.ALLAGENTS_LOCK_TIMEOUT_MS &&
+      settings.env.ALLAGENTS_LOCK_NAME !== windowsLockName
+    ) {
+      console.log(
+        `other-lock timeout=${settings.env.ALLAGENTS_LOCK_TIMEOUT_MS} actual=${settings.env.ALLAGENTS_LOCK_NAME} admission=${windowsLockName}`,
+      );
+    }
     if (command === "/usr/bin/flock") {
       const at = scaled.indexOf("-w") + 1;
       scaled[at] = String(Number(scaled[at]) / 900);

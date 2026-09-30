@@ -346,7 +346,7 @@ describe("workspace configuration", () => {
         });
         child.once("error", reject);
         child.once("close", () =>
-          reject(new Error(`Contender exited before lock wait: ${errors}`)),
+          reject(new Error(`Contender exited before lock wait: stdout=${output} stderr=${errors}`)),
         );
       });
       await new Promise((resolve) => setTimeout(resolve, 1000));
