@@ -338,9 +338,17 @@ jobs:
             const result = spawnSync('npm', ['publish', '--tag', 'next', '--provenance', '--access', 'public', '--registry=https://registry.npmjs.org'], { cwd: 'packages/promptfoo-integration', stdio: 'inherit' });
             if (result.error) throw result.error;
             if (result.status !== 0) throw Error(`npm publish failed (${result.status ?? result.signal})`);
+            const deadline = Date.now() + 5 * 60_000;
+            for (;;) {
+              const indexed = view(`${name}@${version}`, 'version');
+              if (indexed !== undefined && indexed !== version) throw Error('Unexpected npm preview version');
+              const head = indexed === version ? view(`${name}@${version}`, 'gitHead') : undefined;
+              if (head && head !== process.env.GITHUB_SHA) throw Error('Published preview source commit differs');
+              if (indexed === version && head === process.env.GITHUB_SHA && view(`${name}@next`, 'version') === version) break;
+              if (Date.now() >= deadline) throw Error('npm accepted the preview but has not indexed it under next');
+              await new Promise(resolve => setTimeout(resolve, 1_000));
+            }
           }
-          if (view(`${name}@next`, 'version') !== version || view(`${name}@${version}`, 'gitHead') !== process.env.GITHUB_SHA)
-            throw Error('Published npm next preview differs from the source commit');
           JS
       - name: Verify registry consumers and Promptfoo E2E
         env:
