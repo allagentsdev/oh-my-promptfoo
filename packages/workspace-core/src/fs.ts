@@ -140,7 +140,11 @@ export async function ownedRoot(path: string, kind: string): Promise<void> {
   const absolute = resolve(path);
   await assertNoSymlinkAncestors(absolute);
   if (await exists(absolute)) {
-    const entries = await readdir(absolute);
+    // Another publisher may replace an empty root between the existence check and read.
+    const entries = await readdir(absolute).catch((error: NodeJS.ErrnoException) => {
+      if (error.code === "ENOENT") return [];
+      throw error;
+    });
     if (entries.length && !(await exists(join(absolute, MARKER))))
       throw new Error("Refusing unmarked package root");
   }
