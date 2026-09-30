@@ -502,11 +502,7 @@ export async function protect(
   if (process.platform === "win32") {
     if ((await lstat(root)).isSymbolicLink()) throw new Error("Cannot protect symlink root");
     await windowsTreeAccess(root, true);
-    await windowsFileAttributes(
-      root,
-      !writable,
-      writable && preserveGitObjects,
-    );
+    await windowsFileAttributes(root, !writable, writable && preserveGitObjects);
     if (!writable) await windowsTreeAccess(root, false);
     return;
   }

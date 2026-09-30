@@ -385,8 +385,7 @@ async function writeGitIndex(
 
 export async function validateGitTree(root: string, limits: SourceLimits): Promise<void> {
   let bytes = 0;
-  const physicalRoot =
-    process.platform === "win32" ? (await realpath(root)).toLowerCase() : root;
+  const physicalRoot = process.platform === "win32" ? (await realpath(root)).toLowerCase() : root;
   const rootInfo =
     process.platform === "win32" ? await statPath(root, { bigint: true }) : undefined;
   async function walk(path: string): Promise<void> {
@@ -411,8 +410,7 @@ export async function validateGitTree(root: string, limits: SourceLimits): Promi
             let ancestor = dirname(actual);
             for (;;) {
               const info = await statPath(ancestor, { bigint: true });
-              if (info.ino !== 0n && info.dev === rootInfo.dev && info.ino === rootInfo.ino)
-                break;
+              if (info.ino !== 0n && info.dev === rootInfo.dev && info.ino === rootInfo.ino) break;
               const parent = dirname(ancestor);
               if (parent === ancestor) throw new Error("Git symlink escapes realpath containment");
               ancestor = parent;
