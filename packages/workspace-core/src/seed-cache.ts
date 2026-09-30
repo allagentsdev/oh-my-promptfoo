@@ -765,7 +765,8 @@ export async function initializeCacheRoot(
 }
 async function initializeCacheRootLocked(absolute: string): Promise<void> {
   if ((await exists(absolute)) && !(await exists(join(absolute, MARKER)))) {
-    if ((await realpath(absolute)) !== absolute) throw new Error("Symlinked cache root ancestor");
+    if (process.platform !== "win32" && (await realpath(absolute)) !== absolute)
+      throw new Error("Symlinked cache root ancestor");
     await assertNoSymlinkPath(absolute, absolute);
     const entries = await readdir(absolute);
     if (entries.length === 1 && entries[0] === "published") {

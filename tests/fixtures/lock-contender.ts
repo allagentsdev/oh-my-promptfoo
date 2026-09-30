@@ -17,7 +17,8 @@ const windowsLockName =
     : undefined;
 // Scale only the native backend's wait clock. The competing lock and all
 // filesystem/provider operations remain real; POSIX 1800s becomes 2s.
-// Windows 1800s becomes 6s to include PowerShell/Git startup under CI load.
+// Windows scales only the contended admission mutex; short bootstrap waits
+// otherwise expire under loaded runners before acquisition even starts.
 mock.module("node:child_process", () => ({
   ...original,
   spawn(command: string, args: readonly string[], settings: childProcess.SpawnOptions) {
@@ -32,7 +33,8 @@ mock.module("node:child_process", () => ({
     } else if (
       process.platform === "win32" &&
       command.toLowerCase().endsWith("\\powershell.exe") &&
-      settings.env?.ALLAGENTS_LOCK_TIMEOUT_MS
+      settings.env?.ALLAGENTS_LOCK_TIMEOUT_MS &&
+      settings.env.ALLAGENTS_LOCK_NAME === windowsLockName
     ) {
       spawnSettings = {
         ...settings,
