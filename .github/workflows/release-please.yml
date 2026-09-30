@@ -151,18 +151,42 @@ jobs:
           RELEASE_PRS: ${{ steps.release.outputs.prs }}
         run: |
           node --input-type=module <<'JS'
-          import { execFileSync } from 'node:child_process';
+          import { execFileSync, spawnSync } from 'node:child_process';
           import { appendFileSync } from 'node:fs';
           const reported = JSON.parse(process.env.RELEASE_PRS || '[]');
           if (reported.length > 1) throw Error('Expected at most one release pull request');
-          const prs = JSON.parse(execFileSync('gh', ['pr', 'list', '--state', 'open', '--base', 'main', '--label', 'autorelease: pending', '--json', 'number,headRefName,headRepositoryOwner', '--limit', '100'], { encoding: 'utf8' }));
           const expected = 'release-please--branches--main--components--promptfoo-integration';
           const owner = process.env.GITHUB_REPOSITORY.split('/')[0];
-          const matches = prs.filter(pr => pr.headRefName === expected && pr.headRepositoryOwner?.login === owner);
-          if (matches.length > 1 || (reported.length && matches[0]?.number !== reported[0].number))
-            throw Error('Ambiguous release pull request');
-          if (matches.length) {
-            appendFileSync(process.env.GITHUB_OUTPUT, `branch=${matches[0].headRefName}\nnumber=${matches[0].number}\n`);
+          const accept = pr => {
+            if (pr.state !== 'OPEN' || pr.baseRefName !== 'main' || pr.headRefName !== expected || pr.headRepositoryOwner?.login !== owner)
+              throw Error('Release PR is not the expected same-repository main branch');
+            if (!pr.labels.some(label => label.name === 'autorelease: pending')) return false;
+            appendFileSync(process.env.GITHUB_OUTPUT, `branch=${pr.headRefName}\nnumber=${pr.number}\n`);
+            return true;
+          };
+          if (reported.length) {
+            const { number, headBranchName, baseBranchName } = reported[0];
+            if (!Number.isInteger(number) || headBranchName !== expected || baseBranchName !== 'main')
+              throw Error('Release Please reported an unexpected pull request');
+            let accepted = false;
+            for (let attempt = 0; attempt < 20; attempt++) {
+              const result = spawnSync('gh', ['pr', 'view', String(number), '--json', 'number,state,baseRefName,headRefName,headRepositoryOwner,labels'], { encoding: 'utf8' });
+              if (result.error) throw result.error;
+              if (result.status === 0) {
+                const pr = JSON.parse(result.stdout);
+                if (pr.number !== number) throw Error('Release PR number changed');
+                if (accept(pr)) { accepted = true; break; }
+              } else if (!/not found|Could not resolve|HTTP 404/i.test(result.stderr)) {
+                throw Error(`Release PR lookup failed: ${result.stderr}`);
+              }
+              await new Promise(resolve => setTimeout(resolve, 1_000));
+            }
+            if (!accepted) throw Error('Release PR did not become visible with the pending label');
+          } else {
+            const prs = JSON.parse(execFileSync('gh', ['pr', 'list', '--state', 'open', '--base', 'main', '--label', 'autorelease: pending', '--json', 'number,state,baseRefName,headRefName,headRepositoryOwner,labels', '--limit', '100'], { encoding: 'utf8' }));
+            const matches = prs.filter(pr => pr.headRefName === expected && pr.headRepositoryOwner?.login === owner);
+            if (matches.length > 1) throw Error('Ambiguous release pull request');
+            if (matches.length) accept(matches[0]);
           }
           JS
       - name: Preserve the trusted lock synchronizer
