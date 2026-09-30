@@ -516,12 +516,14 @@ export async function protect(
 export async function removeTree(path: string): Promise<void> {
   if (!(await exists(path))) return;
   if (process.platform === "win32" && (await lstat(path)).isSymbolicLink()) {
-    await rm(path, { recursive: true, force: true });
+    await rm(path, { recursive: true, force: true, maxRetries: 8, retryDelay: 125 });
     return;
   }
   if (process.platform === "win32") {
     await windowsTreeAccess(path, true);
-    await rm(path, { recursive: true, force: true });
+    // Git and agent subprocess handles can outlive their close notification briefly on NTFS.
+    // Retry Windows sharing violations, but retain any tree that stays inaccessible.
+    await rm(path, { recursive: true, force: true, maxRetries: 8, retryDelay: 125 });
     return;
   }
   if (process.platform === "linux") {
