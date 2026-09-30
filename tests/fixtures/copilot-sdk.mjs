@@ -1,5 +1,5 @@
-import { writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { readFile, writeFile } from "node:fs/promises";
+import { join, resolve } from "node:path";
 export class CopilotClient {
   constructor(options) {
     this.options = options;
@@ -17,6 +17,38 @@ export class CopilotClient {
       async sendAndWait({ prompt }) {
         if (prompt === "hang") {
           await new Promise(() => {});
+        }
+        if (prompt.startsWith("read:")) {
+          const request = JSON.parse(prompt.slice(5));
+          if (request.mode !== "text-only") {
+            callback({
+              type: "tool.execution_start",
+              data: {
+                toolCallId: "read1",
+                toolName: request.toolName ?? "read_file",
+                arguments: { [request.argumentKey ?? "path"]: request.path },
+                ...(request.mcpServerName ? { mcpServerName: request.mcpServerName } : {}),
+              },
+            });
+            if (request.mode !== "started-only") {
+              let success = false;
+              if (request.mode !== "failed") {
+                try {
+                  await readFile(resolve(config.workingDirectory, request.path), "utf8");
+                  success = true;
+                } catch {
+                  // A failed read still emits a completion event.
+                }
+              }
+              callback({
+                type: "tool.execution_complete",
+                data: { toolCallId: "read1", success },
+              });
+            }
+          }
+          const content = request.mode === "text-only" ? "I read SKILL.md" : "read attempted";
+          callback({ type: "assistant.message", data: { content } });
+          return { data: { content } };
         }
         callback({
           type: "tool.execution_start",

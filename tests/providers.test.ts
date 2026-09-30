@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { execFile } from "node:child_process";
 import { realpathSync, statSync } from "node:fs";
-import { access, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, symlink, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -381,7 +381,7 @@ const sdk = `export class CopilotClient {
  async stop(){return [];} async forceStop(){}
 }`;
 describe("direct Copilot provider", () => {
-  test("passes BYOK object, applies permission policy, emits normalized usage and disables inferred skills", async () => {
+  test("passes BYOK object, applies permission policy, and emits usage without invented skills", async () => {
     const path = await project("@github/copilot-sdk", sdk);
     const provider = new CopilotSdkProvider({
       config: {
@@ -413,11 +413,146 @@ describe("direct Copilot provider", () => {
       cached: 1,
       numRequests: 1,
     });
-    expect((response.metadata as any).copilot.skillSupport).toBe(false);
+    const metadata = response.metadata as {
+      copilot: { skillSupport: boolean };
+      skillCalls: unknown[];
+    };
+    expect(metadata.copilot.skillSupport).toBe(true);
+    expect(metadata.skillCalls).toEqual([]);
     await provider.cleanup();
     expect((await provider.callApi("again")).error).toContain("closed");
     await access(path);
   });
+  test("reports only observed, successful, contained SKILL.md read tool events", async () => {
+    const fixture = await readFile(new URL("./fixtures/copilot-sdk.mjs", import.meta.url), "utf8");
+    const path = await project("@github/copilot-sdk", fixture);
+    const skillPath = join(path, ".agents", "skills", "cw-sql-schema-migration", "SKILL.md");
+    await mkdir(join(path, ".agents", "skills", "cw-sql-schema-migration"), {
+      recursive: true,
+    });
+    await writeFile(skillPath, "# SQL migration\n");
+    await mkdir(join(path, "docs", "cw-sql-schema-migration"), { recursive: true });
+    await writeFile(
+      join(path, "docs", "cw-sql-schema-migration", "SKILL.md"),
+      "# Not installed as a skill\n",
+    );
+    await writeFile(join(path, "README.md"), "# Not a skill\n");
+    const external = await mkdtemp(join(realpathSync(tmpdir()), "allagents-outside-skill-"));
+    roots.push(external);
+    await writeFile(join(external, "SKILL.md"), "# Outside\n");
+    await symlink(external, join(path, "linked-skill"));
+    await mkdir(join(path, ".agents", "skills", "alias"), { recursive: true });
+    await symlink(join(path, "README.md"), join(path, ".agents", "skills", "alias", "SKILL.md"));
+    await symlink(
+      join(path, ".agents", "skills", "cw-sql-schema-migration"),
+      join(path, ".agents", "skills", "linked"),
+    );
+    const provider = new CopilotSdkProvider({ config: { basePath: path, working_dir: "." } });
+    const call = (request: object) => provider.callApi(`read:${JSON.stringify(request)}`);
+    try {
+      for (const request of [
+        { path: ".agents/skills/cw-sql-schema-migration/SKILL.md" },
+        { path: skillPath, toolName: "read", argumentKey: "file_path" },
+        { path: skillPath, toolName: "view", argumentKey: "filePath" },
+      ]) {
+        const positive = await call(request);
+        expect(positive.error).toBeUndefined();
+        const positiveMetadata = positive.metadata as {
+          copilot: { skillSupport: boolean };
+          skillCalls: unknown[];
+        };
+        expect(positiveMetadata.copilot.skillSupport).toBe(true);
+        expect(positiveMetadata.skillCalls).toEqual([
+          { name: "cw-sql-schema-migration", path: skillPath, source: "read-tool" },
+        ]);
+      }
+      for (const request of [
+        { path: "README.md" },
+        { path: "docs/cw-sql-schema-migration/SKILL.md" },
+        { path: skillPath, toolName: "write_file" },
+        { path: skillPath, mode: "failed" },
+        { path: skillPath, mode: "started-only" },
+        { path: skillPath, mode: "text-only" },
+        { path: join(external, "SKILL.md") },
+        { path: "linked-skill/SKILL.md" },
+        { path: ".agents/skills/alias/SKILL.md" },
+        { path: ".agents/skills/linked/SKILL.md" },
+        { path: skillPath, mcpServerName: "unrelated-server" },
+        { path: ".agents/skills/missing/SKILL.md" },
+      ]) {
+        const response = await call(request);
+        expect(response.error).toBeUndefined();
+        const negativeMetadata = response.metadata as { skillCalls: unknown[] };
+        expect(negativeMetadata.skillCalls).toEqual([]);
+      }
+    } finally {
+      await provider.cleanup();
+    }
+  });
+  test("workspace Provider exposes Copilot read-tool skill calls at top-level metadata", async () => {
+    const fixture = await readFile(new URL("./fixtures/copilot-sdk.mjs", import.meta.url), "utf8");
+    const path = await project("@github/copilot-sdk", fixture);
+    const repository = join(path, "source");
+    const skill = ".agents/skills/cw-sql-schema-migration/SKILL.md";
+    await mkdir(join(repository, ".agents", "skills", "cw-sql-schema-migration"), {
+      recursive: true,
+    });
+    await writeFile(join(repository, skill), "# SQL migration\n");
+    const git = promisify(execFile);
+    await git("git", ["init", "-q", repository]);
+    await git("git", ["-C", repository, "add", "."]);
+    await git("git", [
+      "-C",
+      repository,
+      "-c",
+      "user.name=Fixture",
+      "-c",
+      "user.email=fixture@example.test",
+      "commit",
+      "-qm",
+      "fixture",
+    ]);
+    const { stdout } = await git("git", ["-C", repository, "rev-parse", "HEAD"]);
+    const provider = new Provider({
+      config: {
+        basePath: path,
+        delegate: { id: "copilot-sdk" },
+        workspace: {
+          sources: [
+            {
+              type: "git",
+              repository: pathToFileURL(repository).href,
+              ref: stdout.trim(),
+              destination: "repo",
+            },
+          ],
+        },
+      },
+      env: {
+        ALLAGENTS_CACHE_ROOT: join(path, "cache"),
+        ALLAGENTS_WORKSPACE_ROOT: join(path, "runtime"),
+      },
+    });
+    try {
+      const response = await provider.callApi(`read:${JSON.stringify({ path: `repo/${skill}` })}`);
+      expect(response.error).toBeUndefined();
+      const metadata = response.metadata as {
+        copilot: { skillSupport: boolean };
+        skillCalls: unknown[];
+        workspace: { path: string };
+      };
+      expect(metadata.copilot.skillSupport).toBe(true);
+      expect(metadata.skillCalls).toEqual([
+        {
+          name: "cw-sql-schema-migration",
+          path: join(metadata.workspace.path, "repo", skill),
+          source: "read-tool",
+        },
+      ]);
+    } finally {
+      await provider.cleanup();
+    }
+  }, 15_000);
   test("missing SDK is actionable and pre-abort performs no execution", async () => {
     const path = await project("unrelated", "export {};");
     const provider = new CopilotSdkProvider({ config: { basePath: path, working_dir: "." } });
