@@ -70,6 +70,9 @@ jobs:
           const version = execFileSync('npm', ['view', `${manifest.name}@next`, 'version'], { encoding: 'utf8' }).trim();
           if (!version.startsWith(`${manifest.version}-rc.`) || !/^[1-9]\d*$/.test(version.slice(`${manifest.version}-rc.`.length)))
             throw Error('The next tag must identify a prerelease of the current stable version');
+          const candidateCommit = execFileSync('git', ['rev-list', '-n', '1', `v${version}`], { encoding: 'utf8' }).trim();
+          const stableCommit = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+          if (candidateCommit !== stableCommit) throw Error('The verified RC tag must point at the stable release commit');
           appendFileSync(process.env.GITHUB_OUTPUT, `version=${version}\n`);
           JS
       - name: Verify registry release candidate

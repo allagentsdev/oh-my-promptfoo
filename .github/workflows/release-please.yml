@@ -10,12 +10,15 @@ permissions: {}
 jobs:
   release-please:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     permissions:
       contents: write
+      issues: write
       pull-requests: write
     steps:
       - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
@@ -41,6 +44,41 @@ jobs:
           if (release.status !== 0 || release.stdout.trim() !== 'false') throw Error('Current version needs a published GitHub release');
           appendFileSync(process.env.GITHUB_OUTPUT, 'ready=true\n');
           JS
+      - name: Ensure Release Please labels
+        if: steps.current.outputs.ready == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN || github.token }}
+        run: |
+          for label in 'autorelease: pending' 'autorelease: tagged'; do
+            if ! gh label list --limit 1000 --json name --jq '.[].name' | grep -Fxq "$label"; then
+              gh label create "$label" --color 'ededed'
+            fi
+          done
+      - name: Finalize the previously published release PR
+        if: steps.current.outputs.ready == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN || github.token }}
+        run: |
+          node --input-type=module <<'JS'
+          import { execFileSync } from 'node:child_process';
+          import { readFileSync } from 'node:fs';
+          const { version } = JSON.parse(readFileSync('packages/promptfoo-integration/package.json', 'utf8'));
+          const prs = JSON.parse(execFileSync('gh', ['pr', 'list', '--state', 'merged', '--label', 'autorelease: pending', '--json', 'number,title', '--limit', '100'], { encoding: 'utf8' }));
+          const matches = prs.filter(pr => pr.title === `chore(release): release ${version}`);
+          if (matches.length > 1) throw Error('Ambiguous merged release pull request');
+          if (matches.length === 1) {
+            execFileSync('gh', ['pr', 'edit', String(matches[0].number), '--remove-label', 'autorelease: pending', '--add-label', 'autorelease: tagged'], { stdio: 'inherit' });
+          }
+          JS
+      - name: Hold an existing release PR during updates
+        if: steps.current.outputs.ready == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN || github.token }}
+        run: |
+          pr=$(gh pr list --state open --base main --label 'autorelease: pending' --json number,headRefName --jq '[.[] | select(.headRefName == "release-please--branches--main--components--promptfoo-integration")][0].number')
+          if [ -n "$pr" ] && [ "$pr" != null ] && [ "$(gh pr view "$pr" --json isDraft --jq .isDraft)" = false ]; then
+            gh pr ready "$pr" --undo
+          fi
       - name: Prepare version and changelog pull request
         if: steps.current.outputs.ready == 'true'
         id: release
@@ -49,41 +87,64 @@ jobs:
           token: ${{ secrets.RELEASE_PLEASE_TOKEN || github.token }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
-      - name: Resolve updated release pull request
-        if: steps.release.outputs.prs_created == 'true'
+      - name: Resolve pending release pull request
+        if: steps.current.outputs.ready == 'true'
         id: pr
         env:
+          GH_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN || github.token }}
           RELEASE_PRS: ${{ steps.release.outputs.prs }}
         run: |
           node --input-type=module <<'JS'
+          import { execFileSync } from 'node:child_process';
           import { appendFileSync } from 'node:fs';
-          const prs = JSON.parse(process.env.RELEASE_PRS);
-          if (prs.length !== 1 || !prs[0]?.headBranchName) throw Error('Expected one release pull request');
-          appendFileSync(process.env.GITHUB_OUTPUT, `branch=${prs[0].headBranchName}\n`);
+          const reported = JSON.parse(process.env.RELEASE_PRS || '[]');
+          if (reported.length > 1) throw Error('Expected at most one release pull request');
+          const prs = JSON.parse(execFileSync('gh', ['pr', 'list', '--state', 'open', '--base', 'main', '--label', 'autorelease: pending', '--json', 'number,headRefName,headRepositoryOwner', '--limit', '100'], { encoding: 'utf8' }));
+          const expected = 'release-please--branches--main--components--promptfoo-integration';
+          const owner = process.env.GITHUB_REPOSITORY.split('/')[0];
+          const matches = prs.filter(pr => pr.headRefName === expected && pr.headRepositoryOwner?.login === owner);
+          if (matches.length > 1 || (reported.length && matches[0]?.number !== reported[0].number))
+            throw Error('Ambiguous release pull request');
+          if (matches.length) {
+            appendFileSync(process.env.GITHUB_OUTPUT, `branch=${matches[0].headRefName}\nnumber=${matches[0].number}\n`);
+          }
           JS
+      - name: Preserve the trusted lock synchronizer
+        if: steps.pr.outputs.branch != ''
+        run: |
+          mkdir -p "$RUNNER_TEMP/release-tools"
+          cp scripts/sync-release-lock.ts "$RUNNER_TEMP/release-tools/sync-release-lock.ts"
+          npm install --prefix "$RUNNER_TEMP/release-tools" --ignore-scripts --no-audit --no-fund --no-save jsonc-parser@3.3.1
       - uses: actions/checkout@v6
         if: steps.pr.outputs.branch != ''
         with:
           ref: ${{ steps.pr.outputs.branch }}
-          token: ${{ secrets.RELEASE_PLEASE_TOKEN || github.token }}
+          persist-credentials: false
       - uses: oven-sh/setup-bun@v2
         if: steps.pr.outputs.branch != ''
         with:
           bun-version: 1.4.0
-      - name: Synchronize the Bun workspace lockfile in the release PR
+      - name: Synchronize and unlock the release PR
         if: steps.pr.outputs.branch != ''
         env:
+          GH_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN || github.token }}
           RELEASE_BRANCH: ${{ steps.pr.outputs.branch }}
+          RELEASE_PR: ${{ steps.pr.outputs.number }}
         run: |
           bun install --lockfile-only --ignore-scripts
-          bun scripts/sync-release-lock.ts
+          bun "$RUNNER_TEMP/release-tools/sync-release-lock.ts"
           if ! git diff --quiet -- package.json packages/promptfoo-integration/package.json; then
             echo 'Bun unexpectedly modified a package manifest' >&2
             exit 1
           fi
-          if git diff --quiet -- bun.lock; then exit 0; fi
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add bun.lock
-          git commit -m 'chore: synchronize release lockfile'
-          git push origin "HEAD:$RELEASE_BRANCH"
+          if ! git diff --quiet -- bun.lock; then
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git add bun.lock
+            git commit -m 'chore: synchronize release lockfile'
+            gh auth setup-git
+            git push origin "HEAD:$RELEASE_BRANCH"
+          fi
+          if [ "$(gh pr view "$RELEASE_PR" --json isDraft --jq .isDraft)" = true ]; then
+            gh pr ready "$RELEASE_PR"
+          fi
