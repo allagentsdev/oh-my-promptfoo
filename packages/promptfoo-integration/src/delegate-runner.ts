@@ -1,6 +1,6 @@
-import { lstatSync, realpathSync, statSync } from "node:fs";
+import { lstatSync, statSync } from "node:fs";
 import { stat } from "node:fs/promises";
-import { basename, dirname, isAbsolute, relative, resolve, sep } from "node:path";
+import { basename, dirname, isAbsolute, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { context as otelContext, propagation, trace } from "@opentelemetry/api";
 import { AsyncLocalStorageContextManager } from "@opentelemetry/context-async-hooks";
@@ -288,25 +288,21 @@ function observedSkillRead(
     ![".agents", ".claude", ".github"].includes(basename(dirname(skillsDirectory)))
   )
     return;
-  const within = relative(workingDir, candidate);
-  if (!within || within === ".." || within.startsWith(`..${sep}`) || isAbsolute(within)) return;
   try {
-    let cursor = workingDir;
-    for (const part of within.split(sep)) {
-      cursor = resolve(cursor, part);
-      if (lstatSync(cursor).isSymbolicLink()) return;
+    const root = statSync(workingDir, { bigint: true });
+    if (root.ino === 0n) return;
+    let cursor = candidate;
+    let file = true;
+    while (true) {
+      const info = lstatSync(cursor, { bigint: true });
+      if (info.isSymbolicLink() || (file && !info.isFile())) return;
+      if (info.dev === root.dev && info.ino === root.ino)
+        return { name: basename(skillDirectory), path: candidate, source: "read-tool" };
+      const parent = dirname(cursor);
+      if (parent === cursor) return;
+      cursor = parent;
+      file = false;
     }
-    const actual = realpathSync(candidate);
-    const actualWithin = relative(realpathSync(workingDir), actual);
-    if (
-      !actualWithin ||
-      actualWithin === ".." ||
-      actualWithin.startsWith(`..${sep}`) ||
-      isAbsolute(actualWithin) ||
-      !statSync(actual).isFile()
-    )
-      return;
-    return { name: basename(skillDirectory), path: candidate, source: "read-tool" };
   } catch {
     return;
   }
