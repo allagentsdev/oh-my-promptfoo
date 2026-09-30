@@ -1,11 +1,11 @@
 import { createHash, randomUUID } from "node:crypto";
 import { cp, lstat, mkdir, readdir, readlink, realpath, rm, writeFile } from "node:fs/promises";
-import { isAbsolute, join, resolve, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { deflateSync } from "node:zlib";
-import { gitUsesTemporaryAcquisition } from "../acquisition-budget.ts";
-import { atomicJson, isMounted, PACKAGE, processIdentity } from "../fs.ts";
-import { helperInvoke } from "../helper.ts";
+import { gitUsesRemoteAcquisition } from "../acquisition-budget.ts";
+import { atomicJson, isMounted, json, MARKER, PACKAGE, processIdentity } from "../fs.ts";
+import { helperAvailable, helperInvoke } from "../helper.ts";
 import type { GitSource, ResolvedSource, RuntimeChannels, SourceLimits } from "../types.ts";
 import { type PhysicalWriter, runSource, withPrivateAcquisition } from "./process.ts";
 
@@ -71,7 +71,7 @@ export async function resolveGit(
   signal?: AbortSignal,
 ): Promise<ResolvedGit> {
   return withPrivateAcquisition(channels, async (root, env) => {
-    if (!gitUsesTemporaryAcquisition(source.repository)) {
+    if (!gitUsesRemoteAcquisition(source.repository)) {
       const repository = fileURLToPath(source.repository);
       const response = await runSource(
         "git",
@@ -372,7 +372,7 @@ export async function validateGitTree(root: string, limits: SourceLimits): Promi
   await walk(root);
 }
 
-async function materializeRemote(
+async function materializeBoundedGit(
   source: ResolvedGit,
   destination: string,
   staging: string,
@@ -381,6 +381,8 @@ async function materializeRemote(
   writer: PhysicalWriter,
   signal?: AbortSignal,
 ): Promise<number> {
+  const local = !gitUsesRemoteAcquisition(source.repository);
+  const repository = local ? fileURLToPath(source.repository) : undefined;
   const bounded = join(staging, `bounded-git-${randomUUID()}`);
   const recoveryPath = join(staging, ".allagents-acquisition.json");
   const record = {
@@ -402,8 +404,13 @@ async function materializeRemote(
     ]);
     await atomicJson(recoveryPath, { ...record, state: "active" });
     return await withPrivateAcquisition(channels, async (root, env) => {
-      const gitEnv = await gitCredentials(root, env, channels);
-      const options = { env: gitEnv, channels, signal, privatePaths: [root, bounded] };
+      const gitEnv = local ? env : await gitCredentials(root, env, channels);
+      const options = {
+        env: gitEnv,
+        channels,
+        signal,
+        privatePaths: [root, bounded, ...(repository ? [repository] : [])],
+      };
       const checkout = join(bounded, "repository");
       await runSource(
         "git",
@@ -413,27 +420,43 @@ async function materializeRemote(
           "--no-checkout",
           "--no-local",
           "--no-hardlinks",
-          "--depth=1",
+          ...(local ? [] : ["--depth=1"]),
           "--",
           source.repository,
           checkout,
         ],
         options,
       );
-      await runSource(
-        "git",
-        [
-          ...safeGitArgs,
-          "-C",
-          checkout,
-          "fetch",
-          "--depth=1",
-          "--no-tags",
-          "origin",
-          source.commit,
-        ],
-        options,
-      );
+      if (local) {
+        try {
+          await runSource(
+            "git",
+            [...safeGitArgs, "-C", checkout, "cat-file", "-e", `${source.commit}^{commit}`],
+            options,
+          );
+        } catch {
+          await runSource(
+            "git",
+            [...safeGitArgs, "-C", checkout, "fetch", "--no-tags", "origin", source.commit],
+            options,
+          );
+        }
+      } else {
+        await runSource(
+          "git",
+          [
+            ...safeGitArgs,
+            "-C",
+            checkout,
+            "fetch",
+            "--depth=1",
+            "--no-tags",
+            "origin",
+            source.commit,
+          ],
+          options,
+        );
+      }
       let downloaded = 0;
       const count = async (path: string): Promise<void> => {
         for (const name of await readdir(path)) {
@@ -532,7 +555,18 @@ export async function materializeGit(
   signal?: AbortSignal,
 ): Promise<number> {
   const destination = resolve(staging, source.destination);
-  if (!gitUsesTemporaryAcquisition(source.repository))
-    return materializeLocal(source, destination, limits, channels, writer, signal);
-  return materializeRemote(source, destination, staging, limits, channels, writer, signal);
+  if (!gitUsesRemoteAcquisition(source.repository)) {
+    const stage = dirname(staging);
+    const cache = dirname(dirname(stage));
+    const packageStage =
+      basename(staging) === "tree" &&
+      basename(dirname(stage)) === "staging" &&
+      /^[a-f0-9-]{36}$/.test(basename(stage));
+    const marker = packageStage
+      ? await json<{ package: string; kind: string }>(join(cache, MARKER)).catch(() => undefined)
+      : undefined;
+    if (marker?.package !== PACKAGE || marker.kind !== "cache" || !(await helperAvailable()))
+      return materializeLocal(source, destination, limits, channels, writer, signal);
+  }
+  return materializeBoundedGit(source, destination, staging, limits, channels, writer, signal);
 }

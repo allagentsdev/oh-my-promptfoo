@@ -3,8 +3,8 @@ import type { SourceLimits, WorkspaceSource } from "./types.js";
 const CONTROLLED_WRITE_HEADROOM = 16 * 1024 ** 2;
 type AcquisitionLimits = Pick<SourceLimits, "maxDownloadBytes" | "maxExtractedBytes">;
 
-/** Keep reservation classification identical to the actual Git acquisition path. */
-export function gitUsesTemporaryAcquisition(repository: string): boolean {
+/** Distinguish authenticated HTTPS acquisition from a local file repository. */
+export function gitUsesRemoteAcquisition(repository: string): boolean {
   const protocol = new URL(repository).protocol;
   if (protocol === "https:") return true;
   if (protocol === "file:") return false;
@@ -29,14 +29,14 @@ export function controlledAcquisitionPhysicalReservation(limits: AcquisitionLimi
   return sourceByteBudget(limits) + CONTROLLED_WRITE_HEADROOM;
 }
 
-/** Source acquisition is serial, so at most one bounded HTTPS Git tmpfs is live. */
+/** Source acquisition is serial, so at most one bounded Git tmpfs is live.
+ * Local Git uses the tmpfs path when the reviewed helper is available; the
+ * controlled fallback conservatively keeps the same reservation. */
 export function acquisitionPhysicalReservation(
   sources: readonly Pick<WorkspaceSource, "type" | "repository">[],
   limits: AcquisitionLimits,
 ): number {
-  const temporary = sources.some(
-    (source) => source.type === "git" && gitUsesTemporaryAcquisition(source.repository),
-  );
+  const temporary = sources.some((source) => source.type === "git");
   return (
     controlledAcquisitionPhysicalReservation(limits) + (temporary ? sourceByteBudget(limits) : 0)
   );

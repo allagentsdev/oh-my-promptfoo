@@ -6,7 +6,7 @@ import { join } from "node:path";
 import {
   acquisitionPhysicalReservation,
   controlledAcquisitionPhysicalReservation,
-  gitUsesTemporaryAcquisition,
+  gitUsesRemoteAcquisition,
 } from "../packages/workspace-core/src/acquisition-budget.ts";
 import { PhysicalWriter } from "../packages/workspace-core/src/sources/process.ts";
 import type { WorkspaceSource } from "../packages/workspace-core/src/types.ts";
@@ -24,9 +24,9 @@ test.each<{
   temporary: number;
 }>([
   { name: "empty workspace", sources: [], temporary: 0 },
-  { name: "local Git", sources: [file], temporary: 0 },
+  { name: "local Git", sources: [file], temporary: sum },
   { name: "OCI", sources: [oci], temporary: 0 },
-  { name: "local Git and OCI", sources: [file, oci], temporary: 0 },
+  { name: "local Git and OCI", sources: [file, oci], temporary: sum },
   { name: "HTTPS Git", sources: [https], temporary: sum },
   { name: "mixed sources", sources: [file, oci, https], temporary: sum },
   { name: "serial HTTPS Git sources", sources: [https, https], temporary: sum },
@@ -36,9 +36,9 @@ test.each<{
 });
 
 test("URL protocol classification matches accepted case-insensitive Git schemes", () => {
-  expect(gitUsesTemporaryAcquisition("FILE:///fixture")).toBe(false);
-  expect(gitUsesTemporaryAcquisition("HTTPS://example.test/repository")).toBe(true);
-  expect(() => gitUsesTemporaryAcquisition("ssh://example.test/repository")).toThrow(
+  expect(gitUsesRemoteAcquisition("FILE:///fixture")).toBe(false);
+  expect(gitUsesRemoteAcquisition("HTTPS://example.test/repository")).toBe(true);
+  expect(() => gitUsesRemoteAcquisition("ssh://example.test/repository")).toThrow(
     "Unsupported Git acquisition protocol",
   );
 });
