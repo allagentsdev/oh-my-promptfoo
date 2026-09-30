@@ -21,8 +21,10 @@ import { withLock } from "../packages/workspace-core/src/cache-lock.ts";
 import { CheckoutFactory, releaseView } from "../packages/workspace-core/src/checkout.ts";
 import {
   alive,
+  allocated,
   atomicJson,
   exists,
+  inventory,
   isMounted,
   json,
   MARKER,
@@ -117,6 +119,23 @@ test("large protection walks retain file modes and never follow source symlinks"
   expect((await lstat(join(nested, "file-64"))).mode & 0o777).toBe(0o755);
   expect((await lstat(nested)).mode & 0o777).toBe(0o700);
   expect((await lstat(outside)).mode & 0o777).toBe(0o600);
+});
+test("bounded inventory retains depth-first order and allocated blocks match inode totals", async () => {
+  const root = await mkdtemp(join(realpathSync(tmpdir()), "allagents-inventory-test-"));
+  temporary.push(root);
+  await mkdir(join(root, "a"));
+  await writeFile(join(root, "a", "b"), "nested");
+  await writeFile(join(root, "a."), "sibling");
+  await symlink("a/b", join(root, "link"));
+  const entries = await inventory(root);
+  expect(entries.map((entry) => entry.path)).toEqual(["a", "a/b", "a.", "link"]);
+  expect(entries.find((entry) => entry.path === "a/b")?.digest).toBeDefined();
+  const paths = [root, join(root, "a"), join(root, "a", "b"), join(root, "a."), join(root, "link")];
+  const expected = (await Promise.all(paths.map((path) => lstat(path)))).reduce(
+    (sum, stat) => sum + stat.blocks * 512,
+    0,
+  );
+  expect(await allocated(root)).toBe(expected);
 });
 test("writable Git views retain immutable objects while allowing new Git objects", async () => {
   const root = await mkdtemp(join(realpathSync(tmpdir()), "allagents-git-object-modes-"));

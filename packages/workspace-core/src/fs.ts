@@ -169,48 +169,108 @@ export async function ownedRoot(path: string, kind: string): Promise<void> {
   if ((await realpath(absolute)) !== absolute) throw new Error("Package root realpath mismatch");
 }
 export async function inventory(root: string, maxEntries = 1000000): Promise<TreeEntry[]> {
-  const result: TreeEntry[] = [];
+  const result: (TreeEntry | undefined)[] = [];
+  const pending: {
+    path: string;
+    index: number;
+    kind: "file" | "symlink";
+    size: number;
+    mode: number;
+  }[] = [];
   async function visit(path: string): Promise<void> {
     const stat = await lstat(path);
     const rel = relative(root, path).split(sep).join("/");
     if (result.length >= maxEntries) throw new Error("Tree inventory limit exceeded");
     if (stat.isSymbolicLink()) {
-      const target = await readlink(path);
-      const effective = resolve(dirname(path), target);
-      if (effective !== root) contained(root, effective);
-      result.push({
-        path: rel,
+      pending.push({
+        path,
+        index: result.length,
         kind: "symlink",
+        size: 0,
         mode: stat.mode & 0o777,
-        size: Buffer.byteLength(target),
-        target,
       });
+      result.push(undefined);
     } else if (stat.isDirectory()) {
       if (rel) result.push({ path: rel, kind: "directory", mode: stat.mode & 0o777, size: 0 });
       for (const name of (await readdir(path)).sort()) await visit(join(path, name));
     } else if (stat.isFile()) {
       if (stat.nlink !== 1) throw new Error("Hardlinked seed content is forbidden");
-      const hash = createHash("sha256");
-      const { createReadStream } = await import("node:fs");
-      for await (const chunk of createReadStream(path)) hash.update(chunk);
-      result.push({
-        path: rel,
+      pending.push({
+        path,
+        index: result.length,
         kind: "file",
-        mode: stat.mode & 0o777,
         size: stat.size,
-        digest: hash.digest("hex"),
+        mode: stat.mode & 0o777,
       });
+      result.push(undefined);
     } else throw new Error("Special file in workspace source");
   }
   await visit(root);
-  return result;
+  const { createReadStream } = await import("node:fs");
+  let cursor = 0;
+  let failed = false;
+  let failure: unknown;
+  await Promise.all(
+    Array.from({ length: Math.min(32, pending.length) }, async () => {
+      while (!failed && cursor < pending.length) {
+        const item = pending[cursor++];
+        const path = relative(root, item.path).split(sep).join("/");
+        try {
+          if (item.kind === "symlink") {
+            const target = await readlink(item.path);
+            const effective = resolve(dirname(item.path), target);
+            if (effective !== root) contained(root, effective);
+            result[item.index] = {
+              path,
+              kind: "symlink",
+              mode: item.mode,
+              size: Buffer.byteLength(target),
+              target,
+            };
+          } else {
+            const hash = createHash("sha256");
+            for await (const chunk of createReadStream(item.path)) hash.update(chunk);
+            result[item.index] = {
+              path,
+              kind: "file",
+              mode: item.mode,
+              size: item.size,
+              digest: hash.digest("hex"),
+            };
+          }
+        } catch (error) {
+          failed = true;
+          failure = error;
+        }
+      }
+    }),
+  );
+  if (failed) throw failure;
+  if (result.some((entry) => !entry)) throw new Error("Incomplete tree inventory");
+  return result as TreeEntry[];
 }
 export async function allocated(root: string): Promise<number> {
   if (!(await exists(root))) return 0;
-  const stat = await lstat(root);
-  let bytes = stat.blocks * 512;
-  if (stat.isDirectory())
-    for (const name of await readdir(root)) bytes += await allocated(join(root, name));
+  let bytes = 0;
+  const pending = [root];
+  for (let cursor = 0; cursor < pending.length; ) {
+    const end = Math.min(cursor + 64, pending.length);
+    const batch = pending.slice(cursor, end);
+    cursor = end;
+    const entries = await Promise.all(
+      batch.map(async (path) => {
+        const stat = await lstat(path);
+        return {
+          bytes: stat.blocks * 512,
+          children: stat.isDirectory() ? (await readdir(path)).map((name) => join(path, name)) : [],
+        };
+      }),
+    );
+    for (const entry of entries) {
+      bytes += entry.bytes;
+      for (const child of entry.children) pending.push(child);
+    }
+  }
   return bytes;
 }
 export async function protect(
