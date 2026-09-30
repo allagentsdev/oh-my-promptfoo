@@ -41,6 +41,12 @@ jobs:
           if (manifest.version !== match[1]) throw Error('Release tag does not match package version');
           const tags = execFileSync('git', ['tag', '--points-at', 'HEAD'], { encoding: 'utf8' }).split(/\r?\n/);
           if (!tags.includes(ref)) throw Error('Requested release tag does not point at checked-out HEAD');
+          execFileSync('git', ['fetch', '--no-tags', 'origin', 'main'], { stdio: 'pipe' });
+          try {
+            execFileSync('git', ['merge-base', '--is-ancestor', 'HEAD', 'FETCH_HEAD'], { stdio: 'pipe' });
+          } catch {
+            throw Error('Release tag commit must be merged into main');
+          }
           appendFileSync(process.env.GITHUB_OUTPUT, `tag=${match[2] ? 'next' : 'latest'}\n`);
           JS
       - uses: actions/setup-node@v4
