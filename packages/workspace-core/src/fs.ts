@@ -168,7 +168,63 @@ export async function ownedRoot(path: string, kind: string): Promise<void> {
     throw new Error("Invalid package root ownership");
   if ((await realpath(absolute)) !== absolute) throw new Error("Package root realpath mismatch");
 }
-export async function inventory(root: string, maxEntries = 1000000): Promise<TreeEntry[]> {
+export async function inventoryWithAllocation(
+  root: string,
+  maxEntries = 1000000,
+): Promise<{ entries: TreeEntry[]; allocatedBytes: number }> {
+  const nodes: {
+    path: string;
+    rel: string;
+    sortKey: string;
+    kind: "directory" | "file" | "symlink";
+    size: number;
+    mode: number;
+  }[] = [];
+  const queue = [root];
+  let allocatedBytes = 0;
+  for (let cursor = 0; cursor < queue.length; ) {
+    const end = Math.min(cursor + 64, queue.length);
+    const batch = queue.slice(cursor, end);
+    cursor = end;
+    const found = await Promise.all(
+      batch.map(async (path) => {
+        const stat = await lstat(path);
+        const rel = relative(root, path).split(sep).join("/");
+        if (stat.isSymbolicLink())
+          return { path, rel, stat, kind: "symlink" as const, children: [] as string[] };
+        if (stat.isDirectory())
+          return {
+            path,
+            rel,
+            stat,
+            kind: "directory" as const,
+            children: (await readdir(path)).map((name) => join(path, name)),
+          };
+        if (stat.isFile()) {
+          if (stat.nlink !== 1) throw new Error("Hardlinked seed content is forbidden");
+          return { path, rel, stat, kind: "file" as const, children: [] as string[] };
+        }
+        throw new Error("Special file in workspace source");
+      }),
+    );
+    for (const item of found) {
+      allocatedBytes += item.stat.blocks * 512;
+      if (item.rel)
+        nodes.push({
+          path: item.path,
+          rel: item.rel,
+          sortKey: item.rel.replaceAll("/", "\0"),
+          kind: item.kind,
+          size: item.stat.size,
+          mode: item.stat.mode & 0o777,
+        });
+      if (nodes.length > maxEntries) throw new Error("Tree inventory limit exceeded");
+      for (const child of item.children) queue.push(child);
+    }
+  }
+  // Replacing separators with NUL preserves the old depth-first, per-directory
+  // lexical order while allowing the stat walk to run concurrently.
+  nodes.sort((a, b) => (a.sortKey < b.sortKey ? -1 : a.sortKey > b.sortKey ? 1 : 0));
   const result: (TreeEntry | undefined)[] = [];
   const pending: {
     path: string;
@@ -177,35 +233,20 @@ export async function inventory(root: string, maxEntries = 1000000): Promise<Tre
     size: number;
     mode: number;
   }[] = [];
-  async function visit(path: string): Promise<void> {
-    const stat = await lstat(path);
-    const rel = relative(root, path).split(sep).join("/");
-    if (result.length >= maxEntries) throw new Error("Tree inventory limit exceeded");
-    if (stat.isSymbolicLink()) {
+  for (const item of nodes) {
+    if (item.kind === "directory")
+      result.push({ path: item.rel, kind: "directory", mode: item.mode, size: 0 });
+    else {
       pending.push({
-        path,
+        path: item.path,
         index: result.length,
-        kind: "symlink",
-        size: 0,
-        mode: stat.mode & 0o777,
+        kind: item.kind,
+        size: item.size,
+        mode: item.mode,
       });
       result.push(undefined);
-    } else if (stat.isDirectory()) {
-      if (rel) result.push({ path: rel, kind: "directory", mode: stat.mode & 0o777, size: 0 });
-      for (const name of (await readdir(path)).sort()) await visit(join(path, name));
-    } else if (stat.isFile()) {
-      if (stat.nlink !== 1) throw new Error("Hardlinked seed content is forbidden");
-      pending.push({
-        path,
-        index: result.length,
-        kind: "file",
-        size: stat.size,
-        mode: stat.mode & 0o777,
-      });
-      result.push(undefined);
-    } else throw new Error("Special file in workspace source");
+    }
   }
-  await visit(root);
   const { createReadStream } = await import("node:fs");
   let cursor = 0;
   let failed = false;
@@ -247,7 +288,10 @@ export async function inventory(root: string, maxEntries = 1000000): Promise<Tre
   );
   if (failed) throw failure;
   if (result.some((entry) => !entry)) throw new Error("Incomplete tree inventory");
-  return result as TreeEntry[];
+  return { entries: result as TreeEntry[], allocatedBytes };
+}
+export async function inventory(root: string, maxEntries = 1000000): Promise<TreeEntry[]> {
+  return (await inventoryWithAllocation(root, maxEntries)).entries;
 }
 export async function allocated(root: string): Promise<number> {
   if (!(await exists(root))) return 0;

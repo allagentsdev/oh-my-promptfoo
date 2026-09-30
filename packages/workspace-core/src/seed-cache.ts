@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readdir, realpath, rename, statfs } from "node:fs/promises";
+import { channel } from "node:diagnostics_channel";
+import { lstat, mkdir, readdir, realpath, rename, statfs } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import {
   acquisitionPhysicalReservation,
@@ -19,6 +20,7 @@ import {
   exists,
   hash,
   inventory,
+  inventoryWithAllocation,
   json,
   MARKER,
   ownedRoot,
@@ -67,6 +69,19 @@ const MAX_INVENTORY_JSON_BYTES = 512 * 1024 ** 2;
 // Cache age is measured in days; refreshing a recently verified entry on every
 // row would repeatedly traverse a large published tree just to update recency.
 const LAST_USED_REFRESH_MS = 60 * 60 * 1000;
+const preparationPhases = channel("allagents.workspace.preparation");
+async function measuredPhase<T>(phase: string, work: () => Promise<T>): Promise<T> {
+  if (!preparationPhases.hasSubscribers) return work();
+  const start = process.hrtime.bigint();
+  try {
+    return await work();
+  } finally {
+    preparationPhases.publish({
+      phase,
+      elapsedMs: Number(process.hrtime.bigint() - start) / 1_000_000,
+    });
+  }
+}
 
 export class SeedCache {
   private readonly verified = new Map<Digest, SeedMetadata>();
@@ -294,33 +309,56 @@ export class SeedCache {
             const tree = join(staging, "tree");
             await mkdir(tree);
             try {
-              await materializeSources(sources, tree, limits, channels, signal);
+              await measuredPhase("materialize-sources", () =>
+                materializeSources(sources, tree, limits, channels, signal),
+              );
               signal?.throwIfAborted();
-              const contents = await inventory(tree);
-              const actual = await allocated(staging);
+              const { entries: contents, allocatedBytes } = await measuredPhase(
+                "seed-inventory",
+                () => inventoryWithAllocation(tree),
+              );
+              const stageBytes = async (withMetadata: boolean) => {
+                const expected = withMetadata
+                  ? ["metadata.json", "staging.json", "tree"]
+                  : ["staging.json", "tree"];
+                const names = (await readdir(staging)).sort();
+                if (canonicalJson(names) !== canonicalJson(expected))
+                  throw new Error("Unexpected cache staging content");
+                const paths = [staging, join(staging, "staging.json")];
+                if (withMetadata) paths.push(join(staging, "metadata.json"));
+                const stats = await Promise.all(paths.map((path) => lstat(path)));
+                return allocatedBytes + stats.reduce((sum, stat) => sum + stat.blocks * 512, 0);
+              };
+              const actual = await measuredPhase("seed-physical-admission", () =>
+                stageBytes(false),
+              );
               if (actual > reservation)
                 throw new Error("Seed exceeds physical staging reservation");
-              await protect(tree, false);
+              await measuredPhase("seed-protect", () => protect(tree, false));
               const metadata: SeedMetadata = {
                 schemaVersion: 1,
                 package: PACKAGE,
                 digest,
                 sources: sources.map((s) => ({ ...s })),
                 inventory: contents,
-                allocatedBytes: await allocated(tree),
+                allocatedBytes,
                 createdAt: Date.now(),
                 lastUsed: Date.now(),
               };
               // The initial admission already reserved the maximum inventory
               // document and its temporary atomic replacement.
-              await this.writeMetadata(
-                join(staging, "metadata.json"),
-                metadata,
-                digest,
-                undefined,
-                true,
+              await measuredPhase("seed-metadata-write", () =>
+                this.writeMetadata(
+                  join(staging, "metadata.json"),
+                  metadata,
+                  digest,
+                  undefined,
+                  true,
+                ),
               );
-              if ((await allocated(staging)) > reservation)
+              if (
+                (await measuredPhase("seed-final-admission", () => stageBytes(true))) > reservation
+              )
                 throw new Error("Seed metadata exceeds physical staging reservation");
               const { unlink } = await import("node:fs/promises");
               await unlink(join(staging, "staging.json"));

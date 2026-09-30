@@ -25,6 +25,7 @@ import {
   atomicJson,
   exists,
   inventory,
+  inventoryWithAllocation,
   isMounted,
   json,
   MARKER,
@@ -136,6 +137,9 @@ test("bounded inventory retains depth-first order and allocated blocks match ino
     0,
   );
   expect(await allocated(root)).toBe(expected);
+  const combined = await inventoryWithAllocation(root);
+  expect(combined.entries).toEqual(entries);
+  expect(combined.allocatedBytes).toBe(expected);
 });
 test("writable Git views retain immutable objects while allowing new Git objects", async () => {
   const root = await mkdtemp(join(realpathSync(tmpdir()), "allagents-git-object-modes-"));
@@ -183,6 +187,12 @@ test("local Git seed keeps only the pinned commit and remains usable after sourc
   const owner = manager(f.spec, f.channels);
   const view = await owner.prepare();
   const seed = join(view.seedPath, "project");
+  expect((await lstat(join(seed, "executable.sh"))).mode & 0o111).toBe(0o111);
+  expect(
+    execFileSync("git", ["-C", join(view.path, "project"), "status", "--porcelain"], {
+      encoding: "utf8",
+    }),
+  ).toBe("");
   expect(await exists(join(seed, ".git", "objects", "info", "alternates"))).toBe(false);
   expect(() =>
     execFileSync("git", ["-C", seed, "cat-file", "-e", `${later}^{commit}`], {
