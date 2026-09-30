@@ -485,6 +485,37 @@ describe("workspace lifecycle", () => {
     await next.cleanup();
     expect((await pruneCache(f.channels, true)).removed).toContain(c.manifestDigest);
   }, 15_000);
+  test("a writable Git view can commit new objects without changing cached objects", async () => {
+    const f = await fixture();
+    const owner = manager(f.spec, f.channels);
+    const view = await owner.prepare();
+    const project = join(view.path, "project");
+    const original = execFileSync("git", ["-C", project, "rev-parse", "HEAD"], {
+      encoding: "utf8",
+    }).trim();
+    await writeFile(join(project, "source.txt"), "committed in row\n");
+    execFileSync("git", ["-C", project, "add", "source.txt"]);
+    execFileSync("git", [
+      "-C",
+      project,
+      "-c",
+      "user.name=Fixture",
+      "-c",
+      "user.email=fixture@example.test",
+      "commit",
+      "-qm",
+      "row commit",
+    ]);
+    expect(
+      execFileSync("git", ["-C", project, "rev-parse", "HEAD"], { encoding: "utf8" }).trim(),
+    ).not.toBe(original);
+    expect(
+      execFileSync("git", ["-C", join(view.seedPath, "project"), "rev-parse", "HEAD"], {
+        encoding: "utf8",
+      }).trim(),
+    ).toBe(original);
+    await owner.cleanup();
+  }, 15_000);
   test("protected source is shared inside distinct writable roots and retained while readers live", async () => {
     const f = await fixture();
     f.spec.sources[0].permissions = "read-only";
