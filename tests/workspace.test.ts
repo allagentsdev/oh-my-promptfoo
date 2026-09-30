@@ -4,6 +4,7 @@ import { realpathSync } from "node:fs";
 import {
   chmod,
   cp,
+  lstat,
   mkdir,
   mkdtemp,
   open,
@@ -27,6 +28,7 @@ import {
   MARKER,
   ownedRoot,
   processIdentity,
+  protect,
   removeTree,
 } from "../packages/workspace-core/src/fs.ts";
 import { helperInvoke } from "../packages/workspace-core/src/helper.ts";
@@ -87,6 +89,35 @@ function manager(spec: WorkspaceSpec, channels: RuntimeChannels) {
   managers.push(value);
   return value;
 }
+test("large protection walks retain file modes and never follow source symlinks", async () => {
+  const root = await mkdtemp(join(realpathSync(tmpdir()), "allagents-protect-test-"));
+  temporary.push(root);
+  const tree = join(root, "tree");
+  const nested = join(tree, "nested");
+  await mkdir(nested, { recursive: true });
+  await Promise.all(
+    Array.from({ length: 65 }, (_, index) =>
+      writeFile(join(nested, `file-${index}`), "content", {
+        mode: index === 64 ? 0o755 : 0o644,
+      }),
+    ),
+  );
+  const outside = join(root, "outside");
+  await writeFile(outside, "untouched", { mode: 0o600 });
+  await symlink(outside, join(nested, "external"));
+
+  await protect(tree, false);
+  expect((await lstat(join(nested, "file-0"))).mode & 0o777).toBe(0o444);
+  expect((await lstat(join(nested, "file-64"))).mode & 0o777).toBe(0o555);
+  expect((await lstat(nested)).mode & 0o777).toBe(0o555);
+  expect((await lstat(outside)).mode & 0o777).toBe(0o600);
+
+  await protect(tree, true);
+  expect((await lstat(join(nested, "file-0"))).mode & 0o777).toBe(0o644);
+  expect((await lstat(join(nested, "file-64"))).mode & 0o777).toBe(0o755);
+  expect((await lstat(nested)).mode & 0o777).toBe(0o700);
+  expect((await lstat(outside)).mode & 0o777).toBe(0o600);
+});
 describe("workspace configuration", () => {
   test("canceling a native lock waiter preserves its reason and the current holder", async () => {
     const root = await mkdtemp(join(realpathSync(tmpdir()), "allagents-lock-cancel-"));

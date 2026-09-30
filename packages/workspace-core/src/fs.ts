@@ -214,13 +214,28 @@ export async function allocated(root: string): Promise<number> {
   return bytes;
 }
 export async function protect(root: string, writable: boolean): Promise<void> {
-  const stat = await lstat(root);
-  if (stat.isSymbolicLink()) return;
-  if (stat.isDirectory()) {
-    if (writable) await chmod(root, 0o700);
-    for (const name of await readdir(root)) await protect(join(root, name), writable);
-    await chmod(root, writable ? 0o700 : 0o555);
-  } else await chmod(root, (stat.mode & 0o111 ? 0o555 : 0o444) | (writable ? 0o200 : 0));
+  // Protecting a large checkout is dominated by filesystem round trips. Walk
+  // independent entries concurrently while bounding the number of in-flight
+  // operations; every descendant is still visited and symlinks are not followed.
+  const pending = [root];
+  for (let cursor = 0; cursor < pending.length; ) {
+    const end = Math.min(cursor + 32, pending.length);
+    const batch = pending.slice(cursor, end);
+    cursor = end;
+    const children = await Promise.all(
+      batch.map(async (path) => {
+        const stat = await lstat(path);
+        if (stat.isSymbolicLink()) return [];
+        if (stat.isDirectory()) {
+          await chmod(path, writable ? 0o700 : 0o555);
+          return (await readdir(path)).map((name) => join(path, name));
+        }
+        await chmod(path, (stat.mode & 0o111 ? 0o555 : 0o444) | (writable ? 0o200 : 0));
+        return [];
+      }),
+    );
+    for (const group of children) pending.push(...group);
+  }
 }
 export async function removeTree(path: string): Promise<void> {
   if (!(await exists(path))) return;
