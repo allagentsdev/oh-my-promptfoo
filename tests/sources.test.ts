@@ -13,7 +13,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { DEFAULT_LIMITS } from "../packages/workspace-core/src/config.ts";
@@ -32,6 +32,7 @@ import type { WorkspaceSpec } from "../packages/workspace-core/src/types.ts";
 
 const exec = promisify(execFile);
 const roots: string[] = [];
+const privateAclCheck = `$a=Get-Acl -LiteralPath $env:ALLAGENTS_PRIVATE_ROOT;$me=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value;if (!$a.AreAccessRulesProtected -or @($a.Access | Where-Object { $_.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value -ne $me }).Count -ne 0) { exit 4 }`;
 afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
@@ -58,18 +59,20 @@ async function fixture(): Promise<{
         PATH: process.env.PATH,
         HOME: root,
         GIT_CONFIG_NOSYSTEM: "1",
-        GIT_CONFIG_GLOBAL: "/dev/null",
+        GIT_CONFIG_GLOBAL: process.platform === "win32" ? "NUL" : "/dev/null",
       },
     });
   await git("init", "-b", "main");
   await git("config", "user.name", "Fixture");
   await git("config", "user.email", "fixture@example.invalid");
+  await git("config", "core.symlinks", "true");
   await writeFile(join(repository, "hello.txt"), "hello\n");
   await writeFile(join(repository, "binary.bin"), Buffer.from([0, 1, 255]));
   await writeFile(join(repository, "run.sh"), "#!/bin/sh\necho hello\n");
   await chmod(join(repository, "run.sh"), 0o755);
   await symlink("hello.txt", join(repository, "link"));
   await git("add", ".");
+  await git("update-index", "--chmod=+x", "run.sh");
   await git("commit", "-m", "fixture");
   const { stdout } = await git("rev-parse", "HEAD");
   const commit = stdout.trim();
@@ -109,7 +112,11 @@ describe("bounded Git acquisition", () => {
     const project = join(staging, "project");
     expect(await readFile(join(project, "hello.txt"), "utf8")).toBe("hello\n");
     expect(await readFile(join(project, "binary.bin"))).toEqual(Buffer.from([0, 1, 255]));
-    expect((await lstat(join(project, "run.sh"))).mode & 0o111).toBe(0o111);
+    if (process.platform === "win32")
+      expect(
+        (await exec("git", ["-C", project, "ls-files", "--stage", "--", "run.sh"])).stdout,
+      ).toMatch(/^100755 /);
+    else expect((await lstat(join(project, "run.sh"))).mode & 0o111).toBe(0o111);
     expect((await exec("git", ["-C", project, "status", "--porcelain"])).stdout).toBe("");
     expect((await exec("git", ["-C", project, "rev-parse", "HEAD"])).stdout.trim()).toBe(commit);
     expect((await exec("git", ["-C", project, "remote"])).stdout).toBe("");
@@ -225,9 +232,14 @@ async function fakeOras(
   const path = join(root, "oras-fixture.cjs");
   await writeFile(
     path,
-    `#!/usr/bin/env node\nconst fs=require('fs');const args=process.argv.slice(2);if(args[0]==='version'){console.log('Version: 1.3.0');process.exit(0);}const manifest=Buffer.from('${manifest.toString("base64")}','base64');const blobs=${JSON.stringify(blobs)};${extra}\nif(args[0]==='manifest'){if(args.includes('--descriptor'))process.stdout.write(JSON.stringify({digest:'${digest(manifest)}'}));else process.stdout.write(manifest);}else if(args[0]==='blob'){const ref=args[args.length-1];fs.appendFileSync('${join(root, "blob-calls")}','call\\n');process.stdout.write(Buffer.from(blobs[ref.slice(ref.lastIndexOf('@')+1)]||'','base64'));}else process.exit(3);\n`,
+    `#!/usr/bin/env node\nconst fs=require('fs');const args=process.argv.slice(2);if(args[0]==='version'){console.log('Version: 1.3.0');process.exit(0);}const manifest=Buffer.from('${manifest.toString("base64")}','base64');const blobs=${JSON.stringify(blobs)};${extra}\nif(args[0]==='manifest'){if(args.includes('--descriptor'))process.stdout.write(JSON.stringify({digest:'${digest(manifest)}'}));else process.stdout.write(manifest);}else if(args[0]==='blob'){const ref=args[args.length-1];fs.appendFileSync(${JSON.stringify(join(root, "blob-calls"))},'call\\n');process.stdout.write(Buffer.from(blobs[ref.slice(ref.lastIndexOf('@')+1)]||'','base64'));}else process.exit(3);\n`,
     { mode: 0o700 },
   );
+  if (process.platform === "win32") {
+    const executable = join(root, "oras-fixture.exe");
+    await exec(process.execPath, ["build", "--compile", path, "--outfile", executable]);
+    return executable;
+  }
   return path;
 }
 function manifestFor(
@@ -427,11 +439,22 @@ describe("OCI manifest and streaming defenses", () => {
         auths: { "registry.test": { auth: Buffer.from(`user:${secret}`).toString("base64") } },
       }),
     );
+    let checkPrivacy = "if((fs.statSync(p).mode&511)!==384)process.exit(4);";
+    if (process.platform === "win32") {
+      const powershell = join(
+        process.env.SystemRoot ?? "C:\\Windows",
+        "System32",
+        "WindowsPowerShell",
+        "v1.0",
+        "powershell.exe",
+      );
+      checkPrivacy = `require('node:child_process').execFileSync(${JSON.stringify(powershell)}, ['-NoProfile','-NonInteractive','-Command',${JSON.stringify(privateAclCheck)}], {env:{SystemRoot:process.env.SystemRoot,ALLAGENTS_PRIVATE_ROOT:p}});`;
+    }
     const oras = await fakeOras(
       root,
       manifest,
       {},
-      `if(args[0]==='manifest'){const p=args[args.indexOf('--registry-config')+1];fs.writeFileSync('${join(root, "copy-path")}',p);if((fs.statSync(p).mode&511)!==384)process.exit(4);process.stderr.write('${secret}');process.exit(5);}`,
+      `if(args[0]==='manifest'){const p=args[args.indexOf('--registry-config')+1];fs.writeFileSync(${JSON.stringify(join(root, "copy-path"))},p);${checkPrivacy}process.stderr.write('${secret}');process.exit(5);}`,
     );
     const staging = join(root, "stage");
     await mkdir(staging);
@@ -506,6 +529,26 @@ test("source process cancellation kills its process group and redacts credential
   ).rejects.toThrow("[redacted]");
 });
 
+test("source cancellation terminates a spawned descendant before it can write", async () => {
+  const root = await temporary();
+  const escaped = join(root, "escaped");
+  const abort = new AbortController();
+  const descendant = `setTimeout(() => require("node:fs").writeFileSync(process.argv[1], "escaped"), 500)`;
+  const script = `const { spawn } = require("node:child_process"); spawn(process.execPath, ["-e", ${JSON.stringify(descendant)}, process.argv[1]], { stdio: "ignore" }); process.stdout.write("started\\n"); setInterval(() => {}, 1000);`;
+  await expect(
+    runSource(process.execPath, ["-e", script, escaped], {
+      env: { PATH: process.env.PATH, SystemRoot: process.env.SystemRoot },
+      channels: {},
+      signal: abort.signal,
+      onChunk: async (bytes) => {
+        if (bytes.includes("started")) abort.abort(new Error("stop source tree"));
+      },
+    }),
+  ).rejects.toThrow("stop source tree");
+  await new Promise((resolve) => setTimeout(resolve, 650));
+  await expect(lstat(escaped)).rejects.toThrow();
+});
+
 test("private acquisition recovery removes only marked dead credential directories", async () => {
   const identity = await processIdentity();
   const dead = await mkdtemp(join(realpathSync(tmpdir()), "allagents-acquisition-"));
@@ -528,8 +571,28 @@ test("private acquisition recovery removes only marked dead credential directori
     identity,
   });
   await writeFile(join(malformed, ".allagents-owner.json"), "{}", { mode: 0o600 });
-  await withPrivateAcquisition({}, async (root) => {
-    expect((await lstat(root)).mode & 0o077).toBe(0);
+  await withPrivateAcquisition({}, async (root, env) => {
+    if (process.platform === "win32") {
+      expect(env.TEMP).toBe(root);
+      expect(env.TMP).toBe(root);
+      expect(env.USERPROFILE).toBe(root);
+      await exec(
+        join(
+          process.env.SystemRoot ?? "C:\\Windows",
+          "System32",
+          "WindowsPowerShell",
+          "v1.0",
+          "powershell.exe",
+        ),
+        ["-NoProfile", "-NonInteractive", "-Command", privateAclCheck],
+        {
+          env: {
+            SystemRoot: process.env.SystemRoot ?? "C:\\Windows",
+            ALLAGENTS_PRIVATE_ROOT: root,
+          },
+        },
+      );
+    } else expect((await lstat(root)).mode & 0o077).toBe(0);
   });
   await expect(lstat(dead)).rejects.toThrow();
   expect((await lstat(live)).isDirectory()).toBe(true);
@@ -541,14 +604,18 @@ test("private acquisition canonicalizes platform temp aliases and cleans its mar
   const physical = join(root, "physical");
   const alias = join(root, "platform-alias");
   await mkdir(physical);
-  await symlink(physical, alias);
+  await symlink(physical, alias, process.platform === "win32" ? "junction" : "dir");
   const module = pathToFileURL(
     join(process.cwd(), "packages/workspace-core/src/sources/process.ts"),
   ).href;
   const code = `const {withPrivateAcquisition}=await import(${JSON.stringify(module)});let observed;await withPrivateAcquisition({},async(root,env)=>{observed=root;if(env.HOME!==root)throw Error('Environment escaped acquisition');});console.log(observed);`;
   const { stdout } = await exec(process.execPath, ["-e", code], {
-    env: { ...process.env, TMPDIR: alias },
+    env: {
+      ...process.env,
+      TMPDIR: alias,
+      ...(process.platform === "win32" ? { TEMP: alias, TMP: alias } : {}),
+    },
   });
-  expect(stdout.trim().startsWith(`${physical}/`)).toBe(true);
+  expect(stdout.trim().startsWith(`${physical}${sep}`)).toBe(true);
   expect(await readdir(physical)).toEqual([]);
 });

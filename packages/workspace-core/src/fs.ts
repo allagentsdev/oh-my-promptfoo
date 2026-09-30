@@ -10,6 +10,7 @@ import {
   realpath,
   rename,
   rm,
+  rmdir,
   writeFile,
 } from "node:fs/promises";
 import { hostname } from "node:os";
@@ -42,7 +43,8 @@ export async function atomicJson(
   if (Buffer.byteLength(encoded) > maxBytes) throw new Error("Package JSON exceeds write bound");
   const temp = `${path}.${randomUUID()}.tmp`;
   await mkdir(dirname(path), { recursive: true, mode: 0o700 });
-  if ((await realpath(dirname(path))) !== resolve(dirname(path)))
+  if (process.platform === "win32") await assertNoSymlinkAncestors(dirname(path));
+  else if ((await realpath(dirname(path))) !== resolve(dirname(path)))
     throw new Error("Symlinked package write parent");
   try {
     await writeFile(temp, encoded, { mode: 0o600, flag: "wx" });
@@ -65,6 +67,31 @@ export async function json<T>(path: string, maxBytes = 64 * 1024 ** 2): Promise<
     await fd.close();
   }
 }
+/** Windows process creation time is a kernel timestamp, not a PID or wall-clock estimate. */
+async function windowsProcessStart(pid: number): Promise<string> {
+  const { execFile } = await import("node:child_process");
+  return new Promise((res, rej) =>
+    execFile(
+      join(
+        process.env.SystemRoot ?? "C:\\Windows",
+        "System32",
+        "WindowsPowerShell",
+        "v1.0",
+        "powershell.exe",
+      ),
+      [
+        "-NoLogo",
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        `[Console]::Out.Write((Get-Process -Id ${pid} -ErrorAction Stop).StartTime.ToUniversalTime().Ticks.ToString())`,
+      ],
+      { env: { SystemRoot: process.env.SystemRoot ?? "C:\\Windows" }, windowsHide: true },
+      (error, output) => (error ? rej(error) : res(output.trim())),
+    ),
+  );
+}
+
 export async function processIdentity(): Promise<ProcessIdentity> {
   let start = "";
   let boot = "";
@@ -73,6 +100,8 @@ export async function processIdentity(): Promise<ProcessIdentity> {
       (await readFile(`/proc/${process.pid}/stat`, "utf8")).split(") ").at(-1)?.split(" ")[19] ??
       "";
     boot = (await readFile("/proc/sys/kernel/random/boot_id", "utf8")).trim();
+  } else if (process.platform === "win32") {
+    start = await windowsProcessStart(process.pid);
   } else {
     const { execFile } = await import("node:child_process");
     start = await new Promise<string>((res, rej) =>
@@ -114,6 +143,26 @@ export async function alive(identity: ProcessIdentity): Promise<boolean> {
       throw e;
     }
   }
+  if (process.platform === "win32") {
+    try {
+      process.kill(identity.pid, 0);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ESRCH") return false;
+      throw error;
+    }
+    try {
+      return (await windowsProcessStart(identity.pid)) === identity.start;
+    } catch (error) {
+      // An access-denied or unavailable identity is never authority to delete
+      // another process's private scratch. Only a confirmed missing PID is.
+      try {
+        process.kill(identity.pid, 0);
+      } catch (status) {
+        if ((status as NodeJS.ErrnoException).code === "ESRCH") return false;
+      }
+      throw error;
+    }
+  }
   const { execFile } = await import("node:child_process");
   return new Promise((res) =>
     execFile(
@@ -151,12 +200,21 @@ export async function ownedRoot(path: string, kind: string): Promise<void> {
   if (!(await exists(join(absolute, MARKER)))) {
     const parent = dirname(absolute);
     await mkdir(parent, { recursive: true, mode: 0o700 });
-    if ((await realpath(parent)) !== parent) throw new Error("Package root parent is a symlink");
+    if (process.platform === "win32") await assertNoSymlinkAncestors(parent);
+    else if ((await realpath(parent)) !== parent)
+      throw new Error("Package root parent is a symlink");
     const staging = await mkdtemp(join(parent, `.${basename(absolute)}.allagents-bootstrap-`));
     try {
       await atomicJson(join(staging, MARKER), { schemaVersion: 1, package: PACKAGE, kind });
       // Publish the completed directory atomically, including over an empty root.
       // A concurrent publisher's marked, nonempty root cannot be replaced.
+      // Windows cannot rename onto an existing empty directory; remove only
+      // an empty root, then race competing publishers with the atomic rename.
+      if (process.platform === "win32" && (await exists(absolute))) {
+        await rmdir(absolute).catch((error: NodeJS.ErrnoException) => {
+          if (!["ENOENT", "ENOTEMPTY", "EEXIST"].includes(error.code ?? "")) throw error;
+        });
+      }
       try {
         await rename(staging, absolute);
       } catch (error) {
@@ -170,7 +228,8 @@ export async function ownedRoot(path: string, kind: string): Promise<void> {
   const marker = await json<Ownership>(join(absolute, MARKER));
   if (marker.package !== PACKAGE || marker.schemaVersion !== 1 || marker.kind !== kind)
     throw new Error("Invalid package root ownership");
-  if ((await realpath(absolute)) !== absolute) throw new Error("Package root realpath mismatch");
+  if (process.platform !== "win32" && (await realpath(absolute)) !== absolute)
+    throw new Error("Package root realpath mismatch");
 }
 export async function inventoryWithAllocation(
   root: string,
@@ -321,11 +380,41 @@ export async function allocated(root: string): Promise<number> {
   }
   return bytes;
 }
+let windowsIdentity: Promise<string> | undefined;
+/** NTFS read-only directory attributes do not prevent creating children. */
+async function windowsTreeAccess(root: string, writable: boolean): Promise<void> {
+  const { execFile } = await import("node:child_process");
+  const systemRoot = process.env.SystemRoot ?? "C:\\Windows";
+  const system = join(systemRoot, "System32");
+  const run = (command: string, args: string[]): Promise<string> =>
+    new Promise((resolve, reject) =>
+      execFile(
+        join(system, command),
+        args,
+        { env: { SystemRoot: systemRoot }, windowsHide: true },
+        (error, output) => (error ? reject(error) : resolve(output)),
+      ),
+    );
+  if (!windowsIdentity)
+    windowsIdentity = run("whoami.exe", ["/user", "/fo", "csv", "/nh"]).then((identity) => {
+      const sid = /,"(S-\d+(?:-\d+)+)"\s*$/.exec(identity)?.[1];
+      if (!sid) throw new Error("Cannot establish Windows workspace ACL identity");
+      return sid;
+    });
+  const sid = await windowsIdentity;
+  const grant = `*${sid}:(OI)(CI)${writable ? "F" : "RX"}`;
+  // Give each descendant its own ACE before removing inherited permissions.
+  // /L handles link inodes, never the targets outside the protected tree.
+  await run("icacls.exe", [root, "/grant:r", grant, "/T", "/L", "/Q"]);
+  await run("icacls.exe", [root, "/inheritance:r", "/T", "/L", "/Q"]);
+}
+
 export async function protect(
   root: string,
   writable: boolean,
   preserveGitObjects = false,
 ): Promise<void> {
+  if (process.platform === "win32" && writable) await windowsTreeAccess(root, true);
   // Protecting a large checkout is dominated by filesystem round trips. Walk
   // independent entries concurrently while bounding the number of in-flight
   // operations; every descendant is still visited and symlinks are not followed.
@@ -358,9 +447,15 @@ export async function protect(
     for (const result of children)
       if (result.status === "fulfilled") for (const child of result.value) pending.push(child);
   }
+  if (process.platform === "win32" && !writable) await windowsTreeAccess(root, false);
 }
 export async function removeTree(path: string): Promise<void> {
   if (!(await exists(path))) return;
+  if (process.platform === "win32" && (await lstat(path)).isSymbolicLink()) {
+    await rm(path, { recursive: true, force: true });
+    return;
+  }
+  if (process.platform === "win32") await windowsTreeAccess(path, true);
   if (process.platform === "linux") {
     const mounts = (await readFile("/proc/self/mountinfo", "utf8"))
       .split("\n")
@@ -379,8 +474,11 @@ export async function removeTree(path: string): Promise<void> {
     const info = await lstat(directory);
     if (!info.isDirectory() || info.isSymbolicLink()) return;
     if ((info.mode & 0o777) !== 0o700) await chmod(directory, 0o700);
-    for (const entry of await readdir(directory, { withFileTypes: true }))
-      if (entry.isDirectory()) await makeDirectoriesWritable(join(directory, entry.name));
+    for (const entry of await readdir(directory, { withFileTypes: true })) {
+      const child = join(directory, entry.name);
+      if (entry.isDirectory()) await makeDirectoriesWritable(child);
+      else if (process.platform === "win32" && !entry.isSymbolicLink()) await chmod(child, 0o600);
+    }
   };
   // Unlink needs writable parent directories, even when regular files are read-only.
   await makeDirectoriesWritable(path);

@@ -401,7 +401,7 @@ describe("direct Copilot provider", () => {
       "approve-once",
       "reject",
     ]);
-    expect(output.directory).toBe(path);
+    expect(realpathSync(output.directory)).toBe(realpathSync(path));
     expect(output.discovery).toBe(false);
     expect(response.tokenUsage).toEqual({
       prompt: 4,

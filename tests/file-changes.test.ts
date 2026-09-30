@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { chmod, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readlink, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { captureFileChanges, establishBaseline } from "../packages/workspace-core/src/file-changes";
@@ -29,7 +29,9 @@ test("capture records exact after bytes, deletions, modes, symlinks and root add
     await writeFile(join(path, "run.sh"), "#!/bin/sh\n");
     await chmod(join(path, "run.sh"), 0o755);
     await symlink("/outside/not-read", join(path, "link"));
-    await symlink(Buffer.from([255]), join(path, "binary-link"));
+    const binaryLinkTarget =
+      process.platform === "win32" ? "unreadable-target" : Buffer.from([255]);
+    await symlink(binaryLinkTarget, join(path, "binary-link"), "file");
     const result = await captureFileChanges(handle, baseline);
     expect(result.status).toBe("complete");
     if (result.status === "failed") throw new Error(result.failure.message);
@@ -38,13 +40,21 @@ test("capture records exact after bytes, deletions, modes, symlinks and root add
     );
     expect(result.generatedFiles["old.txt"].change).toBe("modified");
     expect(result.deletedFiles).toEqual(["delete.txt"]);
-    expect(result.generatedFiles["run.sh"].mode).toBe("100755");
-    expect(result.generatedFiles.link.kind).toBe("symlink");
-    expect(Buffer.from(result.generatedFiles["binary-link"].content, "base64")).toEqual(
-      Buffer.from([255]),
+    expect(result.generatedFiles["run.sh"].mode).toBe(
+      process.platform === "win32" ? "100644" : "100755",
     );
-    expect(Buffer.from(result.generatedFiles.link.content, "base64").toString()).toBe(
-      "/outside/not-read",
+    expect(result.generatedFiles.link.kind).toBe("symlink");
+    expect(result.generatedFiles["binary-link"].kind).toBe("symlink");
+    expect(result.generatedFiles["binary-link"].mode).toBe("120000");
+    expect(Buffer.from(result.generatedFiles["binary-link"].content, "base64")).toEqual(
+      process.platform === "win32"
+        ? await readlink(join(path, "binary-link"), { encoding: "buffer" })
+        : Buffer.from([255]),
+    );
+    expect(Buffer.from(result.generatedFiles.link.content, "base64")).toEqual(
+      process.platform === "win32"
+        ? await readlink(join(path, "link"), { encoding: "buffer" })
+        : Buffer.from("/outside/not-read"),
     );
     expect(result.diff?.content).toContain("+after");
     expect(result.diff?.content).toContain("-deleted");

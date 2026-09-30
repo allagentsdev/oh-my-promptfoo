@@ -97,18 +97,33 @@ export function redact(
   return message;
 }
 export function sourceEnvironment(home: string): NodeJS.ProcessEnv {
-  return {
+  const environment: NodeJS.ProcessEnv = {
     PATH: process.env.PATH || "/usr/bin:/bin",
     HOME: home,
     TMPDIR: home,
     LANG: "C",
     LC_ALL: "C",
     GIT_CONFIG_NOSYSTEM: "1",
-    GIT_CONFIG_GLOBAL: "/dev/null",
+    GIT_CONFIG_GLOBAL: process.platform === "win32" ? "NUL" : "/dev/null",
     GIT_TERMINAL_PROMPT: "0",
     GIT_NO_REPLACE_OBJECTS: "1",
     GIT_OPTIONAL_LOCKS: "0",
   };
+  if (process.platform === "win32") {
+    const systemRoot = process.env.SystemRoot ?? "C:\\Windows";
+    // Preserve only the Windows loader's necessary settings. Credentials and
+    // per-user paths remain confined to the disposable acquisition directory.
+    Object.assign(environment, {
+      SystemRoot: systemRoot,
+      windir: systemRoot,
+      ComSpec: join(systemRoot, "System32", "cmd.exe"),
+      PATHEXT: ".COM;.EXE;.BAT;.CMD",
+      TEMP: home,
+      TMP: home,
+      USERPROFILE: home,
+    });
+  }
+  return environment;
 }
 export interface RunOptions {
   env: NodeJS.ProcessEnv;
@@ -141,11 +156,28 @@ export async function runSource(
       child.on("close", (code, signal) => resolve({ code, signal }));
     },
   );
+  let stopping: Promise<void> | undefined;
   const terminate = () => {
-    try {
-      if (child.pid) process.kill(process.platform === "win32" ? child.pid : -child.pid, "SIGKILL");
-    } catch {
-      /* Already gone. */
+    if (!child.pid) return;
+    if (process.platform === "win32") {
+      if (child.exitCode != null || child.signalCode != null) return;
+      // Windows has no POSIX process groups. taskkill /T terminates children
+      // spawned by Git/ORAS as well as the original acquisition process.
+      stopping ??= new Promise<void>((resolve) => {
+        const killer = spawn(
+          join(process.env.SystemRoot ?? "C:\\Windows", "System32", "taskkill.exe"),
+          ["/PID", String(child.pid), "/T", "/F"],
+          { stdio: "ignore", windowsHide: true },
+        );
+        killer.once("error", () => resolve());
+        killer.once("close", () => resolve());
+      });
+    } else {
+      try {
+        process.kill(-child.pid, "SIGKILL");
+      } catch {
+        /* Already gone. */
+      }
     }
   };
   const abort = () => terminate();
@@ -181,7 +213,7 @@ export async function runSource(
     return Buffer.concat(chunks);
   } catch (error) {
     terminate();
-    await completed;
+    await Promise.all([completed, stopping]);
     throw new Error(
       redact(
         error instanceof Error ? error.message : String(error),
@@ -194,6 +226,49 @@ export async function runSource(
   }
 }
 
+async function privateWindowsPath(path: string, directory: boolean): Promise<void> {
+  const { execFile } = await import("node:child_process");
+  const script = `
+$ErrorActionPreference = 'Stop'
+$acl = Get-Acl -LiteralPath $env:ALLAGENTS_PRIVATE_ROOT
+$acl.SetAccessRuleProtection($true, $false)
+foreach ($rule in @($acl.Access)) { $acl.RemoveAccessRuleAll($rule) }
+$owner = [Security.Principal.WindowsIdentity]::GetCurrent().User
+$rule = if ($env:ALLAGENTS_PRIVATE_DIRECTORY -eq '1') {
+  [Security.AccessControl.FileSystemAccessRule]::new($owner, 'FullControl', 'ContainerInherit,ObjectInherit', 'None', 'Allow')
+} else { [Security.AccessControl.FileSystemAccessRule]::new($owner, 'FullControl', 'Allow') }
+$acl.AddAccessRule($rule)
+Set-Acl -LiteralPath $env:ALLAGENTS_PRIVATE_ROOT -AclObject $acl
+`;
+  await new Promise<void>((resolve, reject) =>
+    execFile(
+      join(
+        process.env.SystemRoot ?? "C:\\Windows",
+        "System32",
+        "WindowsPowerShell",
+        "v1.0",
+        "powershell.exe",
+      ),
+      [
+        "-NoLogo",
+        "-NoProfile",
+        "-NonInteractive",
+        "-EncodedCommand",
+        Buffer.from(script, "utf16le").toString("base64"),
+      ],
+      {
+        env: {
+          SystemRoot: process.env.SystemRoot ?? "C:\\Windows",
+          ALLAGENTS_PRIVATE_ROOT: path,
+          ALLAGENTS_PRIVATE_DIRECTORY: directory ? "1" : "0",
+        },
+        windowsHide: true,
+      },
+      (error) => (error ? reject(error) : resolve()),
+    ),
+  );
+}
+
 export async function withPrivateAcquisition<T>(
   channels: RuntimeChannels,
   fn: (root: string, env: NodeJS.ProcessEnv) => Promise<T>,
@@ -202,6 +277,7 @@ export async function withPrivateAcquisition<T>(
   const root = await mkdtemp(join(realpathSync(tmpdir()), "allagents-acquisition-"));
   try {
     await chmod(root, 0o700);
+    if (process.platform === "win32") await privateWindowsPath(root, true);
     await atomicJson(join(root, ".allagents-owner.json"), {
       schemaVersion: 1,
       package: PACKAGE,
@@ -230,8 +306,8 @@ async function reapPrivateAcquisitions(): Promise<void> {
       !stat ||
       !stat.isDirectory() ||
       stat.isSymbolicLink() ||
-      stat.uid !== process.getuid?.() ||
-      stat.mode & 0o077
+      (process.platform !== "win32" &&
+        (stat.uid !== process.getuid?.() || (stat.mode & 0o077) !== 0))
     )
       continue;
     try {
@@ -241,9 +317,9 @@ async function reapPrivateAcquisitions(): Promise<void> {
         !markerStat.isFile() ||
         markerStat.isSymbolicLink() ||
         markerStat.nlink !== 1 ||
-        markerStat.uid !== stat.uid ||
         markerStat.size > 4096 ||
-        markerStat.mode & 0o077
+        (process.platform !== "win32" &&
+          (markerStat.uid !== stat.uid || (markerStat.mode & 0o077) !== 0))
       )
         continue;
       const marker = JSON.parse(await readFile(markerPath, "utf8")) as {
@@ -290,6 +366,7 @@ export async function orasEnvironment(
   await mkdir(root, { recursive: true, mode: 0o700 });
   await copyFile(auth, target);
   await chmod(target, 0o600);
+  if (process.platform === "win32") await privateWindowsPath(target, false);
   const bytes = await readFile(target, "utf8");
   if (Buffer.byteLength(bytes) > 1024 * 1024) throw new Error("ORAS auth file exceeds 1 MiB");
   const redactions = [bytes];

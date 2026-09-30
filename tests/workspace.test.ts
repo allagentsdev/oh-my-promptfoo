@@ -15,7 +15,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import { withLock } from "../packages/workspace-core/src/cache-lock.ts";
 import { CheckoutFactory, releaseView } from "../packages/workspace-core/src/checkout.ts";
@@ -63,8 +63,10 @@ async function fixture() {
   execFileSync("git", ["init", "-q", repo]);
   await writeFile(join(repo, "source.txt"), "immutable input\n");
   await writeFile(join(repo, "executable.sh"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+  execFileSync("git", ["-C", repo, "config", "core.symlinks", "true"]);
   await symlink("source.txt", join(repo, "link"));
   execFileSync("git", ["-C", repo, "add", "."]);
+  execFileSync("git", ["-C", repo, "update-index", "--chmod=+x", "executable.sh"]);
   execFileSync("git", [
     "-C",
     repo,
@@ -110,16 +112,35 @@ test("large protection walks retain file modes and never follow source symlinks"
   await symlink(outside, join(nested, "external"));
 
   await protect(tree, false);
-  expect((await lstat(join(nested, "file-0"))).mode & 0o777).toBe(0o444);
-  expect((await lstat(join(nested, "file-64"))).mode & 0o777).toBe(0o555);
-  expect((await lstat(nested)).mode & 0o777).toBe(0o555);
-  expect((await lstat(outside)).mode & 0o777).toBe(0o600);
+  if (process.platform === "win32") {
+    // NTFS exposes a read-only attribute, not Unix execute or owner/group bits.
+    for (const path of [join(nested, "file-0"), join(nested, "file-64")])
+      expect((await lstat(path)).mode & 0o222).toBe(0);
+    await expect(writeFile(join(nested, "file-0"), "changed")).rejects.toThrow();
+    await expect(writeFile(join(nested, "new-file"), "not allowed")).rejects.toThrow();
+    await writeFile(outside, "untouched");
+  } else {
+    expect((await lstat(join(nested, "file-0"))).mode & 0o777).toBe(0o444);
+    expect((await lstat(join(nested, "file-64"))).mode & 0o777).toBe(0o555);
+    expect((await lstat(nested)).mode & 0o777).toBe(0o555);
+    expect((await lstat(outside)).mode & 0o777).toBe(0o600);
+  }
 
   await protect(tree, true);
-  expect((await lstat(join(nested, "file-0"))).mode & 0o777).toBe(0o644);
-  expect((await lstat(join(nested, "file-64"))).mode & 0o777).toBe(0o755);
-  expect((await lstat(nested)).mode & 0o777).toBe(0o700);
-  expect((await lstat(outside)).mode & 0o777).toBe(0o600);
+  if (process.platform === "win32") {
+    for (const path of [join(nested, "file-0"), join(nested, "file-64")])
+      expect((await lstat(path)).mode & 0o222).not.toBe(0);
+    await writeFile(join(nested, "new-file"), "allowed");
+    expect(await readFile(join(nested, "new-file"), "utf8")).toBe("allowed");
+    await writeFile(join(nested, "file-0"), "changed");
+    expect(await readFile(join(nested, "file-0"), "utf8")).toBe("changed");
+    expect(await readFile(outside, "utf8")).toBe("untouched");
+  } else {
+    expect((await lstat(join(nested, "file-0"))).mode & 0o777).toBe(0o644);
+    expect((await lstat(join(nested, "file-64"))).mode & 0o777).toBe(0o755);
+    expect((await lstat(nested)).mode & 0o777).toBe(0o700);
+    expect((await lstat(outside)).mode & 0o777).toBe(0o600);
+  }
 });
 test("bounded inventory retains depth-first order and allocated blocks match inode totals", async () => {
   const root = await mkdtemp(join(realpathSync(tmpdir()), "allagents-inventory-test-"));
@@ -153,10 +174,16 @@ test("writable Git views retain immutable objects while allowing new Git objects
 
   await protect(tree, false);
   await protect(tree, true, true);
-  expect((await lstat(join(objects, "existing"))).mode & 0o777).toBe(0o444);
-  expect((await lstat(objects)).mode & 0o777).toBe(0o700);
-  expect((await lstat(join(tree, ".git", "index"))).mode & 0o777).toBe(0o644);
-  expect((await lstat(join(tree, "source.txt"))).mode & 0o777).toBe(0o644);
+  expect((await lstat(join(objects, "existing"))).mode & 0o222).toBe(0);
+  if (process.platform === "win32") {
+    expect((await lstat(objects)).mode & 0o222).not.toBe(0);
+    expect((await lstat(join(tree, ".git", "index"))).mode & 0o222).not.toBe(0);
+    expect((await lstat(join(tree, "source.txt"))).mode & 0o222).not.toBe(0);
+  } else {
+    expect((await lstat(objects)).mode & 0o777).toBe(0o700);
+    expect((await lstat(join(tree, ".git", "index"))).mode & 0o777).toBe(0o644);
+    expect((await lstat(join(tree, "source.txt"))).mode & 0o777).toBe(0o644);
+  }
   await writeFile(join(objects, "new"), "new object");
   expect(await readFile(join(objects, "new"), "utf8")).toBe("new object");
 });
@@ -187,7 +214,13 @@ test("local Git seed keeps only the pinned commit and remains usable after sourc
   const owner = manager(f.spec, f.channels);
   const view = await owner.prepare();
   const seed = join(view.seedPath, "project");
-  expect((await lstat(join(seed, "executable.sh"))).mode & 0o111).toBe(0o111);
+  if (process.platform === "win32")
+    expect(
+      execFileSync("git", ["-C", seed, "ls-files", "--stage", "--", "executable.sh"], {
+        encoding: "utf8",
+      }),
+    ).toMatch(/^100755 /);
+  else expect((await lstat(join(seed, "executable.sh"))).mode & 0o111).toBe(0o111);
   expect(
     execFileSync("git", ["-C", join(view.path, "project"), "status", "--porcelain"], {
       encoding: "utf8",
@@ -811,14 +844,18 @@ test("default runtime canonicalizes the platform temporary directory while expli
   const target = join(root, "physical");
   const alias = join(root, "platform-alias");
   await mkdir(target);
-  await symlink(target, alias);
+  await symlink(target, alias, process.platform === "win32" ? "junction" : "dir");
   const module = pathToFileURL(join(process.cwd(), "packages/workspace-core/src/index.ts")).href;
   const code = `const {WorkspaceManager}=await import(${JSON.stringify(module)});const manager=new WorkspaceManager({sources:[]},{ALLAGENTS_CACHE_ROOT:${JSON.stringify(join(root, "cache"))}});const handle=await manager.prepare();console.log(handle.path);await manager.cleanup();`;
   const path = execFileSync(process.execPath, ["-e", code], {
     encoding: "utf8",
-    env: { ...process.env, TMPDIR: alias },
+    env: {
+      ...process.env,
+      TMPDIR: alias,
+      ...(process.platform === "win32" ? { TEMP: alias, TMP: alias } : {}),
+    },
   }).trim();
-  expect(path.startsWith(`${target}/`)).toBe(true);
+  expect(path.startsWith(`${target}${sep}`)).toBe(true);
   await expect(
     manager(
       { sources: [] },

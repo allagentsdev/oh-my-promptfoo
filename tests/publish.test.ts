@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
 import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 
 const fakeNpm = `#!/usr/bin/env node
 const {readFileSync,writeFileSync}=require('node:fs');
@@ -49,14 +49,22 @@ async function fixture() {
     join(import.meta.dir, "..", "scripts", "publish.ts"),
     join(root, "scripts", "publish.ts"),
   );
-  await writeFile(join(root, "bin", "npm"), fakeNpm, { mode: 0o755 });
+  if (process.platform === "win32") {
+    await writeFile(join(root, "bin", "npm.js"), fakeNpm);
+    await writeFile(
+      join(root, "bin", "npm.cmd"),
+      `@echo off\r\n"${process.execPath}" "%~dp0npm.js" %*\r\n`,
+    );
+  } else {
+    await writeFile(join(root, "bin", "npm"), fakeNpm, { mode: 0o755 });
+  }
   await writeFile(
     join(root, "package.json"),
     `${JSON.stringify({ version: "1.0.0", private: true })}\n`,
   );
   await writeFile(
     join(root, "packages", "promptfoo-integration", "package.json"),
-    `${JSON.stringify({ name: "@allagents/promptfoo-integration", version: "1.0.0" })}\n`,
+    `${JSON.stringify({ name: "@allagents/promptfoo-integration", version: "1.0.0", private: true })}\n`,
   );
   const registry = join(root, "registry-state");
   await writeFile(registry, JSON.stringify({ versions: [], tags: {}, published: [] }));
@@ -72,7 +80,7 @@ function run(
     encoding: "utf8",
     env: {
       ...process.env,
-      PATH: `${join(f.root, "bin")}:${process.env.PATH}`,
+      PATH: `${join(f.root, "bin")}${delimiter}${process.env.PATH ?? ""}`,
       RELEASE_REF: options.ref ?? "v1.0.0",
       GITHUB_ACTIONS: "true",
       GITHUB_EVENT_NAME: "workflow_dispatch",
