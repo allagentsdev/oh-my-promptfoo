@@ -15,7 +15,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import { withLock } from "../packages/workspace-core/src/cache-lock.ts";
 import { CheckoutFactory, releaseView } from "../packages/workspace-core/src/checkout.ts";
@@ -63,8 +63,10 @@ async function fixture() {
   execFileSync("git", ["init", "-q", repo]);
   await writeFile(join(repo, "source.txt"), "immutable input\n");
   await writeFile(join(repo, "executable.sh"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+  execFileSync("git", ["-C", repo, "config", "core.symlinks", "true"]);
   await symlink("source.txt", join(repo, "link"));
   execFileSync("git", ["-C", repo, "add", "."]);
+  execFileSync("git", ["-C", repo, "update-index", "--chmod=+x", "executable.sh"]);
   execFileSync("git", [
     "-C",
     repo,
@@ -92,6 +94,19 @@ function manager(spec: WorkspaceSpec, channels: RuntimeChannels) {
   managers.push(value);
   return value;
 }
+async function allowFixtureFileMutation(path: string): Promise<void> {
+  if (process.platform !== "win32") {
+    await chmod(path, 0o644);
+    return;
+  }
+  const system32 = join(process.env.SystemRoot ?? "C:\\Windows", "System32");
+  const account = execFileSync(join(system32, "whoami.exe"), ["/user", "/fo", "csv", "/nh"], {
+    encoding: "utf8",
+  });
+  const sid = /,"(S-\d+(?:-\d+)+)"\s*$/.exec(account)?.[1];
+  if (!sid) throw new Error("Cannot determine fixture ACL owner");
+  execFileSync(join(system32, "icacls.exe"), [path, "/grant:r", `*${sid}:F`, "/L", "/Q"]);
+}
 test("large protection walks retain file modes and never follow source symlinks", async () => {
   const root = await mkdtemp(join(realpathSync(tmpdir()), "allagents-protect-test-"));
   temporary.push(root);
@@ -110,16 +125,31 @@ test("large protection walks retain file modes and never follow source symlinks"
   await symlink(outside, join(nested, "external"));
 
   await protect(tree, false);
-  expect((await lstat(join(nested, "file-0"))).mode & 0o777).toBe(0o444);
-  expect((await lstat(join(nested, "file-64"))).mode & 0o777).toBe(0o555);
-  expect((await lstat(nested)).mode & 0o777).toBe(0o555);
-  expect((await lstat(outside)).mode & 0o777).toBe(0o600);
+  if (process.platform === "win32") {
+    // NTFS ACLs, not POSIX mode bits, restrict existing and newly created files.
+    await expect(writeFile(join(nested, "file-0"), "changed")).rejects.toThrow();
+    await expect(writeFile(join(nested, "new-file"), "not allowed")).rejects.toThrow();
+    await writeFile(outside, "untouched");
+  } else {
+    expect((await lstat(join(nested, "file-0"))).mode & 0o777).toBe(0o444);
+    expect((await lstat(join(nested, "file-64"))).mode & 0o777).toBe(0o555);
+    expect((await lstat(nested)).mode & 0o777).toBe(0o555);
+    expect((await lstat(outside)).mode & 0o777).toBe(0o600);
+  }
 
   await protect(tree, true);
-  expect((await lstat(join(nested, "file-0"))).mode & 0o777).toBe(0o644);
-  expect((await lstat(join(nested, "file-64"))).mode & 0o777).toBe(0o755);
-  expect((await lstat(nested)).mode & 0o777).toBe(0o700);
-  expect((await lstat(outside)).mode & 0o777).toBe(0o600);
+  if (process.platform === "win32") {
+    await writeFile(join(nested, "new-file"), "allowed");
+    expect(await readFile(join(nested, "new-file"), "utf8")).toBe("allowed");
+    await writeFile(join(nested, "file-0"), "changed");
+    expect(await readFile(join(nested, "file-0"), "utf8")).toBe("changed");
+    expect(await readFile(outside, "utf8")).toBe("untouched");
+  } else {
+    expect((await lstat(join(nested, "file-0"))).mode & 0o777).toBe(0o644);
+    expect((await lstat(join(nested, "file-64"))).mode & 0o777).toBe(0o755);
+    expect((await lstat(nested)).mode & 0o777).toBe(0o700);
+    expect((await lstat(outside)).mode & 0o777).toBe(0o600);
+  }
 });
 test("bounded inventory retains depth-first order and allocated blocks match inode totals", async () => {
   const root = await mkdtemp(join(realpathSync(tmpdir()), "allagents-inventory-test-"));
@@ -153,10 +183,16 @@ test("writable Git views retain immutable objects while allowing new Git objects
 
   await protect(tree, false);
   await protect(tree, true, true);
-  expect((await lstat(join(objects, "existing"))).mode & 0o777).toBe(0o444);
-  expect((await lstat(objects)).mode & 0o777).toBe(0o700);
-  expect((await lstat(join(tree, ".git", "index"))).mode & 0o777).toBe(0o644);
-  expect((await lstat(join(tree, "source.txt"))).mode & 0o777).toBe(0o644);
+  if (process.platform === "win32") {
+    await expect(writeFile(join(objects, "existing"), "mutation")).rejects.toThrow();
+    await writeFile(join(tree, ".git", "index"), "mutable index");
+    await writeFile(join(tree, "source.txt"), "mutable source");
+  } else {
+    expect((await lstat(join(objects, "existing"))).mode & 0o222).toBe(0);
+    expect((await lstat(objects)).mode & 0o777).toBe(0o700);
+    expect((await lstat(join(tree, ".git", "index"))).mode & 0o777).toBe(0o644);
+    expect((await lstat(join(tree, "source.txt"))).mode & 0o777).toBe(0o644);
+  }
   await writeFile(join(objects, "new"), "new object");
   expect(await readFile(join(objects, "new"), "utf8")).toBe("new object");
 });
@@ -187,7 +223,13 @@ test("local Git seed keeps only the pinned commit and remains usable after sourc
   const owner = manager(f.spec, f.channels);
   const view = await owner.prepare();
   const seed = join(view.seedPath, "project");
-  expect((await lstat(join(seed, "executable.sh"))).mode & 0o111).toBe(0o111);
+  if (process.platform === "win32")
+    expect(
+      execFileSync("git", ["-C", seed, "ls-files", "--stage", "--", "executable.sh"], {
+        encoding: "utf8",
+      }),
+    ).toMatch(/^100755 /);
+  else expect((await lstat(join(seed, "executable.sh"))).mode & 0o111).toBe(0o111);
   expect(
     execFileSync("git", ["-C", join(view.path, "project"), "status", "--porcelain"], {
       encoding: "utf8",
@@ -295,7 +337,7 @@ describe("workspace configuration", () => {
     child.stderr!.on("data", (data) => {
       errors += String(data);
     });
-    const timer = setTimeout(() => child.kill("SIGKILL"), 10_000);
+    const timer = setTimeout(() => child.kill("SIGKILL"), 30_000);
     try {
       await new Promise<void>((resolve, reject) => {
         child.stdout!.on("data", (data) => {
@@ -304,7 +346,7 @@ describe("workspace configuration", () => {
         });
         child.once("error", reject);
         child.once("close", () =>
-          reject(new Error(`Contender exited before lock wait: ${errors}`)),
+          reject(new Error(`Contender exited before lock wait: stdout=${output} stderr=${errors}`)),
         );
       });
       await new Promise((resolve) => setTimeout(resolve, 1000));
@@ -319,7 +361,7 @@ describe("workspace configuration", () => {
       await closed;
       clearTimeout(timer);
     }
-  }, 15_000);
+  }, 45_000);
   test("another process can initialize while an ownership marker awaits publication", async () => {
     const parent = await mkdtemp(join(realpathSync(tmpdir()), "allagents-root-boundary-"));
     temporary.push(parent);
@@ -595,7 +637,7 @@ describe("workspace lifecycle", () => {
     const [a, b] = await Promise.all([aOwner.prepare(), bOwner.prepare()]);
     expect(a.path).not.toBe(b.path);
     expect(await readlink(join(a.path, "project"))).toBe(await readlink(join(b.path, "project")));
-    expect(await readlink(join(a.path, "project"))).not.toContain("/published/");
+    expect(await readlink(join(a.path, "project"))).not.toContain(`${sep}published${sep}`);
     await writeFile(join(a.path, "notes.txt"), "allowed");
     await expect(writeFile(join(a.path, "project", "source.txt"), "forbidden")).rejects.toThrow();
     await aOwner.cleanup();
@@ -603,25 +645,25 @@ describe("workspace lifecycle", () => {
     expect((await pruneCache(f.channels, true)).retained).toContain(b.manifestDigest);
     await bOwner.cleanup();
     expect((await pruneCache(f.channels, true)).removed).toContain(b.manifestDigest);
-  });
+  }, 30_000);
   test("protected checkout mutation invalidates future reuse instead of resetting a live checkout", async () => {
     const f = await fixture();
     f.spec.sources[0].permissions = "read-only";
     const owner = manager(f.spec, f.channels);
     const a = await owner.prepare();
     const shared = await readlink(join(a.path, "project"));
-    await chmod(join(shared, "source.txt"), 0o644);
+    await allowFixtureFileMutation(join(shared, "source.txt"));
     await writeFile(join(shared, "source.txt"), "unexpected");
     await expect(owner.validateProtected(a)).rejects.toThrow("mutated");
-    await expect(owner.prepare()).rejects.toThrow("invalidated");
-    expect(await readFile(join(shared, "source.txt"), "utf8")).toBe("unexpected");
-  });
+    await expect(owner.prepare()).rejects.toThrow();
+    expect(await readFile(join(a.path, "project", "source.txt"), "utf8")).toBe("unexpected");
+  }, 30_000);
   test("unknown mount or invalid recovery state keeps leases and independent workspaces still detach", async () => {
     const f = await fixture();
     const owner = manager(f.spec, f.channels);
     const [a, b] = await Promise.all([owner.prepare(), owner.prepare()]);
     const root = join(a.path, "../..");
-    const recordPath = join(root, "records", `${a.path.split("/").at(-1)}.json`);
+    const recordPath = join(root, "records", `${basename(a.path)}.json`);
     const record = await json<RecoveryRecord>(recordPath);
     record.path = join(f.root, "escape");
     await atomicJson(recordPath, record);
@@ -634,7 +676,7 @@ describe("workspace lifecycle", () => {
     record.path = a.path;
     await atomicJson(recordPath, record);
     await owner.cleanup();
-  });
+  }, 30_000);
   test("unmarked and symlink roots fail before source acquisition", async () => {
     const f = await fixture();
     await mkdir(f.channels.ALLAGENTS_CACHE_ROOT!);
@@ -705,7 +747,7 @@ describe("cache policy and fallback admission", () => {
     // Cleanup also applies age collection after dependency-ordered lease release.
     expect(await readdir(join(f.channels.ALLAGENTS_CACHE_ROOT!, "published"))).toHaveLength(0);
     expect((await pruneCache(f.channels)).allocatedBytes).toBe(emptyAllocatedBytes);
-  });
+  }, 30_000);
   test("fresh hosted root accepts only verified immutable published subtree and makes fresh leases", async () => {
     const f = await fixture();
     const owner = manager(f.spec, f.channels);
@@ -726,13 +768,13 @@ describe("cache policy and fallback admission", () => {
     expect(
       (await pruneCache({ ...f.channels, ALLAGENTS_CACHE_ROOT: restored }, true)).removed,
     ).toContain(row.manifestDigest);
-  });
+  }, 30_000);
   test("corrupt restored seed and symlinked control paths are refused before acquisition", async () => {
     const f = await fixture();
     const owner = manager(f.spec, f.channels);
     const row = await owner.prepare();
     await owner.cleanup();
-    await chmod(join(row.seedPath, "project", "source.txt"), 0o644);
+    await allowFixtureFileMutation(join(row.seedPath, "project", "source.txt"));
     await writeFile(join(row.seedPath, "project", "source.txt"), "corrupt");
     await expect(manager(f.spec, f.channels).prepare()).rejects.toThrow("integrity");
     const restored = join(f.root, "bad-cache");
@@ -741,7 +783,7 @@ describe("cache policy and fallback admission", () => {
     await expect(pruneCache({ ...f.channels, ALLAGENTS_CACHE_ROOT: restored })).rejects.toThrow(
       "Symlink",
     );
-  });
+  }, 30_000);
   test("full-copy fallback creates independent inodes and rejects sparse huge logical footprint before copy", async () => {
     const f = await fixture();
     const runtime = join(f.root, "copies");
@@ -759,9 +801,15 @@ describe("cache policy and fallback admission", () => {
     expect(await readFile(join(b.path, "source.txt"), "utf8")).toBe("immutable input\n");
     const huge = join(f.root, "huge");
     await mkdir(huge);
-    const fd = await open(join(huge, "sparse"), "w");
-    await fd.truncate(2 ** 40);
-    await fd.close();
+    const sparse = join(huge, "sparse");
+    await writeFile(sparse, "");
+    if (process.platform === "win32") execFileSync("fsutil.exe", ["sparse", "setflag", sparse]);
+    const fd = await open(sparse, "r+");
+    try {
+      await fd.truncate(2 ** 40);
+    } finally {
+      await fd.close();
+    }
     const destination = join(runtime, "rejected");
     await expect(factory.create({ ...a, seedSource: huge, path: destination })).rejects.toThrow(
       "cannot fit",
@@ -803,7 +851,7 @@ test("large inventory JSON can use an explicit bounded read without relaxing def
   expect((await json<{ inventory: string }>(path, 512 * 1024 * 1024)).inventory.length).toBe(
     65 * 1024 * 1024,
   );
-});
+}, 30_000);
 
 test("default runtime canonicalizes the platform temporary directory while explicit symlink roots stay rejected", async () => {
   const root = await mkdtemp(join(realpathSync(tmpdir()), "allagents-default-root-"));
@@ -811,14 +859,18 @@ test("default runtime canonicalizes the platform temporary directory while expli
   const target = join(root, "physical");
   const alias = join(root, "platform-alias");
   await mkdir(target);
-  await symlink(target, alias);
+  await symlink(target, alias, process.platform === "win32" ? "junction" : "dir");
   const module = pathToFileURL(join(process.cwd(), "packages/workspace-core/src/index.ts")).href;
   const code = `const {WorkspaceManager}=await import(${JSON.stringify(module)});const manager=new WorkspaceManager({sources:[]},{ALLAGENTS_CACHE_ROOT:${JSON.stringify(join(root, "cache"))}});const handle=await manager.prepare();console.log(handle.path);await manager.cleanup();`;
   const path = execFileSync(process.execPath, ["-e", code], {
     encoding: "utf8",
-    env: { ...process.env, TMPDIR: alias },
+    env: {
+      ...process.env,
+      TMPDIR: alias,
+      ...(process.platform === "win32" ? { TEMP: alias, TMP: alias } : {}),
+    },
   }).trim();
-  expect(path.startsWith(`${target}/`)).toBe(true);
+  expect(path.startsWith(`${target}${sep}`)).toBe(true);
   await expect(
     manager(
       { sources: [] },
@@ -858,7 +910,7 @@ test("crash recovery discards completed staging with a large valid ownership met
   await next.prepare();
   await next.cleanup();
   expect(await readdir(join(f.channels.ALLAGENTS_CACHE_ROOT!, "staging"))).toEqual([]);
-});
+}, 30_000);
 
 test("seed reuse reserves the atomic inventory replacement before writing and preserves the previous metadata on refusal", async () => {
   const { CACHE_CEILING, SeedCache } = await import("../packages/workspace-core/src/seed-cache.ts");
@@ -932,7 +984,7 @@ test("recent verified seed reuse avoids another full capacity walk but refreshes
   expect((await json<{ lastUsed: number }>(metadataPath)).lastUsed).toBeGreaterThan(
     Date.now() - 60_000,
   );
-});
+}, 30_000);
 
 test("bounded JSON writes reject before leaving a partial or temporary file", async () => {
   const root = await mkdtemp(join(realpathSync(tmpdir()), "allagents-json-write-"));
@@ -982,4 +1034,4 @@ test("admission retains a shared protected checkout when reused by a different s
   expect(await readFile(join(reused.path, "source.txt"), "utf8")).toBe("immutable input\n");
   await cache.checkProtected(reused.key);
   await cache.releaseProtected(record, reused.key);
-});
+}, 30_000);

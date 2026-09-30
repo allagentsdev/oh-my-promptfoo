@@ -9,6 +9,7 @@ import {
   readlink,
   realpath,
   rm,
+  stat as statPath,
   utimes,
   writeFile,
 } from "node:fs/promises";
@@ -27,7 +28,7 @@ const safeGitArgs = [
   "-c",
   "core.fsmonitor=false",
   "-c",
-  "core.hooksPath=/dev/null",
+  `core.hooksPath=${process.platform === "win32" ? "NUL" : "/dev/null"}`,
   "-c",
   "credential.helper=",
   "-c",
@@ -81,10 +82,27 @@ async function gitCredentials(
     '#!/usr/bin/env node\nprocess.stdout.write((/username/i.test(process.argv[2] || "") ? process.env.ALLAGENTS_PRIVATE_GIT_USERNAME || "" : process.env.ALLAGENTS_PRIVATE_GIT_TOKEN || "") + "\\n");\n',
     { mode: 0o700 },
   );
+  if (process.platform === "win32") {
+    // Windows does not execute a .cjs shebang directly. The wrapper receives
+    // no untrusted prompt arguments: Git already has a private username, so
+    // the only remaining askpass value is the private token.
+    await writeFile(
+      join(root, "askpass.cmd"),
+      `@echo off\r\n"${process.execPath}" "%~dp0askpass.cjs"\r\n`,
+      { mode: 0o700 },
+    );
+  }
   return {
     ...env,
-    GIT_ASKPASS: helper,
+    GIT_ASKPASS: process.platform === "win32" ? join(root, "askpass.cmd") : helper,
     GIT_ASKPASS_REQUIRE: "force",
+    ...(process.platform === "win32"
+      ? {
+          GIT_CONFIG_COUNT: "1",
+          GIT_CONFIG_KEY_0: "credential.username",
+          GIT_CONFIG_VALUE_0: channels.ALLAGENTS_GIT_USERNAME ?? "oauth2",
+        }
+      : {}),
     ALLAGENTS_PRIVATE_GIT_USERNAME: channels.ALLAGENTS_GIT_USERNAME ?? "oauth2",
     ALLAGENTS_PRIVATE_GIT_TOKEN: channels.ALLAGENTS_GIT_TOKEN ?? "",
   };
@@ -186,7 +204,7 @@ async function writeDetachedGit(
   const files = {
     HEAD: `${commit}\n`,
     shallow: `${commit}\n`,
-    config: `[core]\n\trepositoryformatversion = ${commit.length === 64 ? 1 : 0}\n\tbare = false\n\tfilemode = true\n${commit.length === 64 ? "[extensions]\n\tobjectformat = sha256\n" : ""}`,
+    config: `[core]\n\trepositoryformatversion = ${commit.length === 64 ? 1 : 0}\n\tbare = false\n\tfilemode = ${process.platform === "win32" ? "false" : "true"}\n${commit.length === 64 ? "[extensions]\n\tobjectformat = sha256\n" : ""}`,
   };
   for (const [name, bytes] of Object.entries(files)) {
     if (writer) await writer.file(join(root, ".git", name), bytes);
@@ -367,6 +385,9 @@ async function writeGitIndex(
 
 export async function validateGitTree(root: string, limits: SourceLimits): Promise<void> {
   let bytes = 0;
+  const physicalRoot = process.platform === "win32" ? (await realpath(root)).toLowerCase() : root;
+  const rootInfo =
+    process.platform === "win32" ? await statPath(root, { bigint: true }) : undefined;
   async function walk(path: string): Promise<void> {
     for (const name of await readdir(path)) {
       const child = join(path, name);
@@ -381,8 +402,20 @@ export async function validateGitTree(root: string, limits: SourceLimits): Promi
           throw new Error("Git symlink escapes source containment");
         try {
           const actual = await realpath(child);
-          if (actual !== root && !actual.startsWith(`${root}${sep}`))
-            throw new Error("Git symlink escapes realpath containment");
+          const physical = process.platform === "win32" ? actual.toLowerCase() : actual;
+          if (physical !== physicalRoot && !physical.startsWith(`${physicalRoot}${sep}`)) {
+            // NTFS realpath can return 8.3 for the root and long names for
+            // the target. Only matching nonzero inode identity proves safety.
+            if (!rootInfo?.ino) throw new Error("Git symlink escapes realpath containment");
+            let ancestor = dirname(actual);
+            for (;;) {
+              const info = await statPath(ancestor, { bigint: true });
+              if (info.ino !== 0n && info.dev === rootInfo.dev && info.ino === rootInfo.ino) break;
+              const parent = dirname(ancestor);
+              if (parent === ancestor) throw new Error("Git symlink escapes realpath containment");
+              ancestor = parent;
+            }
+          }
         } catch (error) {
           if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
         }

@@ -8,6 +8,7 @@ import { CheckoutFactory, releaseView } from "./checkout.js";
 import { canonicalJson, DEFAULT_LIMITS, validateWorkspace } from "./config.js";
 import {
   alive,
+  assertNoSymlinkAncestors,
   assertNoSymlinkPath,
   atomicJson,
   contained,
@@ -361,8 +362,9 @@ export class WorkspaceManager {
       if (name === MARKER) continue;
       if (!/^[a-f0-9-]{36}$/.test(name)) throw new Error("Unknown path in package runtime parent");
       const root = join(parent, name);
-      if ((await lstat(root)).isSymbolicLink() || (await realpath(root)) !== root)
-        throw new Error("Symlink runtime root refused");
+      if ((await lstat(root)).isSymbolicLink()) throw new Error("Symlink runtime root refused");
+      if (process.platform === "win32") await assertNoSymlinkAncestors(root);
+      else if ((await realpath(root)) !== root) throw new Error("Symlink runtime root refused");
       const marker = await json<Ownership>(join(root, MARKER));
       if (marker.package !== PACKAGE || marker.kind !== "runtime-provider" || !marker.identity)
         throw new Error("Unmarked runtime provider root");
