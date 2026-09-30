@@ -1,10 +1,10 @@
 # Implementation evidence
 
-The contract is ADR 0001 and the phased plan merged from PR #1. All production modules are implemented; release publication is explicitly held until npm access is available. SDK fixtures used by the deterministic checks are consumer packages in temporary projects, never production provider hooks.
+The contract is ADR 0001 and the phased plan merged from PR #1. All production modules are implemented; the first release candidate was published to npm, while stable publication remains gated on the candidate from its reviewed commit. SDK fixtures used by the deterministic checks are consumer packages in temporary projects, never production provider hooks.
 
 | Contract phase | Implementation and verification |
 | --- | --- |
-| 0: package | Dual ESM/CommonJS runtime and declarations, bundled private core, one CLI, optional Copilot peer, Changesets and trusted-publishing workflow. Packed npm, pnpm and Bun consumers pass. |
+| 0: package | Dual ESM/CommonJS runtime and declarations, bundled private core, one CLI, optional Copilot peer, Release Please version PR configuration, and trusted-publishing workflow. Packed npm, pnpm and Bun consumers pass. |
 | 1: containment | Closed schemas, canonical source digest, normalized contained destinations, fixed acquisition channels and protected constructor policy. Configuration and override tests pass. |
 | 2: Git | Real local object materialization and authenticated HTTPS subprocess acquisition with physically bounded staging. Disposable HTTPS and actual over-capacity writer tests pass. |
 | 3: OCI | Real ORAS 1.3.0 against a disposable registry; digest, size, titles and streaming bounds validated. Registry and credential-isolation tests pass. |
@@ -14,7 +14,7 @@ The contract is ADR 0001 and the phased plan merged from PR #1. All production m
 | 7–8: providers/protocol | Workspace Provider and direct CopilotSdkProvider; closed Codex/Claude/Copilot adapters, bounded JSONL transport, process-group cancellation, native response and trace preservation. Protocol and tracing tests pass. |
 | 9: lifecycle | Workspace remains live through filesystem, async and model-graded assertions. Native errors skip assertions; real CLI cleanup and later Node process recovery pass through the packed package. |
 | 10: compatibility | Independently npm-installed stock Promptfoo 0.122.0 on Node 22.22.1 loads both named exports. Codex, Claude and Copilot fixtures pass all recorded stock assertions, labeled source selection, absent filters and direct Copilot. Credentialed dogfooding is recorded in the private `allagents-research` repository. |
-| 11: release | Built tarball and tag-pinned, retry-safe trusted-publishing workflow are implemented. Changesets prepares later stable versions; `vX.Y.Z-rc.N` publishes `next` and `vX.Y.Z` publishes `latest` only after a matching candidate passes registry consumer/E2E checks. Published versions are verified again from the registry. npm publication and registry-installed release-candidate/stable checks remain the final credential-dependent step; the local machine is not npm-authenticated. |
+| 11: release | The tag-pinned, retry-safe trusted-publishing workflow verifies `vX.Y.Z-rc.N` under `next` and publishes `vX.Y.Z` under `latest` only after the matching candidate passes registry consumer/E2E checks. The first candidate was published manually without provenance; stable `1.0.0` remains pending. Release Please prepares later version and changelog PRs, with `bun.lock` regenerated in each release PR and no npm publishing authority in that workflow. |
 
 ## Reproduce
 

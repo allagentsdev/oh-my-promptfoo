@@ -1,0 +1,52 @@
+import { expect, test } from "bun:test";
+import { spawnSync } from "node:child_process";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { parse } from "jsonc-parser";
+
+const script = join(import.meta.dir, "..", "scripts", "sync-release-lock.ts");
+
+test("release version updates only the public Bun workspace and remains retry-safe", async () => {
+  const root = await mkdtemp(join(tmpdir(), "allagents-release-lock-"));
+  try {
+    await mkdir(join(root, "packages", "promptfoo-integration"), { recursive: true });
+    await writeFile(join(root, "package.json"), JSON.stringify({ version: "1.1.0" }));
+    await writeFile(
+      join(root, "packages", "promptfoo-integration", "package.json"),
+      JSON.stringify({ name: "@allagents/promptfoo-integration", version: "1.1.0" }),
+    );
+    const lockPath = join(root, "bun.lock");
+    await writeFile(
+      lockPath,
+      `{
+  "workspaces": {
+    "packages/promptfoo-integration": {
+      "name": "@allagents/promptfoo-integration",
+      "version": "1.0.0",
+    },
+    "packages/workspace-core": {
+      "name": "@allagents/workspace-core",
+      "version": "1.0.0",
+    },
+  },
+}\n`,
+    );
+    const run = () => spawnSync(process.execPath, [script], { cwd: root, encoding: "utf8" });
+    expect(run().status).toBe(0);
+    const updated = await readFile(lockPath, "utf8");
+    const workspaces = parse(updated).workspaces;
+    expect(workspaces["packages/promptfoo-integration"].version).toBe("1.1.0");
+    expect(workspaces["packages/workspace-core"].version).toBe("1.0.0");
+    expect(run().status).toBe(0);
+    expect(await readFile(lockPath, "utf8")).toBe(updated);
+
+    await writeFile(join(root, "package.json"), JSON.stringify({ version: "1.2.0" }));
+    const mismatch = run();
+    expect(mismatch.status).not.toBe(0);
+    expect(mismatch.stderr).toContain("Root version 1.2.0 differs from package version 1.1.0");
+    expect(await readFile(lockPath, "utf8")).toBe(updated);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

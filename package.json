@@ -1,5 +1,6 @@
 {
   "name": "promptfoo-integration",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
   "packageManager": "bun@1.4.0",
@@ -16,13 +17,10 @@
     "format": "biome check --write .",
     "test": "bun test tests",
     "pack:check": "bun scripts/smoke-packed-package.ts",
-    "e2e": "bun scripts/e2e.ts",
-    "changeset": "changeset",
-    "release": "changeset version"
+    "e2e": "bun scripts/e2e.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "2.4.6",
-    "@changesets/cli": "2.29.8",
     "@github/copilot-sdk": "1.0.6",
     "@opentelemetry/api": "1.9.0",
     "@opentelemetry/context-async-hooks": "2.6.0",
@@ -34,6 +32,7 @@
     "diff": "8.0.2",
     "ignore": "7.0.5",
     "import-meta-resolve": "4.2.0",
+    "jsonc-parser": "3.3.1",
     "promptfoo": "0.122.0",
     "tsup": "8.5.1",
     "typescript": "5.9.3"

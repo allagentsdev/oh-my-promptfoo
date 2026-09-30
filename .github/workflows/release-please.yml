@@ -1,0 +1,89 @@
+name: Release Please
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+concurrency:
+  group: release-please
+  cancel-in-progress: false
+permissions: {}
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Wait for the current version to be released
+        id: current
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          node --input-type=module <<'JS'
+          import { spawnSync } from 'node:child_process';
+          import { appendFileSync, readFileSync } from 'node:fs';
+          const root = JSON.parse(readFileSync('package.json', 'utf8'));
+          const manifest = JSON.parse(readFileSync('packages/promptfoo-integration/package.json', 'utf8'));
+          if (root.version !== manifest.version) throw Error('Root and public package versions differ');
+          const result = spawnSync('npm', ['view', `${manifest.name}@${manifest.version}`, 'version', '--json', '--registry=https://registry.npmjs.org'], { encoding: 'utf8' });
+          if (result.status !== 0) {
+            if (!/\bE404\b/.test(result.stderr)) throw Error(`npm view failed (${result.status}): ${result.stderr}`);
+            console.log(`${manifest.name}@${manifest.version} has not been published yet`);
+            process.exit(0);
+          }
+          if (JSON.parse(result.stdout) !== manifest.version) throw Error('Unexpected registry version');
+          const release = spawnSync('gh', ['release', 'view', `v${manifest.version}`, '--json', 'isDraft', '--jq', '.isDraft'], { encoding: 'utf8' });
+          if (release.status !== 0 || release.stdout.trim() !== 'false') throw Error('Current version needs a published GitHub release');
+          appendFileSync(process.env.GITHUB_OUTPUT, 'ready=true\n');
+          JS
+      - name: Prepare version and changelog pull request
+        if: steps.current.outputs.ready == 'true'
+        id: release
+        uses: googleapis/release-please-action@v5
+        with:
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN || github.token }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+      - name: Resolve updated release pull request
+        if: steps.release.outputs.prs_created == 'true'
+        id: pr
+        env:
+          RELEASE_PRS: ${{ steps.release.outputs.prs }}
+        run: |
+          node --input-type=module <<'JS'
+          import { appendFileSync } from 'node:fs';
+          const prs = JSON.parse(process.env.RELEASE_PRS);
+          if (prs.length !== 1 || !prs[0]?.headBranchName) throw Error('Expected one release pull request');
+          appendFileSync(process.env.GITHUB_OUTPUT, `branch=${prs[0].headBranchName}\n`);
+          JS
+      - uses: actions/checkout@v6
+        if: steps.pr.outputs.branch != ''
+        with:
+          ref: ${{ steps.pr.outputs.branch }}
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN || github.token }}
+      - uses: oven-sh/setup-bun@v2
+        if: steps.pr.outputs.branch != ''
+        with:
+          bun-version: 1.4.0
+      - name: Synchronize the Bun workspace lockfile in the release PR
+        if: steps.pr.outputs.branch != ''
+        env:
+          RELEASE_BRANCH: ${{ steps.pr.outputs.branch }}
+        run: |
+          bun install --lockfile-only --ignore-scripts
+          bun scripts/sync-release-lock.ts
+          if ! git diff --quiet -- package.json packages/promptfoo-integration/package.json; then
+            echo 'Bun unexpectedly modified a package manifest' >&2
+            exit 1
+          fi
+          if git diff --quiet -- bun.lock; then exit 0; fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add bun.lock
+          git commit -m 'chore: synchronize release lockfile'
+          git push origin "HEAD:$RELEASE_BRANCH"
