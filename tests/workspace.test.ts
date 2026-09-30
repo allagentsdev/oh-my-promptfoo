@@ -46,6 +46,7 @@ import type {
   RecoveryRecord,
   ResolvedSource,
   RuntimeChannels,
+  WorkspaceHandle,
   WorkspaceSpec,
 } from "../packages/workspace-core/src/types.ts";
 
@@ -120,6 +121,9 @@ test("large protection walks retain file modes and never follow source symlinks"
       }),
     ),
   );
+  await chmod(join(nested, "file-0"), 0o600);
+  await chmod(join(nested, "file-64"), 0o700);
+  await chmod(nested, 0o700);
   const outside = join(root, "outside");
   await writeFile(outside, "untouched", { mode: 0o600 });
   await symlink(outside, join(nested, "external"));
@@ -131,9 +135,9 @@ test("large protection walks retain file modes and never follow source symlinks"
     await expect(writeFile(join(nested, "new-file"), "not allowed")).rejects.toThrow();
     await writeFile(outside, "untouched");
   } else {
-    expect((await lstat(join(nested, "file-0"))).mode & 0o777).toBe(0o444);
-    expect((await lstat(join(nested, "file-64"))).mode & 0o777).toBe(0o555);
-    expect((await lstat(nested)).mode & 0o777).toBe(0o555);
+    expect((await lstat(join(nested, "file-0"))).mode & 0o777).toBe(0o400);
+    expect((await lstat(join(nested, "file-64"))).mode & 0o777).toBe(0o500);
+    expect((await lstat(nested)).mode & 0o777).toBe(0o500);
     expect((await lstat(outside)).mode & 0o777).toBe(0o600);
   }
 
@@ -145,8 +149,8 @@ test("large protection walks retain file modes and never follow source symlinks"
     expect(await readFile(join(nested, "file-0"), "utf8")).toBe("changed");
     expect(await readFile(outside, "utf8")).toBe("untouched");
   } else {
-    expect((await lstat(join(nested, "file-0"))).mode & 0o777).toBe(0o644);
-    expect((await lstat(join(nested, "file-64"))).mode & 0o777).toBe(0o755);
+    expect((await lstat(join(nested, "file-0"))).mode & 0o777).toBe(0o600);
+    expect((await lstat(join(nested, "file-64"))).mode & 0o777).toBe(0o700);
     expect((await lstat(nested)).mode & 0o777).toBe(0o700);
     expect((await lstat(outside)).mode & 0o777).toBe(0o600);
   }
@@ -180,6 +184,9 @@ test("writable Git views retain immutable objects while allowing new Git objects
   await writeFile(join(objects, "existing"), "immutable object");
   await writeFile(join(tree, ".git", "index"), "index");
   await writeFile(join(tree, "source.txt"), "source");
+  await chmod(join(objects, "existing"), 0o600);
+  await chmod(join(tree, ".git", "index"), 0o644);
+  await chmod(join(tree, "source.txt"), 0o644);
 
   await protect(tree, false);
   await protect(tree, true, true);
@@ -188,7 +195,7 @@ test("writable Git views retain immutable objects while allowing new Git objects
     await writeFile(join(tree, ".git", "index"), "mutable index");
     await writeFile(join(tree, "source.txt"), "mutable source");
   } else {
-    expect((await lstat(join(objects, "existing"))).mode & 0o222).toBe(0);
+    expect((await lstat(join(objects, "existing"))).mode & 0o777).toBe(0o400);
     expect((await lstat(objects)).mode & 0o777).toBe(0o700);
     expect((await lstat(join(tree, ".git", "index"))).mode & 0o777).toBe(0o644);
     expect((await lstat(join(tree, "source.txt"))).mode & 0o777).toBe(0o644);
@@ -196,7 +203,7 @@ test("writable Git views retain immutable objects while allowing new Git objects
   await writeFile(join(objects, "new"), "new object");
   expect(await readFile(join(objects, "new"), "utf8")).toBe("new object");
 });
-test("local Git seed keeps only the pinned commit and remains usable after source removal", async () => {
+test("local Git seed restores pinned executable modes under a restrictive umask", async () => {
   const f = await fixture();
   const pinned = execFileSync("git", ["-C", f.repo, "rev-parse", "HEAD"], {
     encoding: "utf8",
@@ -221,7 +228,13 @@ test("local Git seed keeps only the pinned commit and remains usable after sourc
   if (source.type !== "git") throw new Error("Fixture must use Git");
   source.ref = pinned;
   const owner = manager(f.spec, f.channels);
-  const view = await owner.prepare();
+  const previousUmask = process.umask(0o077);
+  let view: WorkspaceHandle;
+  try {
+    view = await owner.prepare();
+  } finally {
+    process.umask(previousUmask);
+  }
   const seed = join(view.seedPath, "project");
   if (process.platform === "win32")
     expect(

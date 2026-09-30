@@ -71,6 +71,7 @@ export class PhysicalWriter {
     await this.directory(dirname(path));
     this.reserveFile(path, typeof bytes === "string" ? Buffer.byteLength(bytes) : bytes.byteLength);
     await writeFile(path, bytes, { flag: "wx", mode });
+    await chmod(path, mode);
   }
   async link(path: string, target: string): Promise<void> {
     await this.directory(dirname(path));

@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { channel } from "node:diagnostics_channel";
 import { constants } from "node:fs";
 import {
+  chmod,
   copyFile,
   lstat,
   mkdir,
@@ -561,7 +562,7 @@ async function materializeBoundedGit(
         [...safeGitArgs, "-C", checkout, "ls-tree", "-rz", "--full-tree", source.commit],
         { ...options, limit: limits.maxDownloadBytes },
       );
-      parseTreeListing(listing, checkout);
+      const trackedFiles = parseTreeListing(listing, checkout);
       await measuredGitPhase("git-checkout", () =>
         runSource(
           "git",
@@ -634,7 +635,7 @@ async function materializeBoundedGit(
       await writeDetachedGit(checkout, source.commit);
       // External Git is now quiescent; only bounded, already verified parent copying remains.
       await measuredGitPhase("git-seed-copy", () =>
-        copyVerifiedTree(checkout, destination, writer),
+        copyVerifiedTree(checkout, destination, writer, trackedFiles),
       );
       return downloaded;
     });
@@ -673,11 +674,18 @@ async function copyVerifiedTree(
   source: string,
   destination: string,
   writer: PhysicalWriter,
+  trackedFiles: TreeFile[],
 ): Promise<void> {
+  const trackedModes = new Map<string, number>();
+  for (const file of trackedFiles) {
+    if (file.mode !== "120000")
+      trackedModes.set(join(source, file.path), file.mode === "100755" ? 0o755 : 0o644);
+  }
   const files: {
     input: string;
     output: string;
     target?: string;
+    mode?: number;
     atime?: Date;
     mtime?: Date;
   }[] = [];
@@ -694,7 +702,13 @@ async function copyVerifiedTree(
         files.push({ input, output, target });
       } else {
         writer.reserveFile(output, stat.size);
-        files.push({ input, output, atime: stat.atime, mtime: stat.mtime });
+        files.push({
+          input,
+          output,
+          atime: stat.atime,
+          mtime: stat.mtime,
+          mode: trackedModes.get(input),
+        });
       }
     }
   }
@@ -710,6 +724,7 @@ async function copyVerifiedTree(
           try {
             if (file.target === undefined) {
               await copyFile(file.input, file.output, constants.COPYFILE_EXCL);
+              if (file.mode !== undefined) await chmod(file.output, file.mode);
               await utimes(file.output, file.atime!, file.mtime!);
             } else await writer.link(file.output, file.target);
           } catch (error) {

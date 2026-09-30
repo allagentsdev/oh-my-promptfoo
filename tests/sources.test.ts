@@ -104,12 +104,17 @@ describe("bounded Git acquisition", () => {
     expect(await readFile(join(staging, "project", "hello.txt"), "utf8")).toBe("hello\n");
     expect(await readdir(staging)).toEqual(["project"]);
   });
-  test("immutable local acquisition preserves real Git state without writing the source", async () => {
+  test("immutable local acquisition preserves Git executable modes under a restrictive umask", async () => {
     const { repository, staging, spec, commit } = await fixture();
     const before = await readFile(join(repository, ".git", "index"));
     const sources = await resolveSources(spec, {});
     expect(sources[0].type === "git" && sources[0].commit).toBe(commit);
-    await materializeSources(sources, staging, DEFAULT_LIMITS, {});
+    const previousUmask = process.umask(0o077);
+    try {
+      await materializeSources(sources, staging, DEFAULT_LIMITS, {});
+    } finally {
+      process.umask(previousUmask);
+    }
     const project = join(staging, "project");
     expect(await readFile(join(project, "hello.txt"), "utf8")).toBe("hello\n");
     expect(await readFile(join(project, "binary.bin"))).toEqual(Buffer.from([0, 1, 255]));
