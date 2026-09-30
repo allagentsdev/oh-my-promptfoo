@@ -576,22 +576,26 @@ test("private acquisition recovery removes only marked dead credential directori
       expect(env.TEMP).toBe(root);
       expect(env.TMP).toBe(root);
       expect(env.USERPROFILE).toBe(root);
-      await exec(
-        join(
-          process.env.SystemRoot ?? "C:\\Windows",
-          "System32",
-          "WindowsPowerShell",
-          "v1.0",
-          "powershell.exe",
-        ),
-        ["-NoProfile", "-NonInteractive", "-Command", privateAclCheck],
-        {
-          env: {
-            SystemRoot: process.env.SystemRoot ?? "C:\\Windows",
-            ALLAGENTS_PRIVATE_ROOT: root,
+      await new Promise<void>((resolve, reject) => {
+        const child = execFile(
+          join(
+            process.env.SystemRoot ?? "C:\\Windows",
+            "System32",
+            "WindowsPowerShell",
+            "v1.0",
+            "powershell.exe",
+          ),
+          ["-NoProfile", "-NonInteractive", "-Command", privateAclCheck],
+          {
+            env: {
+              SystemRoot: process.env.SystemRoot ?? "C:\\Windows",
+              ALLAGENTS_PRIVATE_ROOT: root,
+            },
           },
-        },
-      );
+          (error) => (error ? reject(error) : resolve()),
+        );
+        child.stdin?.end();
+      });
     } else expect((await lstat(root)).mode & 0o077).toBe(0);
   });
   await expect(lstat(dead)).rejects.toThrow();

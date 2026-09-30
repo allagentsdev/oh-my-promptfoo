@@ -67,11 +67,13 @@ export async function json<T>(path: string, maxBytes = 64 * 1024 ** 2): Promise<
     await fd.close();
   }
 }
+let ownWindowsStart: Promise<string> | undefined;
 /** Windows process creation time is a kernel timestamp, not a PID or wall-clock estimate. */
 async function windowsProcessStart(pid: number): Promise<string> {
   const { execFile } = await import("node:child_process");
-  return new Promise((res, rej) =>
-    execFile(
+  const script = `[Console]::Out.Write([Diagnostics.Process]::GetProcessById(${pid}).StartTime.ToUniversalTime().Ticks.ToString())`;
+  return new Promise((res, rej) => {
+    const child = execFile(
       join(
         process.env.SystemRoot ?? "C:\\Windows",
         "System32",
@@ -83,13 +85,14 @@ async function windowsProcessStart(pid: number): Promise<string> {
         "-NoLogo",
         "-NoProfile",
         "-NonInteractive",
-        "-Command",
-        `[Console]::Out.Write((Get-Process -Id ${pid} -ErrorAction Stop).StartTime.ToUniversalTime().Ticks.ToString())`,
+        "-EncodedCommand",
+        Buffer.from(script, "utf16le").toString("base64"),
       ],
       { env: { SystemRoot: process.env.SystemRoot ?? "C:\\Windows" }, windowsHide: true },
       (error, output) => (error ? rej(error) : res(output.trim())),
-    ),
-  );
+    );
+    child.stdin?.end();
+  });
 }
 
 export async function processIdentity(): Promise<ProcessIdentity> {
@@ -101,7 +104,8 @@ export async function processIdentity(): Promise<ProcessIdentity> {
       "";
     boot = (await readFile("/proc/sys/kernel/random/boot_id", "utf8")).trim();
   } else if (process.platform === "win32") {
-    start = await windowsProcessStart(process.pid);
+    if (!ownWindowsStart) ownWindowsStart = windowsProcessStart(process.pid);
+    start = await ownWindowsStart;
   } else {
     const { execFile } = await import("node:child_process");
     start = await new Promise<string>((res, rej) =>
@@ -144,6 +148,10 @@ export async function alive(identity: ProcessIdentity): Promise<boolean> {
     }
   }
   if (process.platform === "win32") {
+    if (identity.pid === process.pid) {
+      if (!ownWindowsStart) ownWindowsStart = windowsProcessStart(process.pid);
+      return identity.start === (await ownWindowsStart);
+    }
     try {
       process.kill(identity.pid, 0);
     } catch (error) {
@@ -409,12 +417,81 @@ async function windowsTreeAccess(root: string, writable: boolean): Promise<void>
   await run("icacls.exe", [root, "/inheritance:r", "/T", "/L", "/Q"]);
 }
 
+/** chmod needs a write-open on Bun/Windows; use NTFS attributes and ACLs instead. */
+async function windowsFileAttributes(
+  root: string,
+  readOnly: boolean,
+  gitObjects = "",
+): Promise<void> {
+  const { execFile } = await import("node:child_process");
+  const script = `
+$ErrorActionPreference = 'Stop'
+$pending = [Collections.Generic.Stack[string]]::new()
+$pending.Push($env:ALLAGENTS_TREE_ROOT)
+$objects = $env:ALLAGENTS_GIT_OBJECTS
+while ($pending.Count -gt 0) {
+  foreach ($child in [IO.Directory]::GetFileSystemEntries($pending.Pop())) {
+    $attributes = [IO.File]::GetAttributes($child)
+    if (($attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { continue }
+    if (($attributes -band [IO.FileAttributes]::Directory) -ne 0) {
+      $pending.Push($child)
+      continue
+    }
+    $immutable = $env:ALLAGENTS_READ_ONLY -eq '1' -or ($objects -and $child.StartsWith($objects + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase))
+    $next = if ($immutable) {
+      $attributes -bor [IO.FileAttributes]::ReadOnly
+    } else { $attributes -band (-bnot [IO.FileAttributes]::ReadOnly) }
+    if ($next -ne $attributes) { [IO.File]::SetAttributes($child, $next) }
+  }
+}
+`;
+  await new Promise<void>((resolve, reject) => {
+    const child = execFile(
+      join(
+        process.env.SystemRoot ?? "C:\\Windows",
+        "System32",
+        "WindowsPowerShell",
+        "v1.0",
+        "powershell.exe",
+      ),
+      [
+        "-NoLogo",
+        "-NoProfile",
+        "-NonInteractive",
+        "-EncodedCommand",
+        Buffer.from(script, "utf16le").toString("base64"),
+      ],
+      {
+        env: {
+          SystemRoot: process.env.SystemRoot ?? "C:\\Windows",
+          ALLAGENTS_TREE_ROOT: root,
+          ALLAGENTS_READ_ONLY: readOnly ? "1" : "0",
+          ALLAGENTS_GIT_OBJECTS: gitObjects,
+        },
+        windowsHide: true,
+      },
+      (error) => (error ? reject(error) : resolve()),
+    );
+    child.stdin?.end();
+  });
+}
+
 export async function protect(
   root: string,
   writable: boolean,
   preserveGitObjects = false,
 ): Promise<void> {
-  if (process.platform === "win32" && writable) await windowsTreeAccess(root, true);
+  if (process.platform === "win32") {
+    if ((await lstat(root)).isSymbolicLink()) throw new Error("Cannot protect symlink root");
+    await windowsTreeAccess(root, true);
+    await windowsFileAttributes(
+      root,
+      !writable,
+      writable && preserveGitObjects ? join(root, ".git", "objects") : "",
+    );
+    if (!writable) await windowsTreeAccess(root, false);
+    return;
+  }
   // Protecting a large checkout is dominated by filesystem round trips. Walk
   // independent entries concurrently while bounding the number of in-flight
   // operations; every descendant is still visited and symlinks are not followed.
@@ -447,7 +524,6 @@ export async function protect(
     for (const result of children)
       if (result.status === "fulfilled") for (const child of result.value) pending.push(child);
   }
-  if (process.platform === "win32" && !writable) await windowsTreeAccess(root, false);
 }
 export async function removeTree(path: string): Promise<void> {
   if (!(await exists(path))) return;
@@ -455,7 +531,20 @@ export async function removeTree(path: string): Promise<void> {
     await rm(path, { recursive: true, force: true });
     return;
   }
-  if (process.platform === "win32") await windowsTreeAccess(path, true);
+  if (process.platform === "win32") {
+    try {
+      await rm(path, { recursive: true, force: true });
+      return;
+    } catch (error) {
+      if (!["EPERM", "EACCES"].includes((error as NodeJS.ErrnoException).code ?? "")) throw error;
+      if (!(await exists(path))) return;
+      if ((await lstat(path)).isSymbolicLink()) throw error;
+      await windowsTreeAccess(path, true);
+      await windowsFileAttributes(path, false);
+      await rm(path, { recursive: true, force: true });
+      return;
+    }
+  }
   if (process.platform === "linux") {
     const mounts = (await readFile("/proc/self/mountinfo", "utf8"))
       .split("\n")
@@ -474,11 +563,8 @@ export async function removeTree(path: string): Promise<void> {
     const info = await lstat(directory);
     if (!info.isDirectory() || info.isSymbolicLink()) return;
     if ((info.mode & 0o777) !== 0o700) await chmod(directory, 0o700);
-    for (const entry of await readdir(directory, { withFileTypes: true })) {
-      const child = join(directory, entry.name);
-      if (entry.isDirectory()) await makeDirectoriesWritable(child);
-      else if (process.platform === "win32" && !entry.isSymbolicLink()) await chmod(child, 0o600);
-    }
+    for (const entry of await readdir(directory, { withFileTypes: true }))
+      if (entry.isDirectory()) await makeDirectoriesWritable(join(directory, entry.name));
   };
   // Unlink needs writable parent directories, even when regular files are read-only.
   await makeDirectoriesWritable(path);

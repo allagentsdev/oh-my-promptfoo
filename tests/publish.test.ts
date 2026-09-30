@@ -7,6 +7,7 @@ import { delimiter, join } from "node:path";
 const fakeNpm = `#!/usr/bin/env node
 const {readFileSync,writeFileSync}=require('node:fs');
 const args=process.argv.slice(2);
+if(args[0]==='--fixture-probe'){console.log('allagents-fake-npm');process.exit(0);}
 const file=process.env.FAKE_REGISTRY_FILE;
 const state=JSON.parse(readFileSync(file,'utf8'));
 if(args[0]==='view'&&state.indexDelay>0){
@@ -39,6 +40,8 @@ if(args[0]==='view'){
   writeFileSync(file,JSON.stringify(state));
 }else process.exit(2);
 `;
+
+const isPathKey = (key: string) => key.toLowerCase() === "path";
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "allagents-publish-test-"));
@@ -75,20 +78,26 @@ function run(
   f: Awaited<ReturnType<typeof fixture>>,
   options: { ref?: string; mode?: string } = {},
 ) {
+  const env = { ...process.env };
+  const inheritedPath = Object.entries(env).find(([key]) => isPathKey(key))?.[1] ?? "";
+  for (const key of Object.keys(env)) if (isPathKey(key)) delete env[key];
+  Object.assign(env, {
+    PATH: `${join(f.root, "bin")}${delimiter}${inheritedPath}`,
+    RELEASE_REF: options.ref ?? "v1.0.0",
+    GITHUB_ACTIONS: "true",
+    GITHUB_EVENT_NAME: "workflow_dispatch",
+    ACTIONS_ID_TOKEN_REQUEST_URL: "https://example.invalid/oidc",
+    GITHUB_OUTPUT: f.output,
+    FAKE_REGISTRY_FILE: f.registry,
+    FAKE_REGISTRY_MODE: options.mode ?? "",
+  });
+  const probe = spawnSync("npm", ["--fixture-probe"], { cwd: f.root, encoding: "utf8", env });
+  if (probe.status !== 0 || probe.stdout.trim() !== "allagents-fake-npm")
+    throw new Error("Fake npm shim was not selected; refusing to run release script");
   return spawnSync(process.execPath, [join(f.root, "scripts", "publish.ts")], {
     cwd: f.root,
     encoding: "utf8",
-    env: {
-      ...process.env,
-      PATH: `${join(f.root, "bin")}${delimiter}${process.env.PATH ?? ""}`,
-      RELEASE_REF: options.ref ?? "v1.0.0",
-      GITHUB_ACTIONS: "true",
-      GITHUB_EVENT_NAME: "workflow_dispatch",
-      ACTIONS_ID_TOKEN_REQUEST_URL: "https://example.invalid/oidc",
-      GITHUB_OUTPUT: f.output,
-      FAKE_REGISTRY_FILE: f.registry,
-      FAKE_REGISTRY_MODE: options.mode ?? "",
-    },
+    env,
   });
 }
 

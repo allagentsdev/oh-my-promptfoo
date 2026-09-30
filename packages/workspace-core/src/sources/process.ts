@@ -1,11 +1,11 @@
-import { spawn } from "node:child_process";
-import { realpathSync } from "node:fs";
+import { execFile, spawn } from "node:child_process";
+import { constants, realpathSync } from "node:fs";
 import {
   chmod,
-  copyFile,
   lstat,
   mkdir,
   mkdtemp,
+  open,
   readdir,
   readFile,
   rm,
@@ -226,47 +226,35 @@ export async function runSource(
   }
 }
 
+let ownWindowsSid: Promise<string> | undefined;
 async function privateWindowsPath(path: string, directory: boolean): Promise<void> {
-  const { execFile } = await import("node:child_process");
-  const script = `
-$ErrorActionPreference = 'Stop'
-$acl = Get-Acl -LiteralPath $env:ALLAGENTS_PRIVATE_ROOT
-$acl.SetAccessRuleProtection($true, $false)
-foreach ($rule in @($acl.Access)) { $acl.RemoveAccessRuleAll($rule) }
-$owner = [Security.Principal.WindowsIdentity]::GetCurrent().User
-$rule = if ($env:ALLAGENTS_PRIVATE_DIRECTORY -eq '1') {
-  [Security.AccessControl.FileSystemAccessRule]::new($owner, 'FullControl', 'ContainerInherit,ObjectInherit', 'None', 'Allow')
-} else { [Security.AccessControl.FileSystemAccessRule]::new($owner, 'FullControl', 'Allow') }
-$acl.AddAccessRule($rule)
-Set-Acl -LiteralPath $env:ALLAGENTS_PRIVATE_ROOT -AclObject $acl
-`;
-  await new Promise<void>((resolve, reject) =>
-    execFile(
-      join(
-        process.env.SystemRoot ?? "C:\\Windows",
-        "System32",
-        "WindowsPowerShell",
-        "v1.0",
-        "powershell.exe",
+  const system = join(process.env.SystemRoot ?? "C:\\Windows", "System32");
+  const execute = (command: string, args: string[]): Promise<string> =>
+    new Promise((resolve, reject) =>
+      execFile(
+        join(system, command),
+        args,
+        { env: { SystemRoot: process.env.SystemRoot ?? "C:\\Windows" }, windowsHide: true },
+        (error, output) => (error ? reject(error) : resolve(output)),
       ),
-      [
-        "-NoLogo",
-        "-NoProfile",
-        "-NonInteractive",
-        "-EncodedCommand",
-        Buffer.from(script, "utf16le").toString("base64"),
-      ],
-      {
-        env: {
-          SystemRoot: process.env.SystemRoot ?? "C:\\Windows",
-          ALLAGENTS_PRIVATE_ROOT: path,
-          ALLAGENTS_PRIVATE_DIRECTORY: directory ? "1" : "0",
-        },
-        windowsHide: true,
-      },
-      (error) => (error ? reject(error) : resolve()),
-    ),
-  );
+    );
+  if (!ownWindowsSid)
+    ownWindowsSid = execute("whoami.exe", ["/user", "/fo", "csv", "/nh"]).then((output) => {
+      const sid = /,"(S-\d+(?:-\d+)+)"\s*$/.exec(output)?.[1];
+      if (!sid) throw new Error("Cannot establish private acquisition owner");
+      return sid;
+    });
+  // A newly created directory has only inherited entries. Give the owner an
+  // explicit inheritable ACE before stripping every inherited broad ACE.
+  const sid = await ownWindowsSid;
+  await execute("icacls.exe", [
+    path,
+    "/grant:r",
+    `*${sid}:${directory ? "(OI)(CI)" : ""}F`,
+    "/L",
+    "/Q",
+  ]);
+  await execute("icacls.exe", [path, "/inheritance:r", "/L", "/Q"]);
 }
 
 export async function withPrivateAcquisition<T>(
@@ -364,11 +352,27 @@ export async function orasEnvironment(
   if (!auth) return { env, args: [], redactions: [] };
   const target = join(root, "registry-auth.json");
   await mkdir(root, { recursive: true, mode: 0o700 });
-  await copyFile(auth, target);
-  await chmod(target, 0o600);
-  if (process.platform === "win32") await privateWindowsPath(target, false);
-  const bytes = await readFile(target, "utf8");
+  const source = await lstat(auth);
+  if (
+    !source.isFile() ||
+    source.isSymbolicLink() ||
+    source.nlink !== 1 ||
+    source.size > 1024 * 1024
+  )
+    throw new Error("Unsafe or oversized ORAS registry auth file");
+  const fd = await open(auth, constants.O_RDONLY | constants.O_NOFOLLOW);
+  let bytes: string;
+  try {
+    const actual = await fd.stat();
+    if (!actual.isFile() || actual.nlink !== 1 || actual.size > 1024 * 1024)
+      throw new Error("Unsafe or oversized ORAS registry auth file");
+    bytes = await fd.readFile("utf8");
+  } finally {
+    await fd.close();
+  }
   if (Buffer.byteLength(bytes) > 1024 * 1024) throw new Error("ORAS auth file exceeds 1 MiB");
+  await writeFile(target, bytes, { mode: 0o600, flag: "wx" });
+  if (process.platform === "win32") await privateWindowsPath(target, false);
   const redactions = [bytes];
   const collect = (value: unknown): void => {
     if (!value || typeof value !== "object") return;
