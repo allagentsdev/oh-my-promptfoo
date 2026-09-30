@@ -30,7 +30,7 @@ ALLAGENTS_TEST_ORAS_PATH=/path/to/oras ALLAGENTS_TEST_GIT_HTTPS=1 bun test tests
 bun scripts/benchmark-workspaces.ts
 ```
 
-The default suite passes 91 tests with 372 assertions and skips five real-acquisition gates. The separate Linux acquisition job exercises real HTTPS Git, OCI, and privileged OverlayFS paths. TypeScript, Biome, both builds, packed npm/pnpm/Bun consumers and stock Promptfoo E2E pass.
+The default suite passes 91 tests with 374 assertions and skips five real-acquisition gates. The separate Linux acquisition job exercises real HTTPS Git, OCI, and privileged OverlayFS paths. TypeScript, Biome, both builds, packed npm/pnpm/Bun consumers and stock Promptfoo E2E pass.
 
 Install the fixed helper documented in `docs/workspace-helper.md` before the real Linux mount/acquisition gates. Required validation CI runs on Linux, including a real-acquisition job; a manual workflow runs macOS and exploratory Windows checks. The scale JSON reports fixture geometry as well as allocation; a one-file sparse fixture does not predict OverlayFS metadata cost for a large repository.
 
