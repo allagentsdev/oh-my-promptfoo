@@ -1,11 +1,11 @@
-import { spawn } from "node:child_process";
-import { realpathSync } from "node:fs";
+import { execFile, spawn } from "node:child_process";
+import { constants, realpathSync } from "node:fs";
 import {
   chmod,
-  copyFile,
   lstat,
   mkdir,
   mkdtemp,
+  open,
   readdir,
   readFile,
   rm,
@@ -97,18 +97,33 @@ export function redact(
   return message;
 }
 export function sourceEnvironment(home: string): NodeJS.ProcessEnv {
-  return {
+  const environment: NodeJS.ProcessEnv = {
     PATH: process.env.PATH || "/usr/bin:/bin",
     HOME: home,
     TMPDIR: home,
     LANG: "C",
     LC_ALL: "C",
     GIT_CONFIG_NOSYSTEM: "1",
-    GIT_CONFIG_GLOBAL: "/dev/null",
+    GIT_CONFIG_GLOBAL: process.platform === "win32" ? "NUL" : "/dev/null",
     GIT_TERMINAL_PROMPT: "0",
     GIT_NO_REPLACE_OBJECTS: "1",
     GIT_OPTIONAL_LOCKS: "0",
   };
+  if (process.platform === "win32") {
+    const systemRoot = process.env.SystemRoot ?? "C:\\Windows";
+    // Preserve only the Windows loader's necessary settings. Credentials and
+    // per-user paths remain confined to the disposable acquisition directory.
+    Object.assign(environment, {
+      SystemRoot: systemRoot,
+      windir: systemRoot,
+      ComSpec: join(systemRoot, "System32", "cmd.exe"),
+      PATHEXT: ".COM;.EXE;.BAT;.CMD",
+      TEMP: home,
+      TMP: home,
+      USERPROFILE: home,
+    });
+  }
+  return environment;
 }
 export interface RunOptions {
   env: NodeJS.ProcessEnv;
@@ -141,11 +156,28 @@ export async function runSource(
       child.on("close", (code, signal) => resolve({ code, signal }));
     },
   );
+  let stopping: Promise<void> | undefined;
   const terminate = () => {
-    try {
-      if (child.pid) process.kill(process.platform === "win32" ? child.pid : -child.pid, "SIGKILL");
-    } catch {
-      /* Already gone. */
+    if (!child.pid) return;
+    if (process.platform === "win32") {
+      if (child.exitCode != null || child.signalCode != null) return;
+      // Windows has no POSIX process groups. taskkill /T terminates children
+      // spawned by Git/ORAS as well as the original acquisition process.
+      stopping ??= new Promise<void>((resolve) => {
+        const killer = spawn(
+          join(process.env.SystemRoot ?? "C:\\Windows", "System32", "taskkill.exe"),
+          ["/PID", String(child.pid), "/T", "/F"],
+          { stdio: "ignore", windowsHide: true },
+        );
+        killer.once("error", () => resolve());
+        killer.once("close", () => resolve());
+      });
+    } else {
+      try {
+        process.kill(-child.pid, "SIGKILL");
+      } catch {
+        /* Already gone. */
+      }
     }
   };
   const abort = () => terminate();
@@ -181,7 +213,7 @@ export async function runSource(
     return Buffer.concat(chunks);
   } catch (error) {
     terminate();
-    await completed;
+    await Promise.all([completed, stopping]);
     throw new Error(
       redact(
         error instanceof Error ? error.message : String(error),
@@ -194,6 +226,37 @@ export async function runSource(
   }
 }
 
+let ownWindowsSid: Promise<string> | undefined;
+async function privateWindowsPath(path: string, directory: boolean): Promise<void> {
+  const system = join(process.env.SystemRoot ?? "C:\\Windows", "System32");
+  const execute = (command: string, args: string[]): Promise<string> =>
+    new Promise((resolve, reject) =>
+      execFile(
+        join(system, command),
+        args,
+        { env: { SystemRoot: process.env.SystemRoot ?? "C:\\Windows" }, windowsHide: true },
+        (error, output) => (error ? reject(error) : resolve(output)),
+      ),
+    );
+  if (!ownWindowsSid)
+    ownWindowsSid = execute("whoami.exe", ["/user", "/fo", "csv", "/nh"]).then((output) => {
+      const sid = /,"(S-\d+(?:-\d+)+)"\s*$/.exec(output)?.[1];
+      if (!sid) throw new Error("Cannot establish private acquisition owner");
+      return sid;
+    });
+  // A newly created directory has only inherited entries. Give the owner an
+  // explicit inheritable ACE before stripping every inherited broad ACE.
+  const sid = await ownWindowsSid;
+  await execute("icacls.exe", [
+    path,
+    "/grant:r",
+    `*${sid}:${directory ? "(OI)(CI)" : ""}F`,
+    "/L",
+    "/Q",
+  ]);
+  await execute("icacls.exe", [path, "/inheritance:r", "/L", "/Q"]);
+}
+
 export async function withPrivateAcquisition<T>(
   channels: RuntimeChannels,
   fn: (root: string, env: NodeJS.ProcessEnv) => Promise<T>,
@@ -202,6 +265,7 @@ export async function withPrivateAcquisition<T>(
   const root = await mkdtemp(join(realpathSync(tmpdir()), "allagents-acquisition-"));
   try {
     await chmod(root, 0o700);
+    if (process.platform === "win32") await privateWindowsPath(root, true);
     await atomicJson(join(root, ".allagents-owner.json"), {
       schemaVersion: 1,
       package: PACKAGE,
@@ -230,8 +294,8 @@ async function reapPrivateAcquisitions(): Promise<void> {
       !stat ||
       !stat.isDirectory() ||
       stat.isSymbolicLink() ||
-      stat.uid !== process.getuid?.() ||
-      stat.mode & 0o077
+      (process.platform !== "win32" &&
+        (stat.uid !== process.getuid?.() || (stat.mode & 0o077) !== 0))
     )
       continue;
     try {
@@ -241,9 +305,9 @@ async function reapPrivateAcquisitions(): Promise<void> {
         !markerStat.isFile() ||
         markerStat.isSymbolicLink() ||
         markerStat.nlink !== 1 ||
-        markerStat.uid !== stat.uid ||
         markerStat.size > 4096 ||
-        markerStat.mode & 0o077
+        (process.platform !== "win32" &&
+          (markerStat.uid !== stat.uid || (markerStat.mode & 0o077) !== 0))
       )
         continue;
       const marker = JSON.parse(await readFile(markerPath, "utf8")) as {
@@ -288,10 +352,27 @@ export async function orasEnvironment(
   if (!auth) return { env, args: [], redactions: [] };
   const target = join(root, "registry-auth.json");
   await mkdir(root, { recursive: true, mode: 0o700 });
-  await copyFile(auth, target);
-  await chmod(target, 0o600);
-  const bytes = await readFile(target, "utf8");
+  const source = await lstat(auth);
+  if (
+    !source.isFile() ||
+    source.isSymbolicLink() ||
+    source.nlink !== 1 ||
+    source.size > 1024 * 1024
+  )
+    throw new Error("Unsafe or oversized ORAS registry auth file");
+  const fd = await open(auth, constants.O_RDONLY | constants.O_NOFOLLOW);
+  let bytes: string;
+  try {
+    const actual = await fd.stat();
+    if (!actual.isFile() || actual.nlink !== 1 || actual.size > 1024 * 1024)
+      throw new Error("Unsafe or oversized ORAS registry auth file");
+    bytes = await fd.readFile("utf8");
+  } finally {
+    await fd.close();
+  }
   if (Buffer.byteLength(bytes) > 1024 * 1024) throw new Error("ORAS auth file exceeds 1 MiB");
+  await writeFile(target, bytes, { mode: 0o600, flag: "wx" });
+  if (process.platform === "win32") await privateWindowsPath(target, false);
   const redactions = [bytes];
   const collect = (value: unknown): void => {
     if (!value || typeof value !== "object") return;

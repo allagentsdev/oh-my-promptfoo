@@ -11,7 +11,7 @@ Run coding-agent evaluations with stock Promptfoo. This package provides two ent
 
 ## Install
 
-Requires Node 22.22+, Linux or macOS, and Promptfoo 0.122.x.
+Requires Node 22.22+, Linux, macOS, or Windows, and Promptfoo 0.122.x. On Windows, workspace cache locks and process identity require the system Windows PowerShell executable.
 
 ```sh
 npm install --save-dev promptfoo@0.122.0 @allagents/promptfoo-integration

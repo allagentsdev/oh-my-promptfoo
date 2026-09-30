@@ -1,5 +1,6 @@
 import { mock } from "bun:test";
 import * as fs from "node:fs/promises";
+import { basename } from "node:path";
 
 const original = { ...fs };
 let release!: () => void;
@@ -14,7 +15,7 @@ process.stdin.once("data", () => {
 mock.module("node:fs/promises", () => ({
   ...original,
   rename: async (source: string, destination: string) => {
-    if (destination.endsWith("/.allagents-owner.json")) {
+    if (basename(destination) === ".allagents-owner.json") {
       console.log("paused");
       await resumed;
     }
