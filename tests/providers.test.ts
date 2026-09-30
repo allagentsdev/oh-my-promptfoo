@@ -470,7 +470,9 @@ describe("direct Copilot provider", () => {
         };
         expect(observed.name).toBe("cw-sql-schema-migration");
         expect(observed.source).toBe("read-tool");
-        expect(realpathSync(observed.path)).toBe(realpathSync(skillPath));
+        const actualFile = statSync(observed.path);
+        const expectedFile = statSync(skillPath);
+        expect([actualFile.dev, actualFile.ino]).toEqual([expectedFile.dev, expectedFile.ino]);
       }
       for (const request of [
         { path: "README.md" },
