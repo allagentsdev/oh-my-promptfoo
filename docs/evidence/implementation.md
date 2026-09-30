@@ -30,9 +30,9 @@ ALLAGENTS_TEST_ORAS_PATH=/path/to/oras ALLAGENTS_TEST_GIT_HTTPS=1 bun test tests
 bun scripts/benchmark-workspaces.ts
 ```
 
-The current local full suite passes 87 tests with 348 assertions when the privileged OverlayFS identity gate is enabled, including real HTTPS Git and OCI acquisition. The default suite passes 82 tests with 333 assertions and skips the five real-acquisition gates. TypeScript, Biome, both builds, packed npm/pnpm/Bun consumers and stock Promptfoo E2E pass.
+The default suite passes 91 tests with 372 assertions and skips five real-acquisition gates. The separate Linux acquisition job exercises real HTTPS Git, OCI, and privileged OverlayFS paths. TypeScript, Biome, both builds, packed npm/pnpm/Bun consumers and stock Promptfoo E2E pass.
 
-Install the fixed helper documented in `docs/workspace-helper.md` before the real Linux mount/acquisition gates. Validation CI runs Linux/macOS checks and a Linux real-acquisition job. The scale JSON reports fixture geometry as well as allocation; a one-file sparse fixture does not predict OverlayFS metadata cost for a large repository.
+Install the fixed helper documented in `docs/workspace-helper.md` before the real Linux mount/acquisition gates. Required validation CI runs on Linux, including a real-acquisition job; a manual workflow runs macOS and exploratory Windows checks. The scale JSON reports fixture geometry as well as allocation; a one-file sparse fixture does not predict OverlayFS metadata cost for a large repository.
 
 Native peers resolve the evaluation project's ESM export conditions. Using Promptfoo's CommonJS export can mask an SDK failure with `chalk.default.red is not a function` under an ordinary npm dependency graph. Native SDK discovery also uses the consumer process directory; the adapter separately forces the isolated workspace as the SDK's working directory. The import/require regression, external-directory regression and independently npm-installed E2E with workspace storage outside the consumer cover these boundaries. Overlay capability probes touch only the selected file and mount root; production views still restore writable modes throughout their source. Cleanup changes directory permissions before unlinking read-only files.
 
