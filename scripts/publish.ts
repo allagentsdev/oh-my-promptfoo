@@ -50,6 +50,7 @@ function view(args: string[]): unknown | undefined {
 const existing = view([`${name}@${version}`, "version"]);
 if (existing !== undefined && existing !== version)
   throw new Error(`Unexpected registry version for ${name}@${version}`);
+let tags: unknown;
 if (existing === undefined) {
   const result = spawnSync(
     "npm",
@@ -67,10 +68,30 @@ if (existing === undefined) {
   if (result.error) throw result.error;
   if (result.status !== 0)
     throw new Error(`npm publish failed (${result.status ?? result.signal})`);
+  // npm accepts the tarball before its version and dist-tag become queryable.
+  const deadline = Date.now() + 5 * 60_000;
+  for (;;) {
+    const indexed = view([`${name}@${version}`, "version"]);
+    if (indexed !== undefined && indexed !== version)
+      throw new Error(`Unexpected registry version for ${name}@${version}`);
+    const indexedTags = view([name, "dist-tags"]);
+    if (
+      indexed === version &&
+      indexedTags &&
+      typeof indexedTags === "object" &&
+      (indexedTags as Record<string, string>).latest === version
+    ) {
+      tags = indexedTags;
+      break;
+    }
+    if (Date.now() >= deadline)
+      throw new Error(`npm accepted ${name}@${version}, but it is not indexed under latest`);
+    await Bun.sleep(1_000);
+  }
 } else {
   console.log(`${name}@${version} is already published`);
+  tags = view([name, "dist-tags"]);
 }
-const tags = view([name, "dist-tags"]);
 if (!tags || typeof tags !== "object" || (tags as Record<string, string>).latest !== version)
   throw new Error(`${name}@${version} must be published under latest`);
 

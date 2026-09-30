@@ -9,6 +9,12 @@ const {readFileSync,writeFileSync}=require('node:fs');
 const args=process.argv.slice(2);
 const file=process.env.FAKE_REGISTRY_FILE;
 const state=JSON.parse(readFileSync(file,'utf8'));
+if(args[0]==='view'&&state.indexDelay>0){
+  state.indexDelay--;
+  writeFileSync(file,JSON.stringify(state));
+  if(args[2]==='version'){console.error('ETARGET');process.exit(1);}
+  if(args[2]==='dist-tags'){console.log(JSON.stringify({latest:'1.0.0-rc.1'}));process.exit(0);}
+}
 if(args[0]==='view'){
   if(process.env.FAKE_REGISTRY_MODE==='unavailable'){
     console.error('E503: registry unavailable');process.exit(1);
@@ -29,6 +35,7 @@ if(args[0]==='view'){
   state.versions.push(version);
   state.tags[args[args.indexOf('--tag')+1]]=version;
   state.published.push(version);
+  if(process.env.FAKE_REGISTRY_MODE==='lagged')state.indexDelay=3;
   writeFileSync(file,JSON.stringify(state));
 }else process.exit(2);
 `;
@@ -89,6 +96,20 @@ describe("trusted stable release publish", () => {
       expect(state.published).toEqual(["1.0.0"]);
       expect(run(f).status).toBe(0);
       expect(JSON.parse(await readFile(f.registry, "utf8")).published).toEqual(["1.0.0"]);
+    } finally {
+      await rm(f.root, { recursive: true, force: true });
+    }
+  });
+
+  test("waits for the accepted version and latest tag to become queryable", async () => {
+    const f = await fixture();
+    try {
+      const result = run(f, { mode: "lagged" });
+      expect(result.status).toBe(0);
+      const state = JSON.parse(await readFile(f.registry, "utf8"));
+      expect(state.published).toEqual(["1.0.0"]);
+      expect(state.indexDelay).toBe(0);
+      expect(state.tags.latest).toBe("1.0.0");
     } finally {
       await rm(f.root, { recursive: true, force: true });
     }
