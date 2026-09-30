@@ -477,7 +477,19 @@ async function materializeBoundedGit(
       parseTreeListing(listing, checkout);
       await runSource(
         "git",
-        [...safeGitArgs, "-C", checkout, "checkout", "--detach", "--force", source.commit],
+        [
+          ...safeGitArgs,
+          "-c",
+          "checkout.workers=8",
+          "-c",
+          "checkout.thresholdForParallelism=100",
+          "-C",
+          checkout,
+          "checkout",
+          "--detach",
+          "--force",
+          source.commit,
+        ],
         options,
       );
       await validateGitTree(checkout, limits);
@@ -532,18 +544,44 @@ async function copyVerifiedTree(
   destination: string,
   writer: PhysicalWriter,
 ): Promise<void> {
-  await writer.directory(destination);
-  for (const name of await readdir(source)) {
-    const input = join(source, name);
-    const output = join(destination, name);
-    const stat = await lstat(input);
-    if (stat.isDirectory()) await copyVerifiedTree(input, output, writer);
-    else if (stat.isSymbolicLink()) await writer.link(output, await readlink(input));
-    else {
-      writer.reserveFile(output, stat.size);
-      await cp(input, output, { preserveTimestamps: true });
+  const files: { input: string; output: string; target?: string }[] = [];
+  async function plan(inputDirectory: string, outputDirectory: string): Promise<void> {
+    await writer.directory(outputDirectory);
+    for (const name of await readdir(inputDirectory)) {
+      const input = join(inputDirectory, name);
+      const output = join(outputDirectory, name);
+      const stat = await lstat(input);
+      if (stat.isDirectory()) await plan(input, output);
+      else if (stat.isSymbolicLink()) {
+        const target = await readlink(input);
+        writer.reserveFile(output, Buffer.byteLength(target));
+        files.push({ input, output, target });
+      } else {
+        writer.reserveFile(output, stat.size);
+        files.push({ input, output });
+      }
     }
   }
+  await plan(source, destination);
+  let cursor = 0;
+  let failed = false;
+  let failure: unknown;
+  await Promise.all(
+    Array.from({ length: Math.min(32, files.length) }, async () => {
+      while (!failed && cursor < files.length) {
+        const file = files[cursor++];
+        try {
+          if (file.target === undefined)
+            await cp(file.input, file.output, { preserveTimestamps: true });
+          else await writer.link(file.output, file.target);
+        } catch (error) {
+          failed = true;
+          failure = error;
+        }
+      }
+    }),
+  );
+  if (failed) throw failure;
 }
 
 export async function materializeGit(
