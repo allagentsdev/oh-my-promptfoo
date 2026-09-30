@@ -156,6 +156,48 @@ test("writable Git views retain immutable objects while allowing new Git objects
   await writeFile(join(objects, "new"), "new object");
   expect(await readFile(join(objects, "new"), "utf8")).toBe("new object");
 });
+test("local Git seed keeps only the pinned commit and remains usable after source removal", async () => {
+  const f = await fixture();
+  const pinned = execFileSync("git", ["-C", f.repo, "rev-parse", "HEAD"], {
+    encoding: "utf8",
+  }).trim();
+  await writeFile(join(f.repo, "later.txt"), "unrelated later content\n");
+  execFileSync("git", ["-C", f.repo, "add", "later.txt"]);
+  execFileSync("git", [
+    "-C",
+    f.repo,
+    "-c",
+    "user.name=Fixture",
+    "-c",
+    "user.email=fixture@example.test",
+    "commit",
+    "-qm",
+    "later",
+  ]);
+  const later = execFileSync("git", ["-C", f.repo, "rev-parse", "HEAD"], {
+    encoding: "utf8",
+  }).trim();
+  const source = f.spec.sources[0];
+  if (source.type !== "git") throw new Error("Fixture must use Git");
+  source.ref = pinned;
+  const owner = manager(f.spec, f.channels);
+  const view = await owner.prepare();
+  const seed = join(view.seedPath, "project");
+  expect(await exists(join(seed, ".git", "objects", "info", "alternates"))).toBe(false);
+  expect(() =>
+    execFileSync("git", ["-C", seed, "cat-file", "-e", `${later}^{commit}`], {
+      stdio: "ignore",
+    }),
+  ).toThrow();
+  await removeTree(f.repo);
+  expect(execFileSync("git", ["-C", seed, "show", "HEAD:source.txt"], { encoding: "utf8" })).toBe(
+    "immutable input\n",
+  );
+  execFileSync("git", ["-C", seed, "fsck", "--connectivity-only", "--no-reflogs"], {
+    stdio: "ignore",
+  });
+  await owner.cleanup();
+}, 15_000);
 describe("workspace configuration", () => {
   test("canceling a native lock waiter preserves its reason and the current holder", async () => {
     const root = await mkdtemp(join(realpathSync(tmpdir()), "allagents-lock-cancel-"));

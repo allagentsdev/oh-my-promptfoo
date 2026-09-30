@@ -383,6 +383,31 @@ async function materializeBoundedGit(
 ): Promise<number> {
   const local = !gitUsesRemoteAcquisition(source.repository);
   const repository = local ? fileURLToPath(source.repository) : undefined;
+  const gitDirectory = repository ? join(repository, ".git") : undefined;
+  const gitDirectoryStat = gitDirectory
+    ? await lstat(gitDirectory).catch((error: NodeJS.ErrnoException) => {
+        if (error.code === "ENOENT") return undefined;
+        throw error;
+      })
+    : undefined;
+  const objectsStat = gitDirectoryStat?.isDirectory()
+    ? await lstat(join(gitDirectory!, "objects")).catch((error: NodeJS.ErrnoException) => {
+        if (error.code === "ENOENT") return undefined;
+        throw error;
+      })
+    : undefined;
+  const localShared =
+    !!gitDirectoryStat?.isDirectory() &&
+    !gitDirectoryStat.isSymbolicLink() &&
+    !!objectsStat?.isDirectory() &&
+    !objectsStat.isSymbolicLink() &&
+    !(await lstat(join(gitDirectory!, "objects", "info", "alternates")).then(
+      () => true,
+      (error: NodeJS.ErrnoException) => {
+        if (error.code === "ENOENT") return false;
+        throw error;
+      },
+    ));
   const bounded = join(staging, `bounded-git-${randomUUID()}`);
   const recoveryPath = join(staging, ".allagents-acquisition.json");
   const record = {
@@ -418,11 +443,11 @@ async function materializeBoundedGit(
           ...safeGitArgs,
           "clone",
           "--no-checkout",
-          "--no-local",
-          "--no-hardlinks",
-          ...(local ? [] : ["--depth=1"]),
+          ...(localShared
+            ? ["--shared"]
+            : ["--no-local", "--no-hardlinks", ...(local ? [] : ["--depth=1"])]),
           "--",
-          source.repository,
+          localShared ? repository! : source.repository,
           checkout,
         ],
         options,
@@ -466,9 +491,11 @@ async function materializeBoundedGit(
           else downloaded += stat.size;
         }
       };
-      await count(join(checkout, ".git"));
-      if (downloaded > limits.maxDownloadBytes)
-        throw new Error("Git download exceeds maxDownloadBytes");
+      if (!localShared) {
+        await count(join(checkout, ".git"));
+        if (downloaded > limits.maxDownloadBytes)
+          throw new Error("Git download exceeds maxDownloadBytes");
+      }
       const listing = await runSource(
         "git",
         [...safeGitArgs, "-C", checkout, "ls-tree", "-rz", "--full-tree", source.commit],
@@ -493,6 +520,41 @@ async function materializeBoundedGit(
         options,
       );
       await validateGitTree(checkout, limits);
+      if (localShared) {
+        const git = join(checkout, ".git");
+        // Keep only the pinned commit reachable while Git repacks objects from
+        // the source's read-only alternate into the bounded temporary clone.
+        for (const name of ["refs", "packed-refs", "logs"])
+          await rm(join(git, name), { recursive: true, force: true });
+        await mkdir(join(git, "refs"));
+        await writeFile(join(git, "shallow"), `${source.commit}\n`);
+        await runSource(
+          "git",
+          [
+            ...safeGitArgs,
+            "-C",
+            checkout,
+            "repack",
+            "-a",
+            "-d",
+            "--window=0",
+            "--depth=0",
+            "--no-local",
+            "-q",
+          ],
+          options,
+        );
+        await rm(join(git, "objects", "info", "alternates"));
+        await runSource(
+          "git",
+          [...safeGitArgs, "-C", checkout, "fsck", "--connectivity-only", "--no-reflogs"],
+          options,
+        );
+        downloaded = 0;
+        await count(git);
+        if (downloaded > limits.maxDownloadBytes)
+          throw new Error("Git download exceeds maxDownloadBytes");
+      }
       for (const name of [
         "config",
         "FETCH_HEAD",
