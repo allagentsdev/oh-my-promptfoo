@@ -462,9 +462,15 @@ describe("direct Copilot provider", () => {
           skillCalls: unknown[];
         };
         expect(positiveMetadata.copilot.skillSupport).toBe(true);
-        expect(positiveMetadata.skillCalls).toEqual([
-          { name: "cw-sql-schema-migration", path: skillPath, source: "read-tool" },
-        ]);
+        expect(positiveMetadata.skillCalls).toHaveLength(1);
+        const observed = positiveMetadata.skillCalls[0] as {
+          name: string;
+          path: string;
+          source: string;
+        };
+        expect(observed.name).toBe("cw-sql-schema-migration");
+        expect(observed.source).toBe("read-tool");
+        expect(realpathSync(observed.path)).toBe(realpathSync(skillPath));
       }
       for (const request of [
         { path: "README.md" },
