@@ -2,7 +2,7 @@
 
 Coding-agent providers for stock Promptfoo. `Provider` assembles a private writable workspace from pinned Git/OCI inputs and delegates to Promptfoo's Codex or Claude SDK provider, or the Copilot SDK. `CopilotSdkProvider` runs Copilot in an existing directory. Promptfoo assertions perform all grading.
 
-Requires Node 22.22+, Linux/macOS, and Promptfoo 0.122.x. Copilot additionally requires `@github/copilot-sdk@1.0.6`. Development uses Bun 1.4.0. OCI requires an ORAS 1.x executable supplied through `ALLAGENTS_ORAS_PATH`.
+Requires Node 22.22+, Linux/macOS/Windows, and Promptfoo 0.122.x. Windows workspace cache locks and process identity require the system Windows PowerShell executable. Copilot additionally requires `@github/copilot-sdk@1.0.6`. Development uses Bun 1.4.0. OCI requires an ORAS 1.x executable supplied through `ALLAGENTS_ORAS_PATH`.
 
 ```sh
 npm install @allagents/promptfoo-integration promptfoo@0.122.0
@@ -72,6 +72,8 @@ Both commands report removed/retained entries and allocated bytes and return non
 Package maintainers use the tag-pinned [npm release procedure](docs/releasing.md).
 
 Writable views try verified reflink, provider-visible OverlayFS, then disk-admitted full copy. Copy allocates a full source per retained row; insufficient capacity fails before copying. Large-repository writable rollout requires verified copy-on-write on the target runner. A successful small copy fallback does not clear that gate. Linux administrators can install the narrowly scoped helper using the repository's `scripts/workspace-helper.py` and its installation documentation. The provider invokes only that fixed root-owned helper, never arbitrary sudo commands.
+
+On Windows, protected source trees use scoped NTFS ACLs, and writable views use verified reflinks where supported or a disk-admitted independent copy. Linux-only OverlayFS and tmpfs acquisition are not available; HTTPS Git requires capacity-bounded staging and fails closed without it.
 
 For hosted cache reuse, save only the published `published` subtree and verification metadata. Restore it into a fresh marked cache; never restore leases, protected checkouts, staging, locks, trash, or runtime roots. Local/self-hosted caches retain live mutable state and must recover abandoned roots before releasing leases. Hosted runner disposal is the final cleanup backstop.
 
