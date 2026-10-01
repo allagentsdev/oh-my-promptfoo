@@ -322,6 +322,44 @@ describe("bounded Git acquisition", () => {
       else process.env.ALLAGENTS_NO_PRIVILEGED_HELPER = previous;
     }
   });
+  test("one bounded no-sudo mount stages two Git sources within the aggregate physical reservation", async () => {
+    if (process.platform !== "linux") return;
+    const { spec, staging } = await fixture();
+    const mount = await statfs("/dev/shm", { bigint: true });
+    const total = Number(mount.blocks * mount.bsize);
+    if (!Number.isSafeInteger(total) || total > 100 * 1024 ** 3) return;
+    const root = await mkdtemp("/dev/shm/allagents-bounded-two-sources-");
+    roots.push(root);
+    await chmod(root, 0o700);
+    const previous = process.env.ALLAGENTS_NO_PRIVILEGED_HELPER;
+    process.env.ALLAGENTS_NO_PRIVILEGED_HELPER = "1";
+    try {
+      const limits = {
+        ...DEFAULT_LIMITS,
+        maxDownloadBytes: Math.floor(total / 2),
+        maxExtractedBytes: Math.ceil(total / 2),
+      };
+      const original = spec.sources[0]!;
+      const sources = await resolveSources(
+        {
+          sources: [
+            { ...original, destination: "first" },
+            { ...original, destination: "second" },
+          ],
+        },
+        {},
+      );
+      await materializeSources(sources, staging, limits, {
+        ALLAGENTS_GIT_STAGING_ROOT: root,
+      });
+      expect(await readFile(join(staging, "first", "hello.txt"), "utf8")).toBe("hello\n");
+      expect(await readFile(join(staging, "second", "hello.txt"), "utf8")).toBe("hello\n");
+      expect(await readdir(root)).toEqual([]);
+    } finally {
+      if (previous === undefined) delete process.env.ALLAGENTS_NO_PRIVILEGED_HELPER;
+      else process.env.ALLAGENTS_NO_PRIVILEGED_HELPER = previous;
+    }
+  });
   test("staging reaper removes only dead marked children, preserving live and unmarked children", async () => {
     if (process.platform !== "linux") return;
     const root = await mkdtemp("/dev/shm/allagents-bounded-test-");

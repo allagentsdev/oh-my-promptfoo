@@ -446,6 +446,7 @@ async function materializeBoundedGit(
   channels: RuntimeChannels,
   writer: PhysicalWriter,
   signal?: AbortSignal,
+  physicalLimits: SourceLimits = limits,
 ): Promise<number> {
   const local = !gitUsesRemoteAcquisition(source.repository);
   const repository = local ? fileURLToPath(source.repository) : undefined;
@@ -498,7 +499,9 @@ async function materializeBoundedGit(
     path: bounded,
     state: "pending",
   };
-  if (externalRoot) await verifyGitStagingRoot(externalRoot, limits);
+  // One fixed tmpfs serves serial sources; cache admission reserves its aggregate
+  // capacity separately from final writes. `limits` still bounds this source's output.
+  if (externalRoot) await verifyGitStagingRoot(externalRoot, physicalLimits);
   await atomicJson(recoveryPath, record);
   if (!externalRoot) await mkdir(bounded, { mode: 0o700 });
   let acquisitionError: unknown;
@@ -506,7 +509,7 @@ async function materializeBoundedGit(
   try {
     if (externalRoot) {
       childCreated = true;
-      await createGitStagingChild(externalRoot, limits, bounded);
+      await createGitStagingChild(externalRoot, physicalLimits, bounded);
     } else {
       // Legacy helper mode remains the default when no external root is configured.
       await helperInvoke("acquire-tmpfs", [
@@ -529,7 +532,7 @@ async function materializeBoundedGit(
         privatePaths: [root, acquisition, ...(repository ? [repository] : [])],
       };
       const checkout = join(acquisition, "repository");
-      if (externalRoot) await verifyGitStagingRoot(externalRoot, limits);
+      if (externalRoot) await verifyGitStagingRoot(externalRoot, physicalLimits);
       await measuredGitPhase("git-clone", () =>
         runSource(
           "git",
@@ -818,6 +821,7 @@ export async function materializeGit(
   channels: RuntimeChannels,
   writer: PhysicalWriter,
   signal?: AbortSignal,
+  physicalLimits: SourceLimits = limits,
 ): Promise<number> {
   if (channels.ALLAGENTS_GIT_STAGING_ROOT === "")
     throw new Error("Git staging root cannot be empty");
@@ -835,5 +839,14 @@ export async function materializeGit(
     if (marker?.package !== PACKAGE || marker.kind !== "cache" || !(await helperAvailable()))
       return materializeLocal(source, destination, limits, channels, writer, signal);
   }
-  return materializeBoundedGit(source, destination, staging, limits, channels, writer, signal);
+  return materializeBoundedGit(
+    source,
+    destination,
+    staging,
+    limits,
+    channels,
+    writer,
+    signal,
+    physicalLimits,
+  );
 }
