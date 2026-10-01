@@ -30,6 +30,7 @@ import {
   removeTree,
   treeStamp,
 } from "./fs.js";
+import { publishProgress } from "./progress.js";
 import { materializeSources } from "./sources/index.js";
 import type {
   Digest,
@@ -263,6 +264,7 @@ export class SeedCache {
     channels: RuntimeChannels,
     signal?: AbortSignal,
     lease?: RecoveryRecord,
+    caseIndex?: number,
   ): Promise<SeedMetadata> {
     const digest = manifestDigest(sources);
     if (lease && lease.digest !== digest) throw new Error("Lease digest must match prepared seed");
@@ -291,8 +293,13 @@ export class SeedCache {
                 );
               }
               if (lease) await this.writeLease(lease);
+              if (!lease) {
+                publishProgress("seed-cache-hit", caseIndex, undefined, sources.length);
+                publishProgress("seed-ready", caseIndex, undefined, sources.length);
+              }
               return metadata;
             }
+            publishProgress("seed-start", caseIndex, undefined, sources.length);
             // Bound acquisitions reserve simultaneous temporary and final bytes plus filesystem overhead.
             const reservation =
               acquisitionPhysicalReservation(sources, limits) +
@@ -315,7 +322,7 @@ export class SeedCache {
             await mkdir(tree);
             try {
               await measuredPhase("materialize-sources", () =>
-                materializeSources(sources, tree, limits, channels, signal),
+                materializeSources(sources, tree, limits, channels, signal, caseIndex),
               );
               signal?.throwIfAborted();
               const { entries: contents, allocatedBytes } = await measuredPhase(
@@ -370,6 +377,7 @@ export class SeedCache {
               await rename(staging, join(this.root, "published", this.key(digest)));
               this.verified.set(digest, metadata);
               if (lease) await this.writeLease(lease);
+              publishProgress("seed-ready", caseIndex, undefined, sources.length);
               return metadata;
             } catch (error) {
               // Never delete a still-mounted acquisition tree.
@@ -444,6 +452,9 @@ export class SeedCache {
     source: ResolvedSource,
     signal?: AbortSignal,
     viewMode: ViewMode = "auto",
+    caseIndex?: number,
+    sourceIndex?: number,
+    sourceCount?: number,
   ): Promise<{ key: string; path: string }> {
     const key = protectedCheckoutKey(source, viewMode);
     const path = join(this.root, "checkouts", key, "tree");
@@ -491,7 +502,14 @@ export class SeedCache {
                 identity: await processIdentity(),
               });
               try {
-                await prepareProtectedCopy(seedSource, join(stage, "tree"), viewMode);
+                await prepareProtectedCopy(
+                  seedSource,
+                  join(stage, "tree"),
+                  viewMode,
+                  caseIndex,
+                  sourceIndex,
+                  sourceCount,
+                );
                 await this.writeMetadata(
                   join(stage, "metadata.json"),
                   {

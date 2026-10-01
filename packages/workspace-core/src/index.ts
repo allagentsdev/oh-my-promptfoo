@@ -20,6 +20,7 @@ import {
   processIdentity,
   removeTree,
 } from "./fs.js";
+import { publishProgress } from "./progress.js";
 import { initializeCacheRoot, protectedCheckoutKey, SeedCache } from "./seed-cache.js";
 import { resolveSources } from "./sources/index.js";
 import type {
@@ -128,15 +129,15 @@ export class WorkspaceManager {
       process.emitWarning(`Workspace cache collection: ${String(error).slice(0, 2048)}`);
     }
   }
-  prepare(signal?: AbortSignal): Promise<WorkspaceHandle> {
+  prepare(signal?: AbortSignal, caseIndex?: number): Promise<WorkspaceHandle> {
     if (this.closed) return Promise.reject(new Error("Workspace manager closed"));
     signal?.throwIfAborted();
-    const call = this.prepareInner(signal);
+    const call = this.prepareInner(signal, caseIndex);
     this.active.add(call);
     call.finally(() => this.active.delete(call)).catch(() => {});
     return call;
   }
-  private async prepareInner(signal?: AbortSignal): Promise<WorkspaceHandle> {
+  private async prepareInner(signal?: AbortSignal, caseIndex?: number): Promise<WorkspaceHandle> {
     await this.initialization;
     signal?.throwIfAborted();
     if (this.closed) throw new Error("Workspace manager closed");
@@ -151,6 +152,8 @@ export class WorkspaceManager {
       { ...DEFAULT_LIMITS, ...this.spec.limits },
       this.channels,
       combined,
+      undefined,
+      caseIndex,
     );
     const id = randomUUID();
     const path = join(this.root, "workspaces", id);
@@ -179,9 +182,11 @@ export class WorkspaceManager {
         this.channels,
         combined,
         record,
+        caseIndex,
       );
       await mkdir(path, { mode: 0o700 });
-      for (const source of resolved) {
+      for (let sourceOffset = 0; sourceOffset < resolved.length; sourceOffset++) {
+        const source = resolved[sourceOffset];
         combined.throwIfAborted();
         const dest = join(path, source.destination);
         contained(path, dest);
@@ -202,6 +207,9 @@ export class WorkspaceManager {
             source,
             combined,
             this.spec.viewMode,
+            caseIndex,
+            sourceOffset + 1,
+            resolved.length,
           );
           await symlink(prepared.path, dest);
         } else {
@@ -228,6 +236,7 @@ export class WorkspaceManager {
       }
       record.status = "active";
       await this.save(record);
+      publishProgress("workspace-ready", caseIndex);
       return {
         path,
         manifestDigest: record.digest,
