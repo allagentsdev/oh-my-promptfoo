@@ -34,7 +34,7 @@ jobs:
         with:
           bun-version: 1.4.0
       - run: bun install --frozen-lockfile
-      - name: Install fixed privileged helper
+      - name: Install bounded HTTPS Git helper
         run: |
           sudo install -D -o root -g root -m 0755 scripts/workspace-helper.py /usr/local/libexec/allagents-workspace-helper
       - name: Install pinned ORAS
@@ -48,6 +48,5 @@ jobs:
       - name: Exercise real HTTPS Git and disposable OCI registry
         env:
           ALLAGENTS_TEST_GIT_HTTPS: '1'
-          ALLAGENTS_TEST_PRIVILEGED_OVERLAY: '1'
           ALLAGENTS_TEST_ORAS_PATH: ${{ runner.temp }}/oras/oras
         run: bun test tests/sources.test.ts tests/sources-git-https.test.ts tests/sources-oci-registry.test.ts tests/workspace.test.ts

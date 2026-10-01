@@ -62,7 +62,7 @@ export function acquisitionIdentity(source: ResolvedSource): Record<string, unkn
 }
 export function protectedCheckoutKey(source: ResolvedSource, viewMode: ViewMode = "auto"): string {
   const identity = canonicalJson(acquisitionIdentity(source));
-  return hash(viewMode === "reflink-only" ? `${identity}\0reflink-only` : identity);
+  return hash(viewMode === "copy-only" ? `${identity}\0copy-only` : identity);
 }
 export function manifestDigest(sources: ResolvedSource[]): Digest {
   const identities = [...sources]

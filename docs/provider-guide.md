@@ -19,7 +19,7 @@ Provider config is closed: only `delegate`, `workspace`, `fileChanges`, and `tim
 | `delegate.env` | No | Passes only the named environment values to the agent |
 | `workspace.sources` | Yes | Lists Git or OCI inputs; `[]` starts with an empty workspace |
 | `workspace.limits` | No | Narrows source count, download/extraction bytes, or acquisition timeout |
-| `workspace.viewMode` | No | `auto` (default) or `reflink-only`; the latter refuses OverlayFS and full-copy views, including protected read-only sources |
+| `workspace.viewMode` | No | `auto` (default) tries reflinks then disk-admitted physical copies; `copy-only` skips reflinks and uses disk-admitted physical copies for writable views and protected read-only checkouts |
 | `fileChanges` | No | Captures bounded after-bytes and a diff; defaults to `false` |
 | `timeoutMs` | No | Limits the agent call |
 
@@ -40,9 +40,9 @@ Destinations must be relative, normalized, nonempty, nonoverlapping paths. A rea
 
 Select source policy with labeled providers and `defaultTest.providers` / `tests[].providers`; without a filter, a test runs against every configured provider. There is no workspace-wide permissions setting. Native sandbox settings apply to the whole workspace.
 
-### Unprivileged copy-on-write runners
+### Unprivileged workspace runners
 
-Set `workspace.viewMode: reflink-only` and `ALLAGENTS_NO_PRIVILEGED_HELPER=1` in the provider process. Every writable view and protected read-only checkout must pass a real `COPYFILE_FICLONE_FORCE` isolation probe; otherwise the call fails instead of trying OverlayFS, sudo, or a full copy. Keep the seed cache and runtime roots on compatible reflink-capable filesystems. `ALLAGENTS_NO_PRIVILEGED_HELPER=1` also forbids the legacy mount helper during acquisition and cleanup.
+Set `workspace.viewMode: copy-only` and `ALLAGENTS_NO_PRIVILEGED_HELPER=1` for runners without reflink support or sudo. Writable source views are independent full copies, admitted against available disk before writing; a protected read-only source gets one independent physical checkout per source identity, shared across matching rows. Neither mode mounts OverlayFS. In `auto`, verified unprivileged reflinks remain available for compatible seed and runtime filesystems before the admitted full-copy fallback. `ALLAGENTS_NO_PRIVILEGED_HELPER=1` forbids the bounded staging helper during acquisition and cleanup.
 
 For HTTPS Git, the runner image must provide a private `0700` directory owned by the runner inside a pre-mounted tmpfs, named by `ALLAGENTS_GIT_STAGING_ROOT`. It must be outside the seed cache: cache staging is renamed into the published seed on the same disk filesystem. The package checks the containing mount, its total byte and inode capacities against the configured source download/extraction limits, free capacity, and path ownership before launching Git. Git and its descendants use only this tmpfs for their temporary HOME and TMPDIR; the package cleans its marked children but never mounts, unmounts, or runs sudo. The image must reserve enough memory and swap for the tmpfs. Provision and smoke-test the actual runner; neither an mtime check nor an ordinary file copy is copy-on-write.
 
@@ -54,7 +54,7 @@ This opt-in path requires a trusted, single-job runner with no concurrent untrus
 
 ## Workspace lifetime
 
-Workspaces remain live through synchronous/asynchronous assertions. `Provider.cleanup()` closes calls, stops active process groups, detaches views, then releases leases. Promptfoo 0.122 does not guarantee cleanup on every CLI/Node path. Paths are transient and may survive until later dead-owner recovery or runner disposal. There is no cleanup timer. Call `cleanup()` explicitly when using providers directly. Dead-owner recovery uses process start identity and never removes live or unmarked roots; failed detach retains leases.
+Workspaces remain live through synchronous/asynchronous assertions. `Provider.cleanup()` closes calls, stops active process groups, removes private views, then releases leases. Promptfoo 0.122 does not guarantee cleanup on every CLI/Node path. Paths are transient and may survive until later dead-owner recovery or runner disposal. There is no cleanup timer. Call `cleanup()` explicitly when using providers directly. Dead-owner recovery uses process start identity and never removes live or unmarked roots; an unknown mount or legacy OverlayFS recovery record fails closed and retains leases for manual cleanup.
 
 ## Seed cache and resource limits
 
@@ -90,11 +90,11 @@ Both direct and workspace-backed Copilot responses report `metadata.skillCalls` 
 
 ## Filesystem behavior
 
-In `auto` mode, writable views try verified reflink, provider-visible OverlayFS, then disk-admitted full copy. Copy allocates a full source per retained row; insufficient capacity fails before copying. Large-repository writable rollout requires verified copy-on-write on the target runner. `reflink-only` instead rejects both fallbacks and requires forced reflinks for protected read-only sources too. Linux administrators can install the narrowly scoped helper using the repository's `scripts/workspace-helper.py` and its installation documentation for legacy mode; the no-helper mode above never invokes it.
+In `auto` mode, writable views try verified reflink, then disk-admitted full copy. In `copy-only` mode they directly use admitted full copies, without a reflink probe. Protected read-only checkouts use forced reflinks with full-copy fallback in `auto`, or physical copies in `copy-only`; they are admitted once per distinct source identity and mode and then shared by matching rows. A full writable source copy consumes disk per retained row; a protected read-only copy consumes peak disk in addition to the seed and any other sources. Insufficient capacity fails before copying. Plan capacity for seeds, protected copies, mutable views, Git objects, and temporary acquisition at peak concurrency; large-repository writable rollout depends on actual runner capacity or verified reflinks.
 
-On Windows, protected source trees use scoped NTFS ACLs, and writable views use verified reflinks where supported or a disk-admitted independent copy. Linux-only OverlayFS and tmpfs acquisition are not available; HTTPS Git requires capacity-bounded staging and fails closed without it. Workspace cache locks and process identity require the system Windows PowerShell executable.
+On Windows, protected source trees use scoped NTFS ACLs. Linux-only tmpfs acquisition is not available; HTTPS Git requires capacity-bounded staging and fails closed without it. Workspace cache locks and process identity require the system Windows PowerShell executable.
 
-The Linux OverlayFS adapter uses metadata copy-up to restore writable file modes while seed contents stay protected. Existing Git object files remain read-only because Git creates new objects instead of editing them; their directories remain writable. Preparing a view still creates upper-layer metadata for working files and mutable Git state, so cost scales with entry count even before file writes. Writes can copy an entire modified file into the upper layer. The sparse benchmark measures 1,000 views of one 2 GiB file; it does not predict the metadata cost of 1,000 large source trees. Cache inventories are bounded to one million entries and 512 MiB of JSON. macOS cache locks require Python 3 from Xcode command line tools. Copilot's experimental usage `cost` is forwarded in SDK units and should not be interpreted as a USD price.
+Existing Git object files remain read-only because Git creates new objects instead of editing them; their directories remain writable. The sparse benchmark measures 1,000 views of one 2 GiB file; it does not predict the metadata or physical copy cost of large source trees. Cache inventories are bounded to one million entries and 512 MiB of JSON. macOS cache locks require Python 3 from Xcode command line tools. Copilot's experimental usage `cost` is forwarded in SDK units and should not be interpreted as a USD price.
 
 ## For maintainers
 

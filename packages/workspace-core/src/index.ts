@@ -220,9 +220,6 @@ export class WorkspaceManager {
             adapter,
             seedSource,
             path: dest,
-            ...(adapter === "overlay"
-              ? { statePath: join(this.root, "adapter-state", id, randomUUID()) }
-              : {}),
           };
           record.views.push(view);
           await this.save(record);
@@ -275,16 +272,24 @@ export class WorkspaceManager {
     )
       throw new Error("Workspace recovery ownership mismatch");
     for (const view of record.views) {
+      if ((view.adapter as string) === "overlay")
+        throw new Error(
+          "Legacy OverlayFS workspace recovery requires manual cleanup; leases retained",
+        );
       if (await exists(dirname(view.path))) await assertNoSymlinkPath(root, dirname(view.path));
       if (
-        !["reflink", "overlay", "copy", "read-only"].includes(view.adapter) ||
+        !["reflink", "copy", "read-only"].includes(view.adapter) ||
         (!view.probe && view.path !== join(record.path, view.destination))
       )
         throw new Error("Invalid view recovery state");
       if (view.probe) {
         contained(join(root, "adapter-state", record.id), view.path);
-        if (view.path !== join(view.statePath ?? "", "mount"))
-          throw new Error("Invalid probe mount state");
+        if (
+          view.path !== join(view.statePath ?? "", "view") &&
+          // Reflink probes from before mount support was removed used this path.
+          !(view.adapter === "reflink" && view.path === join(view.statePath ?? "", "mount"))
+        )
+          throw new Error("Invalid probe recovery state");
       } else contained(record.path, view.path);
       if (view.seedSource !== join(this.cache.seedPath(record.digest), view.destination))
         throw new Error("Invalid seed recovery state");

@@ -1,9 +1,8 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { execFileSync, spawn } from "node:child_process";
-import { constants, realpathSync } from "node:fs";
+import { realpathSync } from "node:fs";
 import {
   chmod,
-  copyFile,
   cp,
   lstat,
   mkdir,
@@ -19,11 +18,7 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import { withLock } from "../packages/workspace-core/src/cache-lock.ts";
-import {
-  CheckoutFactory,
-  prepareProtectedCopy,
-  releaseView,
-} from "../packages/workspace-core/src/checkout.ts";
+import { CheckoutFactory } from "../packages/workspace-core/src/checkout.ts";
 import {
   alive,
   allocated,
@@ -31,7 +26,6 @@ import {
   exists,
   inventory,
   inventoryWithAllocation,
-  isMounted,
   json,
   MARKER,
   ownedRoot,
@@ -39,7 +33,6 @@ import {
   protect,
   removeTree,
 } from "../packages/workspace-core/src/fs.ts";
-import { helperInvoke } from "../packages/workspace-core/src/helper.ts";
 import {
   manifestDigest,
   pruneCache,
@@ -499,9 +492,8 @@ describe("workspace configuration", () => {
     ).toThrow();
     expect(() => validateWorkspace({ sources: [], permissions: "all" })).toThrow();
     expect(validateWorkspace({ sources: [] }).viewMode).toBe("auto");
-    expect(validateWorkspace({ sources: [], viewMode: "reflink-only" }).viewMode).toBe(
-      "reflink-only",
-    );
+    expect(validateWorkspace({ sources: [], viewMode: "copy-only" }).viewMode).toBe("copy-only");
+    expect(() => validateWorkspace({ sources: [], viewMode: "reflink-only" })).toThrow("viewMode");
     expect(() => validateWorkspace({ sources: [], viewMode: "copy" })).toThrow("viewMode");
   });
   test("seed identity excludes permissions and mutable requested refs", () => {
@@ -520,60 +512,6 @@ describe("workspace configuration", () => {
   });
 });
 describe("workspace lifecycle", () => {
-  if (process.env.ALLAGENTS_TEST_PRIVILEGED_OVERLAY === "1")
-    test("fixed helper rejects a different live overlay state and source", async () => {
-      const root = await mkdtemp(join(realpathSync(tmpdir()), "allagents-overlay-identity-"));
-      temporary.push(root);
-      const cache = join(root, "cache");
-      const runtime = join(root, "runtime");
-      const provider = join(runtime, "provider");
-      await ownedRoot(cache, "cache");
-      await ownedRoot(runtime, "runtime-parent");
-      await ownedRoot(provider, "runtime-provider");
-      const lower = join(cache, "published", "source-a", "tree", "project");
-      const otherLower = join(cache, "published", "source-b", "tree", "project");
-      for (const path of [lower, otherLower]) {
-        await mkdir(path, { recursive: true, mode: 0o700 });
-        await writeFile(join(path, "public.txt"), "public input\n");
-      }
-      const target = join(provider, "adapter-state", "row", "mount");
-      const state = join(provider, "adapter-state", "row", "state-a");
-      const otherState = join(provider, "adapter-state", "row", "state-b");
-      await mkdir(target, { recursive: true, mode: 0o700 });
-      for (const root of [state, otherState])
-        for (const name of ["upper", "work"])
-          await mkdir(join(root, name), { recursive: true, mode: 0o700 });
-      const upper = join(state, "upper");
-      const work = join(state, "work");
-      await helperInvoke("mount-overlay", [target, lower, upper, work]);
-      try {
-        await expect(
-          helperInvoke("release-overlay", [
-            target,
-            lower,
-            join(otherState, "upper"),
-            join(otherState, "work"),
-          ]),
-        ).rejects.toThrow();
-        expect(await isMounted(target)).toBe(true);
-        await expect(
-          releaseView({
-            adapter: "overlay",
-            destination: "project",
-            seedSource: otherLower,
-            path: target,
-            statePath: state,
-          }),
-        ).rejects.toThrow();
-        expect(await isMounted(target)).toBe(true);
-      } finally {
-        if ((await exists(target)) && (await exists(upper)) && (await exists(work)))
-          await helperInvoke("release-overlay", [target, lower, upper, work]);
-      }
-      expect(await isMounted(target)).toBe(false);
-      await removeTree(state);
-      await removeTree(otherState);
-    }, 30_000);
   test("different caches can initialize concurrently under one shared runtime parent", async () => {
     const root = await mkdtemp(join(realpathSync(tmpdir()), "allagents-shared-runtime-"));
     temporary.push(root);
@@ -669,58 +607,29 @@ describe("workspace lifecycle", () => {
     await bOwner.cleanup();
     expect((await pruneCache(f.channels, true)).removed).toContain(b.manifestDigest);
   }, 30_000);
-  test("reflink-only managers reject unavailable writable and protected views without fallback", async () => {
+  test("copy-only shares one protected physical checkout per source identity, separate from auto", async () => {
     const f = await fixture();
-    const capability = join(f.root, "capability");
-    let supported = true;
-    try {
-      await copyFile(join(f.repo, "source.txt"), capability, constants.COPYFILE_FICLONE_FORCE);
-    } catch {
-      supported = false;
-    }
-    for (const permissions of ["all", "read-only"] as const) {
-      const spec: WorkspaceSpec = {
-        ...f.spec,
-        viewMode: "reflink-only",
-        sources: [{ ...f.spec.sources[0]!, permissions }],
-      };
-      const owner = manager(spec, f.channels);
-      if (supported) {
-        const view = await owner.prepare();
-        expect(await readFile(join(view.path, "project", "source.txt"), "utf8")).toBe(
-          "immutable input\n",
-        );
-        expect(view.adapters[0]?.adapter).toBe(permissions === "all" ? "reflink" : "read-only");
-        await owner.validateProtected(view);
-        await owner.release(view);
-      } else {
-        await expect(owner.prepare()).rejects.toThrow("Reflink-only workspace requires");
-        const runtime = f.channels.ALLAGENTS_WORKSPACE_ROOT!;
-        const providers = await readdir(runtime);
-        for (const provider of providers) {
-          const path = join(runtime, provider);
-          if ((await lstat(path)).isDirectory())
-            expect(await readdir(join(path, "workspaces"))).toEqual([]);
-        }
-      }
-    }
-  }, 30_000);
-  test("reflink-only never reuses a protected full-copy checkout from auto mode", async () => {
-    const f = await fixture();
-    f.spec.sources[0].permissions = "read-only";
-    const previous = manager(f.spec, f.channels);
-    const existing = await previous.prepare();
-    const original = await readlink(join(existing.path, "project"));
-    await previous.cleanup();
-    const strict = manager({ ...f.spec, viewMode: "reflink-only" }, f.channels);
-    try {
-      const view = await strict.prepare();
-      expect(await readlink(join(view.path, "project"))).not.toBe(original);
-    } catch (error) {
-      expect(String(error)).toContain("Reflink-only workspace requires");
-    } finally {
-      await strict.cleanup();
-    }
+    const spec: WorkspaceSpec = {
+      ...f.spec,
+      viewMode: "copy-only",
+      sources: [{ ...f.spec.sources[0]!, permissions: "read-only" }],
+    };
+    const owner = manager(spec, f.channels);
+    const [a, b] = await Promise.all([owner.prepare(), owner.prepare()]);
+    const shared = await readlink(join(a.path, "project"));
+    expect(await readlink(join(b.path, "project"))).toBe(shared);
+    expect(await readdir(join(f.channels.ALLAGENTS_CACHE_ROOT!, "checkouts"))).toHaveLength(1);
+    expect((await lstat(join(shared, "source.txt"))).ino).not.toBe(
+      (await lstat(join(a.seedPath, "project", "source.txt"))).ino,
+    );
+    const automatic = manager({ ...spec, viewMode: "auto" }, f.channels);
+    const autoRow = await automatic.prepare();
+    expect(await readlink(join(autoRow.path, "project"))).not.toBe(shared);
+    expect(await readdir(join(f.channels.ALLAGENTS_CACHE_ROOT!, "checkouts"))).toHaveLength(2);
+    await writeFile(join(a.path, "notes.txt"), "private scratch");
+    await expect(writeFile(join(a.path, "project", "source.txt"), "forbidden")).rejects.toThrow();
+    await owner.cleanup();
+    await automatic.cleanup();
   }, 30_000);
   test("protected checkout mutation invalidates future reuse instead of resetting a live checkout", async () => {
     const f = await fixture();
@@ -733,6 +642,26 @@ describe("workspace lifecycle", () => {
     await expect(owner.validateProtected(a)).rejects.toThrow("mutated");
     await expect(owner.prepare()).rejects.toThrow();
     expect(await readFile(join(a.path, "project", "source.txt"), "utf8")).toBe("unexpected");
+  }, 30_000);
+  test("legacy overlay recovery fails closed without removing a workspace or releasing its lease", async () => {
+    const f = await fixture();
+    const owner = manager({ ...f.spec, viewMode: "copy-only" }, f.channels);
+    const row = await owner.prepare();
+    const recordPath = join(dirname(dirname(row.path)), "records", `${basename(row.path)}.json`);
+    const record = await json<RecoveryRecord>(recordPath);
+    const original = record.views[0]!.adapter;
+    record.views[0]!.adapter = "overlay" as "copy"; // Deliberately emulate a pre-upgrade record.
+    await atomicJson(recordPath, record);
+    await expect(owner.release(row)).rejects.toThrow("Legacy OverlayFS");
+    expect(await readFile(join(row.path, "project", "source.txt"), "utf8")).toBe(
+      "immutable input\n",
+    );
+    expect(
+      await readdir(join(f.channels.ALLAGENTS_CACHE_ROOT!, "leases", row.manifestDigest.slice(7))),
+    ).toHaveLength(1);
+    record.views[0]!.adapter = original;
+    await atomicJson(recordPath, record);
+    await owner.cleanup();
   }, 30_000);
   test("unknown mount or invalid recovery state keeps leases and independent workspaces still detach", async () => {
     const f = await fixture();
@@ -860,32 +789,7 @@ describe("cache policy and fallback admission", () => {
       "Symlink",
     );
   }, 30_000);
-  test("reflink-only refuses injected copy and overlay views before creating mount state", async () => {
-    const f = await fixture();
-    const runtime = join(f.root, "views");
-    await mkdir(runtime);
-    const factory = new CheckoutFactory(
-      runtime,
-      f.channels.ALLAGENTS_CACHE_ROOT!,
-      120000,
-      "reflink-only",
-    );
-    for (const adapter of ["copy", "overlay"] as const) {
-      const path = join(runtime, adapter);
-      await expect(
-        factory.create({
-          destination: adapter,
-          adapter,
-          seedSource: f.repo,
-          path,
-          statePath: join(runtime, `${adapter}-state`),
-        }),
-      ).rejects.toThrow("Reflink-only");
-      expect(await exists(path)).toBe(false);
-      expect(await exists(join(runtime, `${adapter}-state`))).toBe(false);
-    }
-  });
-  test("reflink-only verifies isolation or fails without overlay probe or full-copy fallback", async () => {
+  test("copy-only selects independent physical writable views without probing", async () => {
     const f = await fixture();
     const runtime = join(f.root, "views");
     const state = join(runtime, "state");
@@ -894,65 +798,43 @@ describe("cache policy and fallback admission", () => {
       runtime,
       f.channels.ALLAGENTS_CACHE_ROOT!,
       120000,
-      "reflink-only",
+      "copy-only",
     );
-    const seed = f.repo;
-    const source = join(seed, "source.txt");
-    let supported = true;
-    try {
-      await copyFile(source, join(state, "capability"), constants.COPYFILE_FICLONE_FORCE);
-    } catch {
-      supported = false;
-    }
-    const probes: string[] = [];
-    const selected = factory.selected(
-      seed,
+    const selected = await factory.selected(
+      f.repo,
       state,
-      async (view) => {
-        probes.push(view.adapter);
+      async () => {
+        throw new Error("Copy-only must not probe");
       },
       "project",
     );
-    if (supported) {
-      expect(await selected).toBe("reflink");
-      const view = {
-        destination: "project",
-        adapter: "reflink" as const,
-        seedSource: seed,
-        path: join(runtime, "project"),
-      };
-      await factory.create(view);
-      await writeFile(join(view.path, "source.txt"), "private");
-      expect(await readFile(source, "utf8")).toBe("immutable input\n");
-    } else {
-      await expect(selected).rejects.toThrow("Reflink-only workspace requires verified reflink");
-      expect(await exists(join(runtime, "project"))).toBe(false);
-    }
-    expect(probes).toEqual(["reflink"]);
-    expect(await readdir(state)).toEqual(supported ? ["capability"] : []);
+    expect(selected).toBe("copy");
+    expect(await readdir(state)).toEqual([]);
+    const view = {
+      destination: "project",
+      adapter: selected,
+      seedSource: f.repo,
+      path: join(runtime, "project"),
+    };
+    await factory.create(view);
+    expect((await lstat(join(view.path, "source.txt"))).ino).not.toBe(
+      (await lstat(join(f.repo, "source.txt"))).ino,
+    );
+    await writeFile(join(view.path, "source.txt"), "private");
+    expect(await readFile(join(f.repo, "source.txt"), "utf8")).toBe("immutable input\n");
+    await expect(
+      factory.create({ ...view, adapter: "reflink", path: join(runtime, "reflink") }),
+    ).rejects.toThrow("Copy-only");
   });
-  test("protected read-only reflink-only copies never fall back to full copies", async () => {
+  test("auto selects a reflink when supported and otherwise admits a copy", async () => {
     const f = await fixture();
-    const tree = join(f.root, "protected");
-    let supported = true;
-    try {
-      await copyFile(
-        join(f.repo, "source.txt"),
-        join(f.root, "capability"),
-        constants.COPYFILE_FICLONE_FORCE,
-      );
-    } catch {
-      supported = false;
-    }
-    if (supported) {
-      await prepareProtectedCopy(f.repo, tree, "reflink-only");
-      expect(await readFile(join(tree, "source.txt"), "utf8")).toBe("immutable input\n");
-    } else {
-      await expect(prepareProtectedCopy(f.repo, tree, "reflink-only")).rejects.toThrow(
-        "Reflink-only workspace requires reflink support for protected read-only sources",
-      );
-      expect(await exists(tree)).toBe(false);
-    }
+    const owner = manager(f.spec, f.channels);
+    const row = await owner.prepare();
+    expect(["reflink", "copy"]).toContain(row.adapters[0]?.adapter);
+    await writeFile(join(row.path, "project", "source.txt"), "private");
+    expect(await readFile(join(row.seedPath, "project", "source.txt"), "utf8")).toBe(
+      "immutable input\n",
+    );
   });
   test("full-copy fallback creates independent inodes and rejects sparse huge logical footprint before copy", async () => {
     const f = await fixture();

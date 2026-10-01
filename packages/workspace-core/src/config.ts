@@ -55,9 +55,9 @@ export function validateWorkspace(value: unknown): WorkspaceSpec {
   if (
     config.viewMode !== undefined &&
     config.viewMode !== "auto" &&
-    config.viewMode !== "reflink-only"
+    config.viewMode !== "copy-only"
   )
-    throw new Error("workspace.viewMode must be auto or reflink-only");
+    throw new Error("workspace.viewMode must be auto or copy-only");
   const limits = { ...DEFAULT_LIMITS };
   if (config.limits !== undefined) {
     const authored = object(config.limits, "workspace.limits");

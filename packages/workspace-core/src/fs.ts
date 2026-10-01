@@ -510,7 +510,7 @@ export async function protect(
         }
         // Git never edits an existing loose object or pack file. Its object
         // directories remain writable for newly created objects, while keeping
-        // existing object bytes read-only avoids OverlayFS metadata copy-ups.
+        // existing Git object bytes read-only prevents accidental object mutation.
         if (writable && preserveGitObjects && path.startsWith(`${gitObjects}${sep}`)) return [];
         await chmod(path, (stat.mode & ~0o222) | (writable ? 0o200 : 0));
         return [];

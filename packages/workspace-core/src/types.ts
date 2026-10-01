@@ -19,7 +19,7 @@ export type OciSource = {
   permissions?: "all" | "read-only";
 } & ({ digest: `sha256:${string}`; tag?: never } | { tag: string; digest?: never });
 export type WorkspaceSource = GitSource | OciSource;
-export type ViewMode = "auto" | "reflink-only";
+export type ViewMode = "auto" | "copy-only";
 export interface WorkspaceSpec {
   sources: WorkspaceSource[];
   limits?: Partial<SourceLimits>;
@@ -49,7 +49,7 @@ export interface Ownership {
   kind: string;
   identity?: ProcessIdentity;
 }
-export type AdapterKind = "reflink" | "overlay" | "copy";
+export type AdapterKind = "reflink" | "copy";
 export interface SourceView {
   probe?: boolean;
   destination: string;
