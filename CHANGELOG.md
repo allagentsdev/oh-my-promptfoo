@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.4](https://github.com/allagentsdev/promptfoo-integration/compare/v1.3.3...v1.3.4) (2026-10-01)
+
+
+### Performance Improvements
+
+* avoid repeated full-cache admission walks ([#34](https://github.com/allagentsdev/promptfoo-integration/issues/34)) ([fc066f2](https://github.com/allagentsdev/promptfoo-integration/commit/fc066f20234ecdefd1e4a41900a017e25d587bf3))
+
 ## [1.3.3](https://github.com/allagentsdev/promptfoo-integration/compare/v1.3.2...v1.3.3) (2026-10-01)
 
 
