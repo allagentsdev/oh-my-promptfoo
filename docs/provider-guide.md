@@ -46,6 +46,13 @@ Set `workspace.viewMode: copy-only` and `ALLAGENTS_NO_PRIVILEGED_HELPER=1` for r
 
 For HTTPS Git, the runner image must provide a private `0700` directory owned by the runner inside a pre-mounted tmpfs, named by `ALLAGENTS_GIT_STAGING_ROOT`. It must be outside the seed cache: cache staging is renamed into the published seed on the same disk filesystem. The package checks the containing mount, its total byte and inode capacities against the configured source download/extraction limits, free capacity, and path ownership before launching Git. Git and its descendants use only this tmpfs for their temporary HOME and TMPDIR; the package cleans its marked children but never mounts, unmounts, or runs sudo. The image must reserve enough memory and swap for the tmpfs. Provision and smoke-test the actual runner; neither an mtime check nor an ordinary file copy is copy-on-write.
 
+A pre-mounted tmpfs has a fixed capacity while Git sources acquire serially.
+The package checks that capacity against the original suite-wide physical
+reservation, not a shrinking remainder after the first source. It still
+enforces the remaining download/extraction limits on each materialized source
+and the aggregate limits before publishing the immutable seed. The cache
+admits space for both the bounded temporary stage and final controlled writes.
+
 This opt-in path requires a trusted, single-job runner with no concurrent untrusted process under the runner UID and no untrusted process that can add mounts in its namespace during acquisition or cleanup. Mode `0700` excludes other users, not another process with the same UID: such a process could rename staging paths between verification and Git's writes, bypassing the physical bound. The package cannot establish this host-level isolation from a path check. Do not configure `ALLAGENTS_GIT_STAGING_ROOT` on a shared or adversarial same-UID host; leave HTTPS acquisition fail-closed without the privileged helper.
 
 ## File-change evidence

@@ -146,7 +146,15 @@ export async function materializeSources(
       throw new Error("Aggregate source acquisition limit exhausted");
     downloaded +=
       source.type === "git"
-        ? await materializeGit(source, staging, remaining, channels, writer, acquisitionSignal)
+        ? await materializeGit(
+            source,
+            staging,
+            remaining,
+            channels,
+            writer,
+            acquisitionSignal,
+            limits,
+          )
         : await materializeOci(source, staging, remaining, channels, writer, acquisitionSignal);
     extracted = await logicalBytes(staging);
     if (downloaded > limits.maxDownloadBytes || extracted > limits.maxExtractedBytes)
