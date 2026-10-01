@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.3](https://github.com/allagentsdev/promptfoo-integration/compare/v1.3.2...v1.3.3) (2026-10-01)
+
+
+### Performance Improvements
+
+* measure protected checkout preparation phases ([#32](https://github.com/allagentsdev/promptfoo-integration/issues/32)) ([401062b](https://github.com/allagentsdev/promptfoo-integration/commit/401062b2a17a5bfed0c49d6de802beea8a0d17f9))
+
 ## [1.3.2](https://github.com/allagentsdev/promptfoo-integration/compare/v1.3.1...v1.3.2) (2026-10-01)
 
 
