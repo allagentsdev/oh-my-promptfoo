@@ -631,6 +631,23 @@ describe("workspace lifecycle", () => {
     await owner.cleanup();
     await automatic.cleanup();
   }, 30_000);
+  test("protected checkout reuse checkpoints recent metadata hourly and refreshes stale use", async () => {
+    const f = await fixture();
+    f.spec.sources[0].permissions = "read-only";
+    const owner = manager(f.spec, f.channels);
+    const first = await owner.prepare();
+    const path = join(dirname(await readlink(join(first.path, "project"))), "metadata.json");
+    const metadata = await json<Record<string, unknown>>(path);
+    const recent = Date.now() - 30 * 60_000;
+    await atomicJson(path, { ...metadata, lastUsed: recent });
+    await owner.prepare();
+    expect((await json<{ lastUsed: number }>(path)).lastUsed).toBe(recent);
+
+    await atomicJson(path, { ...metadata, lastUsed: Date.now() - 2 * 60 * 60_000 });
+    await owner.prepare();
+    expect((await json<{ lastUsed: number }>(path)).lastUsed).toBeGreaterThan(Date.now() - 60_000);
+    await owner.cleanup();
+  }, 30_000);
   test("protected checkout mutation invalidates future reuse instead of resetting a live checkout", async () => {
     const f = await fixture();
     f.spec.sources[0].permissions = "read-only";

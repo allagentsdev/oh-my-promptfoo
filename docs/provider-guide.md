@@ -79,6 +79,11 @@ Workspaces remain live through synchronous/asynchronous assertions. `Provider.cl
 
 The seed cache is persistent and separate from runtime roots. Seeds and protected checkouts share a 50 GiB allocated-size ceiling; unused entries expire after 30 days. Seed last-use checkpoints have one-hour granularity, while a fresh process verifies the restored tree before reuse. Admission and digest locks serialize publication and lease changes. Acquisition reserves the controlled materialization budget, bounded temporary Git staging for the pinned fetch, and up to 512 MiB for inventory metadata. The temporary mount counts toward the cache ceiling, while the host-disk free-space check reserves only writes to that disk. Atomic inventory replacements also reserve their temporary allocation before writing. Every lease blocks pruning, including dead-owner leases until dependent workspaces are recovered. Workspace cleanup retains reusable seeds.
 
+Protected checkout last-use checkpoints also have one-hour granularity.
+Admission reuses the post-eviction allocated size already measured under its
+lock rather than walking the full cache again; the 50 GiB and disk checks
+remain in force.
+
 For hosted cache reuse, save only the published `published` subtree and verification metadata. Restore it into a fresh marked cache; never restore leases, protected checkouts, staging, locks, trash, or runtime roots. Local/self-hosted caches retain live mutable state and must recover abandoned roots before releasing leases. Hosted runner disposal is the final cleanup backstop.
 
 ## Lock waits and maintenance

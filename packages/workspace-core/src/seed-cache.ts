@@ -562,12 +562,20 @@ export class SeedCache {
               metadataPath,
               MAX_INVENTORY_JSON_BYTES,
             );
-            await this.writeMetadata(
-              metadataPath,
-              { ...current, lastUsed: Date.now() },
-              record.digest,
-              key,
-            );
+            const now = Date.now();
+            const lastUsed = current.lastUsed;
+            if (
+              typeof lastUsed !== "number" ||
+              !Number.isSafeInteger(lastUsed) ||
+              lastUsed > now ||
+              now - lastUsed >= LAST_USED_REFRESH_MS
+            )
+              await this.writeMetadata(
+                metadataPath,
+                { ...current, lastUsed: now },
+                record.digest,
+                key,
+              );
             await atomicJson(join(this.root, "checkout-leases", key, `${record.id}.json`), {
               schemaVersion: 1,
               package: PACKAGE,
@@ -647,8 +655,8 @@ export class SeedCache {
   ): Promise<void> {
     if (reservation > CACHE_CEILING)
       throw new Error("Acquisition reservation exceeds 50 GiB cache ceiling");
-    await this.collect(false, reservation, exclude, checkoutKey);
-    const current = await this.size();
+    // collect already measured the post-eviction cache under the admission lock.
+    const current = (await this.collect(false, reservation, exclude, checkoutKey)).allocatedBytes;
     const disk = await statfs(this.root);
     if (
       current + reservation > CACHE_CEILING ||
