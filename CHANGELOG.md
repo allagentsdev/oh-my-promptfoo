@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.1](https://github.com/allagentsdev/promptfoo-integration/compare/v1.3.0...v1.3.1) (2026-10-01)
+
+
+### Bug Fixes
+
+* verify protected checkout after agent completion ([#28](https://github.com/allagentsdev/promptfoo-integration/issues/28)) ([e331589](https://github.com/allagentsdev/promptfoo-integration/commit/e331589466618652d11197e612f612551cf76ced))
+
 ## [1.3.0](https://github.com/allagentsdev/promptfoo-integration/compare/v1.2.1...v1.3.0) (2026-10-01)
 
 
