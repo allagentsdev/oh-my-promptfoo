@@ -2,6 +2,7 @@ import { lstat, readdir, readlink } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { controlledAcquisitionPhysicalReservation } from "../acquisition-budget.ts";
 import { canonicalJson, DEFAULT_LIMITS, validateWorkspace } from "../config.ts";
+import { publishProgress } from "../progress.js";
 import type { ResolvedSource, RuntimeChannels, SourceLimits, WorkspaceSpec } from "../types.ts";
 import { materializeGit, resolveGit } from "./git.ts";
 import { materializeOci, resolveOci } from "./oci.ts";
@@ -121,6 +122,7 @@ export async function materializeSources(
   limits: SourceLimits,
   channels: RuntimeChannels,
   signal?: AbortSignal,
+  caseIndex?: number,
 ): Promise<void> {
   signal?.throwIfAborted();
   if (resolved.length > limits.maxSources) throw new Error("Too many resolved sources");
@@ -135,7 +137,8 @@ export async function materializeSources(
   ]);
   let downloaded = 0;
   let extracted = 0;
-  for (const source of resolved) {
+  for (let sourceOffset = 0; sourceOffset < resolved.length; sourceOffset++) {
+    const source = resolved[sourceOffset];
     acquisitionSignal.throwIfAborted();
     const remaining = {
       ...limits,
@@ -144,6 +147,7 @@ export async function materializeSources(
     };
     if (remaining.maxDownloadBytes <= 0 || remaining.maxExtractedBytes <= 0)
       throw new Error("Aggregate source acquisition limit exhausted");
+    publishProgress("source-start", caseIndex, sourceOffset + 1, resolved.length);
     downloaded +=
       source.type === "git"
         ? await materializeGit(
@@ -154,11 +158,15 @@ export async function materializeSources(
             writer,
             acquisitionSignal,
             limits,
+            caseIndex,
+            sourceOffset + 1,
+            resolved.length,
           )
         : await materializeOci(source, staging, remaining, channels, writer, acquisitionSignal);
     extracted = await logicalBytes(staging);
     if (downloaded > limits.maxDownloadBytes || extracted > limits.maxExtractedBytes)
       throw new Error("Aggregate source acquisition exceeds configured limits");
+    publishProgress("source-finished", caseIndex, sourceOffset + 1, resolved.length, "ok");
   }
 }
 

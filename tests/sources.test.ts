@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { execFile } from "node:child_process";
+import { subscribe, unsubscribe } from "node:diagnostics_channel";
 import { realpathSync } from "node:fs";
 import {
   chmod,
@@ -110,6 +111,28 @@ describe("bounded Git acquisition", () => {
     await materializeSources(sources, staging, DEFAULT_LIMITS, {});
     expect(await readFile(join(staging, "project", "hello.txt"), "utf8")).toBe("hello\n");
     expect(await readdir(staging)).toEqual(["project"]);
+  });
+  test("source progress tracks actual local Git materialization in sorted ordinal order", async () => {
+    const { root, staging, spec } = await fixture();
+    spec.sources.push({ ...spec.sources[0], destination: "another" });
+    const events: Record<string, unknown>[] = [];
+    const listener = (message: unknown) => events.push(message as Record<string, unknown>);
+    subscribe("allagents.workspace.progress", listener);
+    try {
+      const sources = await resolveSources(spec, {});
+      await materializeSources(sources, staging, DEFAULT_LIMITS, {}, undefined, 42);
+      expect(await readFile(join(staging, "another", "hello.txt"), "utf8")).toBe("hello\n");
+      expect(await readFile(join(staging, "project", "hello.txt"), "utf8")).toBe("hello\n");
+      expect(events).toEqual([
+        { phase: "source-start", caseIndex: 42, sourceIndex: 1, sourceCount: 2 },
+        { phase: "source-finished", caseIndex: 42, sourceIndex: 1, sourceCount: 2, outcome: "ok" },
+        { phase: "source-start", caseIndex: 42, sourceIndex: 2, sourceCount: 2 },
+        { phase: "source-finished", caseIndex: 42, sourceIndex: 2, sourceCount: 2, outcome: "ok" },
+      ]);
+      expect(JSON.stringify(events)).not.toContain(root);
+    } finally {
+      unsubscribe("allagents.workspace.progress", listener);
+    }
   });
   test("immutable local acquisition preserves Git executable modes under a restrictive umask", async () => {
     const { repository, staging, spec, commit } = await fixture();

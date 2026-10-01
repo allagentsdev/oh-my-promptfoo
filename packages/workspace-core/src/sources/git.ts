@@ -20,6 +20,7 @@ import { deflateSync } from "node:zlib";
 import { gitUsesRemoteAcquisition } from "../acquisition-budget.ts";
 import { atomicJson, isMounted, json, MARKER, PACKAGE, processIdentity } from "../fs.ts";
 import { helperAvailable, helperInvoke } from "../helper.ts";
+import { publishProgress } from "../progress.js";
 import type { GitSource, ResolvedSource, RuntimeChannels, SourceLimits } from "../types.ts";
 import { type PhysicalWriter, runSource, withPrivateAcquisition } from "./process.ts";
 import {
@@ -447,6 +448,9 @@ async function materializeBoundedGit(
   writer: PhysicalWriter,
   signal?: AbortSignal,
   physicalLimits: SourceLimits = limits,
+  caseIndex?: number,
+  sourceIndex?: number,
+  sourceCount?: number,
 ): Promise<number> {
   const local = !gitUsesRemoteAcquisition(source.repository);
   const repository = local ? fileURLToPath(source.repository) : undefined;
@@ -533,6 +537,7 @@ async function materializeBoundedGit(
       };
       const checkout = join(acquisition, "repository");
       if (externalRoot) await verifyGitStagingRoot(externalRoot, physicalLimits);
+      if (!local) publishProgress("git-fetch-start", caseIndex, sourceIndex, sourceCount);
       await measuredGitPhase("git-clone", () =>
         runSource(
           "git",
@@ -580,6 +585,7 @@ async function materializeBoundedGit(
           options,
         );
       }
+      if (!local) publishProgress("git-fetch-finished", caseIndex, sourceIndex, sourceCount, "ok");
       let downloaded = 0;
       const count = async (path: string): Promise<void> => {
         for (const name of await readdir(path)) {
@@ -822,6 +828,9 @@ export async function materializeGit(
   writer: PhysicalWriter,
   signal?: AbortSignal,
   physicalLimits: SourceLimits = limits,
+  caseIndex?: number,
+  sourceIndex?: number,
+  sourceCount?: number,
 ): Promise<number> {
   if (channels.ALLAGENTS_GIT_STAGING_ROOT === "")
     throw new Error("Git staging root cannot be empty");
@@ -848,5 +857,8 @@ export async function materializeGit(
     writer,
     signal,
     physicalLimits,
+    caseIndex,
+    sourceIndex,
+    sourceCount,
   );
 }

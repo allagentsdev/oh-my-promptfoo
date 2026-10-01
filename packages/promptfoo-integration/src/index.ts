@@ -12,6 +12,7 @@ import {
   WorkspaceManager,
   type WorkspaceSpec,
 } from "../../workspace-core/src/index.js";
+import { nextCaseIndex, publishProgress } from "../../workspace-core/src/progress.js";
 import {
   type CopilotSdkProviderConfig,
   envelope,
@@ -113,6 +114,23 @@ export class Provider extends Calls {
     return this.providerId;
   }
   async callApi(prompt: string, context?: unknown, options?: CallOptions): Promise<JsonObject> {
+    const caseIndex = nextCaseIndex();
+    publishProgress("case-start", caseIndex);
+    let outcome: "ok" | "error" = "error";
+    try {
+      const result = await this.callCase(prompt, context, options, caseIndex);
+      outcome = Object.hasOwn(result, "error") ? "error" : "ok";
+      return result;
+    } finally {
+      publishProgress("case-finished", caseIndex, undefined, undefined, outcome);
+    }
+  }
+  private async callCase(
+    prompt: string,
+    context: unknown,
+    options: CallOptions | undefined,
+    caseIndex: number | undefined,
+  ): Promise<JsonObject> {
     const env = this.config.delegate.env ?? {};
     let merged: JsonObject;
     let ctx: JsonObject;
@@ -132,8 +150,7 @@ export class Provider extends Calls {
         let baselineError: string | undefined;
         let published = false;
         try {
-          if (signal.aborted) throw new Error("Provider call aborted before acquisition");
-          handle = await this.manager.prepare(signal);
+          handle = await this.manager.prepare(signal, caseIndex);
           if (this.config.fileChanges) {
             try {
               baseline = await establishBaseline(handle);
@@ -142,22 +159,35 @@ export class Provider extends Calls {
                 error instanceof Error ? error.message : "Unable to establish file baseline";
             }
           }
-          const response = await runDelegate(
-            {
-              version: 1,
-              type: "call",
-              delegate: this.config.delegate.id,
-              basePath: this.basePath,
-              workingDir: handle.path,
-              config: merged,
-              prompt,
-              context: ctx,
-            },
-            env,
-            this.config.timeoutMs ?? 900_000,
-            signal,
-          );
-          await this.manager.validateProtected(handle);
+          publishProgress("agent-start", caseIndex);
+          let response: JsonObject;
+          try {
+            response = await runDelegate(
+              {
+                version: 1,
+                type: "call",
+                delegate: this.config.delegate.id,
+                basePath: this.basePath,
+                workingDir: handle.path,
+                config: merged,
+                prompt,
+                context: ctx,
+              },
+              env,
+              this.config.timeoutMs ?? 900_000,
+              signal,
+            );
+            publishProgress(
+              "agent-finished",
+              caseIndex,
+              undefined,
+              undefined,
+              Object.hasOwn(response, "error") ? "error" : "ok",
+            );
+          } catch (error) {
+            publishProgress("agent-finished", caseIndex, undefined, undefined, "error");
+            throw error;
+          }
           const metadata = response.metadata === undefined ? {} : response.metadata;
           if (!metadata || typeof metadata !== "object" || Array.isArray(metadata))
             throw new Error("Delegate metadata must be a JSON object");

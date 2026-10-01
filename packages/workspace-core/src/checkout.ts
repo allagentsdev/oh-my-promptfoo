@@ -16,6 +16,7 @@ import {
 import { dirname, join } from "node:path";
 import { DEFAULT_LOCK_TIMEOUT_MS, withLock } from "./cache-lock.js";
 import { conservativeCopyBytes, contained, isMounted, protect, removeTree } from "./fs.js";
+import { publishProgress } from "./progress.js";
 import type { AdapterKind, SourceView, ViewMode } from "./types.js";
 
 const HEADROOM = 256 * 1024 ** 2;
@@ -150,18 +151,34 @@ export class CheckoutFactory {
     else await operation();
   }
 }
+async function copyPhysicalProtected(
+  source: string,
+  path: string,
+  caseIndex?: number,
+  sourceIndex?: number,
+  sourceCount?: number,
+): Promise<void> {
+  publishProgress("protected-copy-start", caseIndex, sourceIndex, sourceCount);
+  await copyTree(source, path, false);
+  publishProgress("protected-copy-finished", caseIndex, sourceIndex, sourceCount, "ok");
+}
+
 export async function prepareProtectedCopy(
   source: string,
   path: string,
   viewMode: ViewMode = "auto",
+  caseIndex?: number,
+  sourceIndex?: number,
+  sourceCount?: number,
 ): Promise<void> {
-  if (viewMode === "copy-only") await copyTree(source, path, false);
+  if (viewMode === "copy-only")
+    await copyPhysicalProtected(source, path, caseIndex, sourceIndex, sourceCount);
   else {
     try {
       await copyTree(source, path, true);
     } catch {
       await removeTree(path);
-      await copyTree(source, path, false);
+      await copyPhysicalProtected(source, path, caseIndex, sourceIndex, sourceCount);
     }
   }
   await protect(path, false);

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { execFile } from "node:child_process";
+import { subscribe, unsubscribe } from "node:diagnostics_channel";
 import { realpathSync, statSync } from "node:fs";
 import { access, mkdir, mkdtemp, readFile, symlink, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
@@ -193,7 +194,7 @@ describe("workspace provider publication and lifetime", () => {
       }
     }
   });
-  async function workspaceProvider(fileChanges = false) {
+  async function workspaceProvider(fileChanges = false, readOnly = false) {
     const path = await project("promptfoo", native);
     const repository = join(path, "source");
     await mkdir(repository);
@@ -233,8 +234,10 @@ describe("workspace provider publication and lifetime", () => {
               repository: pathToFileURL(repository).href,
               ref: stdout.trim(),
               destination: "repo",
+              permissions: readOnly ? "read-only" : "all",
             },
           ],
+          viewMode: readOnly ? "copy-only" : "auto",
         },
         fileChanges,
       },
@@ -245,6 +248,83 @@ describe("workspace provider publication and lifetime", () => {
     });
     return { path, provider };
   }
+  test("progress follows seed acquisition, protected copy, reuse and agent outcomes without private data", async () => {
+    const { path, provider } = await workspaceProvider(false, true);
+    const events: Record<string, unknown>[] = [];
+    const listener = (message: unknown) => events.push(message as Record<string, unknown>);
+    subscribe("allagents.workspace.progress", listener);
+    try {
+      expect((await provider.callApi("private-first-prompt")).error).toBeUndefined();
+      expect((await provider.callApi("error")).error).toBe("native failure");
+      const aborted = new AbortController();
+      aborted.abort();
+      expect(
+        (
+          await provider.callApi("private-aborted-prompt", undefined, {
+            abortSignal: aborted.signal,
+          })
+        ).error,
+      ).toBeDefined();
+      const first = events[0].caseIndex;
+      const second = events.find((event) => event.phase === "seed-cache-hit")?.caseIndex;
+      const third = events.at(-1)?.caseIndex;
+      expect([first, second, third].every((index) => Number.isSafeInteger(index))).toBe(true);
+      expect(new Set([first, second, third]).size).toBe(3);
+      expect(events).toEqual([
+        { phase: "case-start", caseIndex: first },
+        { phase: "seed-start", caseIndex: first, sourceCount: 1 },
+        { phase: "source-start", caseIndex: first, sourceIndex: 1, sourceCount: 1 },
+        {
+          phase: "source-finished",
+          caseIndex: first,
+          sourceIndex: 1,
+          sourceCount: 1,
+          outcome: "ok",
+        },
+        { phase: "seed-ready", caseIndex: first, sourceCount: 1 },
+        { phase: "protected-copy-start", caseIndex: first, sourceIndex: 1, sourceCount: 1 },
+        {
+          phase: "protected-copy-finished",
+          caseIndex: first,
+          sourceIndex: 1,
+          sourceCount: 1,
+          outcome: "ok",
+        },
+        { phase: "workspace-ready", caseIndex: first },
+        { phase: "agent-start", caseIndex: first },
+        { phase: "agent-finished", caseIndex: first, outcome: "ok" },
+        { phase: "case-finished", caseIndex: first, outcome: "ok" },
+        { phase: "case-start", caseIndex: second },
+        { phase: "seed-cache-hit", caseIndex: second, sourceCount: 1 },
+        { phase: "seed-ready", caseIndex: second, sourceCount: 1 },
+        { phase: "workspace-ready", caseIndex: second },
+        { phase: "agent-start", caseIndex: second },
+        { phase: "agent-finished", caseIndex: second, outcome: "error" },
+        { phase: "case-finished", caseIndex: second, outcome: "error" },
+        { phase: "case-start", caseIndex: third },
+        { phase: "case-finished", caseIndex: third, outcome: "error" },
+      ]);
+      const serialized = JSON.stringify(events);
+      for (const forbidden of [
+        path,
+        pathToFileURL(join(path, "source")).href,
+        "private-first-prompt",
+        "private-aborted-prompt",
+        "native failure",
+        "immutable source",
+      ])
+        expect(serialized).not.toContain(forbidden);
+      for (const event of events)
+        expect(
+          Object.keys(event).every((key) =>
+            ["phase", "caseIndex", "sourceIndex", "sourceCount", "outcome"].includes(key),
+          ),
+        ).toBe(true);
+    } finally {
+      unsubscribe("allagents.workspace.progress", listener);
+      await provider.cleanup();
+    }
+  }, 15_000);
   test("parallel rows remain assertion-accessible with distinct writable workspace paths", async () => {
     const { provider } = await workspaceProvider();
     try {
