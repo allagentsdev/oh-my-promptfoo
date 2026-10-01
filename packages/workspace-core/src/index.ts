@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { realpathSync } from "node:fs";
 import { lstat, mkdir, readdir, realpath, symlink } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
-import { basename, dirname, join, relative, resolve, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { DEFAULT_LOCK_TIMEOUT_MS, withLock } from "./cache-lock.js";
 import { CheckoutFactory, releaseView } from "./checkout.js";
 import { canonicalJson, DEFAULT_LIMITS, validateWorkspace } from "./config.js";
@@ -20,13 +20,20 @@ import {
   processIdentity,
   removeTree,
 } from "./fs.js";
+import { PreparedSources, preparedKey } from "./prebuilt.js";
 import { publishProgress } from "./progress.js";
-import { initializeCacheRoot, protectedCheckoutKey, SeedCache } from "./seed-cache.js";
+import {
+  initializeCacheRoot,
+  manifestDigest,
+  protectedCheckoutKey,
+  SeedCache,
+} from "./seed-cache.js";
 import { resolveSources } from "./sources/index.js";
 import type {
   Ownership,
   ProcessIdentity,
   RecoveryRecord,
+  ResolvedSource,
   RuntimeChannels,
   SourceView,
   WorkspaceHandle,
@@ -67,6 +74,8 @@ export class WorkspaceManager {
   private root!: string;
   private identity!: ProcessIdentity;
   private readonly handles = new Map<string, RecoveryRecord>();
+  private readonly prebuiltStamps = new Map<string, string>();
+  private readonly invalidPrebuilt = new Set<string>();
   private readonly active = new Set<Promise<WorkspaceHandle>>();
   private closed = false;
   private readonly shutdown = new AbortController();
@@ -146,15 +155,39 @@ export class WorkspaceManager {
       ...(signal ? [signal] : []),
       AbortSignal.timeout(this.spec.limits?.timeoutMs ?? DEFAULT_LIMITS.timeoutMs),
     ]);
-    const resolved = await resolveSources(this.spec, this.channels, combined);
-    const metadata = await this.cache.prepare(
-      resolved,
-      { ...DEFAULT_LIMITS, ...this.spec.limits },
-      this.channels,
-      combined,
-      undefined,
-      caseIndex,
+    const prebuilt =
+      this.channels.ALLAGENTS_PREBUILT_ROOT !== undefined
+        ? await PreparedSources.open(
+            this.channels.ALLAGENTS_PREBUILT_ROOT,
+            this.spec,
+            this.channels,
+            roots(this.channels).cache,
+            roots(this.channels).runtime,
+          )
+        : undefined;
+    const preparedSources = new Map<string, ResolvedSource>();
+    for (const source of this.spec.sources) {
+      if (source.type !== "git") continue;
+      const prepared = prebuilt?.resolves(source);
+      if (prepared) preparedSources.set(source.destination, prepared);
+    }
+    const ordinary = this.spec.sources.filter((source) => !preparedSources.has(source.destination));
+    const normal = ordinary.length
+      ? await resolveSources({ ...this.spec, sources: ordinary }, this.channels, combined)
+      : [];
+    const resolved = [...normal, ...preparedSources.values()].sort((a, b) =>
+      a.destination < b.destination ? -1 : a.destination > b.destination ? 1 : 0,
     );
+    const metadata = normal.length
+      ? await this.cache.prepare(
+          normal,
+          { ...DEFAULT_LIMITS, ...this.spec.limits },
+          this.channels,
+          combined,
+          undefined,
+          caseIndex,
+        )
+      : undefined;
     const id = randomUUID();
     const path = join(this.root, "workspaces", id);
     const record: RecoveryRecord = {
@@ -162,7 +195,7 @@ export class WorkspaceManager {
       id,
       root: this.root,
       path,
-      digest: metadata.digest,
+      digest: metadata?.digest ?? manifestDigest(resolved),
       identity: this.identity,
       status: "pending",
       seedLease: false,
@@ -172,18 +205,19 @@ export class WorkspaceManager {
     await this.save(record);
     this.handles.set(path, record);
     try {
-      record.seedLease = true;
-      await this.save(record);
-      // Revalidate/reacquire and publish the lease under one admission + digest chain.
-      // Pruning may run between initial resolution and pending-record publication.
-      await this.cache.prepare(
-        resolved,
-        { ...DEFAULT_LIMITS, ...this.spec.limits },
-        this.channels,
-        combined,
-        record,
-        caseIndex,
-      );
+      if (metadata) {
+        record.seedLease = true;
+        await this.save(record);
+        // Pruning may run between resolution and pending-record publication.
+        await this.cache.prepare(
+          normal,
+          { ...DEFAULT_LIMITS, ...this.spec.limits },
+          this.channels,
+          combined,
+          record,
+          caseIndex,
+        );
+      }
       await mkdir(path, { mode: 0o700 });
       for (let sourceOffset = 0; sourceOffset < resolved.length; sourceOffset++) {
         const source = resolved[sourceOffset];
@@ -191,7 +225,36 @@ export class WorkspaceManager {
         const dest = join(path, source.destination);
         contained(path, dest);
         await mkdir(dirname(dest), { recursive: true, mode: 0o700 });
-        if (source.permissions === "read-only") {
+        if (source.type === "git" && prebuilt && preparedSources.has(source.destination)) {
+          const key = preparedKey(source);
+          if (this.invalidPrebuilt.has(key))
+            throw new Error("Prepared source checkout was invalidated");
+          const view: SourceView = {
+            destination: source.destination,
+            adapter: "read-only",
+            seedSource: prebuilt.path(source),
+            path: dest,
+            prebuiltRoot: prebuilt.root,
+            prebuiltKey: key,
+          };
+          record.views.push(view);
+          await this.save(record);
+          try {
+            view.prebuiltStamp = await prebuilt.check(source, this.prebuiltStamps.get(key));
+            const established = this.prebuiltStamps.get(key);
+            if (
+              this.invalidPrebuilt.has(key) ||
+              (established !== undefined && established !== view.prebuiltStamp)
+            )
+              throw new Error("Prepared source checkout mutated");
+            this.prebuiltStamps.set(key, view.prebuiltStamp);
+          } catch {
+            this.invalidPrebuilt.add(key);
+            throw new Error("Prepared source checkout failed integrity verification");
+          }
+          await this.save(record);
+          await symlink(view.seedSource, dest);
+        } else if (source.permissions === "read-only") {
           const key = protectedCheckoutKey(source, this.spec.viewMode);
           const view: SourceView = {
             destination: source.destination,
@@ -239,9 +302,9 @@ export class WorkspaceManager {
       publishProgress("workspace-ready", caseIndex);
       return {
         path,
-        manifestDigest: record.digest,
+        manifestDigest: manifestDigest(resolved),
         sources: resolved.map((s) => ({ ...s })),
-        seedPath: this.cache.seedPath(record.digest),
+        seedPath: metadata ? this.cache.seedPath(record.digest) : "",
         adapters: record.views.filter((v) => !v.probe).map((v) => ({ ...v })),
       };
     } catch (error) {
@@ -300,10 +363,36 @@ export class WorkspaceManager {
         )
           throw new Error("Invalid probe recovery state");
       } else contained(record.path, view.path);
-      if (view.seedSource !== join(this.cache.seedPath(record.digest), view.destination))
+      if (view.prebuiltKey) {
+        if (
+          view.checkoutKey ||
+          view.adapter !== "read-only" ||
+          view.probe ||
+          !/^[a-f0-9]{64}$/.test(view.prebuiltKey) ||
+          !view.prebuiltRoot ||
+          !isAbsolute(view.prebuiltRoot) ||
+          view.seedSource !== join(view.prebuiltRoot, "sources", view.prebuiltKey, "protected")
+        )
+          throw new Error("Invalid prepared source recovery state");
+        const { cache, runtime } = roots(this.channels);
+        for (const other of [cache, runtime]) {
+          const a = relative(view.prebuiltRoot, other);
+          const b = relative(other, view.prebuiltRoot);
+          if (
+            [a, b].some(
+              (v) => !v || (v !== ".." && !v.startsWith(`..${sep}`) && !v.startsWith(sep)),
+            )
+          )
+            throw new Error("Prepared source recovery overlaps package roots");
+        }
+      } else if (view.seedSource !== join(this.cache.seedPath(record.digest), view.destination))
         throw new Error("Invalid seed recovery state");
       if (view.statePath) contained(join(root, "adapter-state", record.id), view.statePath);
-      if (view.adapter === "read-only" && !/^[a-f0-9]{64}$/.test(view.checkoutKey ?? ""))
+      if (
+        view.adapter === "read-only" &&
+        !view.prebuiltKey &&
+        !/^[a-f0-9]{64}$/.test(view.checkoutKey ?? "")
+      )
         throw new Error("Invalid checkout recovery state");
     }
   }
@@ -340,8 +429,35 @@ export class WorkspaceManager {
   }
   async validateProtected(handle: WorkspaceHandle): Promise<void> {
     await this.initialization;
-    for (const view of handle.adapters)
+    for (const view of handle.adapters) {
       if (view.checkoutKey) await this.cache.checkProtected(view.checkoutKey);
+      if (view.prebuiltKey) {
+        const source = handle.sources.find((item) => item.destination === view.destination);
+        if (
+          !source ||
+          source.type !== "git" ||
+          preparedKey(source) !== view.prebuiltKey ||
+          !view.prebuiltRoot ||
+          this.channels.ALLAGENTS_PREBUILT_ROOT !== view.prebuiltRoot ||
+          !view.prebuiltStamp ||
+          this.invalidPrebuilt.has(view.prebuiltKey)
+        )
+          throw new Error("Prepared source identity mismatch");
+        try {
+          const prepared = await PreparedSources.open(
+            view.prebuiltRoot,
+            this.spec,
+            this.channels,
+            roots(this.channels).cache,
+            roots(this.channels).runtime,
+          );
+          await prepared.check(source, view.prebuiltStamp);
+        } catch (error) {
+          this.invalidPrebuilt.add(view.prebuiltKey);
+          throw error;
+        }
+      }
+    }
   }
   async release(handle: WorkspaceHandle): Promise<void> {
     await this.initialization;

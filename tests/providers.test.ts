@@ -1,8 +1,20 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
 import { subscribe, unsubscribe } from "node:diagnostics_channel";
 import { realpathSync, statSync } from "node:fs";
-import { access, mkdir, mkdtemp, readFile, symlink, writeFile } from "node:fs/promises";
+import {
+  access,
+  chmod,
+  cp,
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  readlink,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -25,7 +37,7 @@ import {
   runDelegate,
   wireContext,
 } from "../packages/promptfoo-integration/src/protocol";
-import { removeTree } from "../packages/workspace-core/src/fs";
+import { atomicJson, MARKER, protect, removeTree } from "../packages/workspace-core/src/fs";
 
 const roots: string[] = [];
 afterEach(async () => {
@@ -195,6 +207,206 @@ describe("workspace provider publication and lifetime", () => {
       }
     }
   });
+  test("prepared remote Git runs offline, reuses clean views, and refuses mismatches or tampering", async () => {
+    const path = await project("promptfoo", native);
+    const repository = join(path, "local");
+    await mkdir(repository);
+    await writeFile(join(repository, "input.txt"), "immutable source");
+    const git = promisify(execFile);
+    await git("git", ["init", "-q", repository]);
+    await git("git", [
+      "-C",
+      repository,
+      "-c",
+      "user.name=Fixture",
+      "-c",
+      "user.email=fixture@example.test",
+      "add",
+      ".",
+    ]);
+    await git("git", [
+      "-C",
+      repository,
+      "-c",
+      "user.name=Fixture",
+      "-c",
+      "user.email=fixture@example.test",
+      "commit",
+      "-qm",
+      "fixture",
+    ]);
+    const commit = (await git("git", ["-C", repository, "rev-parse", "HEAD"])).stdout.trim();
+    const repositoryUrl = "https://invalid.example.test/offline.git";
+    const source = {
+      type: "git" as const,
+      repository: repositoryUrl,
+      ref: commit,
+      destination: "repo",
+      permissions: "read-only" as const,
+    };
+    const key = createHash("sha256")
+      .update(JSON.stringify([repositoryUrl, commit, "repo"]))
+      .digest("hex");
+    const prepared = join(path, "prepared");
+    const protectedPath = join(prepared, "sources", key, "protected");
+    await mkdir(join(prepared, "sources", key), { recursive: true, mode: 0o700 });
+    await git("git", [
+      "clone",
+      "-q",
+      "--bare",
+      "--no-hardlinks",
+      repository,
+      join(prepared, "sources", key, "mirror"),
+    ]);
+    await cp(repository, join(prepared, "sources", key, "seed"), { recursive: true });
+    await cp(repository, protectedPath, { recursive: true });
+    await protect(protectedPath, false);
+    await chmod(prepared, 0o700);
+    await chmod(join(prepared, "sources"), 0o700);
+    await atomicJson(join(prepared, MARKER), {
+      schemaVersion: 1,
+      package: "@allagents/promptfoo-integration",
+      kind: "prebuilt-sources",
+    });
+    await atomicJson(join(prepared, "manifest.json"), {
+      schemaVersion: 1,
+      sources: [{ repository: repositoryUrl, commit, destination: "repo" }],
+    });
+    const options = {
+      config: {
+        basePath: path,
+        delegate: { id: "openai:codex-sdk" as const },
+        workspace: { sources: [source], viewMode: "copy-only" as const },
+      },
+      env: {
+        ALLAGENTS_CACHE_ROOT: join(path, "cache"),
+        ALLAGENTS_WORKSPACE_ROOT: join(path, "runtime"),
+        ALLAGENTS_PREBUILT_ROOT: prepared,
+        ALLAGENTS_NO_PRIVILEGED_HELPER: "1",
+      },
+    };
+    const provider = new Provider(options);
+    try {
+      const first = await provider.callApi("clean");
+      expect(first.error).toBeUndefined();
+      const workspace = (first.metadata as { workspace?: Record<string, unknown> } | undefined)
+        ?.workspace;
+      if (
+        !workspace ||
+        typeof workspace !== "object" ||
+        Array.isArray(workspace) ||
+        typeof workspace.path !== "string" ||
+        !Array.isArray(workspace.sources)
+      )
+        throw new Error("Prepared workspace metadata missing");
+      expect(workspace.sources[0]).toMatchObject({
+        repository: repositoryUrl,
+        commit,
+        destination: "repo",
+      });
+      const linked = await readlink(join(workspace.path, "repo"));
+      expect(linked).toBe(protectedPath);
+      expect((await provider.callApi("clean-reuse")).error).toBeUndefined();
+      expect(await readdir(join(options.env.ALLAGENTS_CACHE_ROOT, "published"))).toEqual([]);
+      const mixed = new Provider({
+        ...options,
+        config: {
+          ...options.config,
+          workspace: {
+            ...options.config.workspace,
+            sources: [
+              source,
+              {
+                type: "git" as const,
+                repository: pathToFileURL(repository).href,
+                ref: commit,
+                destination: "skills",
+                permissions: "all" as const,
+              },
+            ],
+          },
+        },
+      });
+      try {
+        const result = await mixed.callApi("clean-mixed");
+        expect(result.error).toBeUndefined();
+        const mixedWorkspace = (
+          result.metadata as { workspace?: Record<string, unknown> } | undefined
+        )?.workspace;
+        if (
+          !mixedWorkspace ||
+          typeof mixedWorkspace !== "object" ||
+          Array.isArray(mixedWorkspace) ||
+          typeof mixedWorkspace.path !== "string"
+        )
+          throw new Error("Mixed workspace metadata missing");
+        expect(await readFile(join(mixedWorkspace.path, "skills", "input.txt"), "utf8")).toBe(
+          "immutable source",
+        );
+        expect(await readlink(join(mixedWorkspace.path, "repo"))).toBe(protectedPath);
+        expect(mixedWorkspace.manifestDigest).not.toBe(workspace.manifestDigest);
+        expect(await readdir(join(options.env.ALLAGENTS_CACHE_ROOT, "published"))).toHaveLength(1);
+      } finally {
+        await mixed.cleanup();
+      }
+      const started: unknown[] = [];
+      const onProgress = (value: unknown) => {
+        if (value && typeof value === "object" && "phase" in value && value.phase === "agent-start")
+          started.push(value);
+      };
+      subscribe("allagents.workspace.progress", onProgress);
+      try {
+        for (const [sources, reason] of [
+          [
+            [{ ...source, repository: "https://invalid.example.test/other.git" }],
+            "manifest does not match",
+          ],
+          [[{ ...source, ref: "f".repeat(40) }], "manifest does not match"],
+          [[{ ...source, destination: "wrong" }], "manifest does not match"],
+          [[{ ...source, permissions: "all" as const }], "refuses writable remote Git"],
+          [
+            [
+              {
+                type: "oci" as const,
+                repository: "example.org/offline/image",
+                digest: `sha256:${"a".repeat(64)}` as const,
+                destination: "other",
+              },
+            ],
+            "refuses remote OCI",
+          ],
+          [[], "manifest does not match"],
+        ] as const) {
+          const mismatch = new Provider({
+            ...options,
+            config: {
+              ...options.config,
+              workspace: { ...options.config.workspace, sources: [...sources] },
+            },
+          });
+          try {
+            expect((await mismatch.callApi("write")).error).toContain(reason);
+            expect(started).toEqual([]);
+          } finally {
+            await mismatch.cleanup();
+          }
+        }
+      } finally {
+        unsubscribe("allagents.workspace.progress", onProgress);
+      }
+      const tamper = await provider.callApi("tamper-protected");
+      expect(tamper.error).toContain("Prepared source checkout failed integrity verification");
+      expect((await provider.callApi("write")).error).toContain("invalidated");
+      expect(await readFile(join(protectedPath, "input.txt"), "utf8")).toBe(
+        "modified protected source",
+      );
+    } finally {
+      await provider.cleanup();
+    }
+    expect(await readFile(join(protectedPath, "input.txt"), "utf8")).toBe(
+      "modified protected source",
+    );
+  }, 30_000);
   async function workspaceProvider(fileChanges = false, readOnly = false) {
     const path = await project("promptfoo", native);
     const repository = join(path, "source");

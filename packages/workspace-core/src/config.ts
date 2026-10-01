@@ -14,6 +14,7 @@ export const RUNTIME_CHANNELS = [
   "ALLAGENTS_ORAS_AUTH_FILE",
   "ALLAGENTS_WORKSPACE_ROOT",
   "ALLAGENTS_CACHE_ROOT",
+  "ALLAGENTS_PREBUILT_ROOT",
 ] as const;
 export function object(value: unknown, name: string): Record<string, unknown> {
   if (
