@@ -691,6 +691,8 @@ describe("workspace lifecycle", () => {
           "immutable input\n",
         );
         expect(view.adapters[0]?.adapter).toBe(permissions === "all" ? "reflink" : "read-only");
+        await owner.validateProtected(view);
+        await owner.release(view);
       } else {
         await expect(owner.prepare()).rejects.toThrow("Reflink-only workspace requires");
         const runtime = f.channels.ALLAGENTS_WORKSPACE_ROOT!;

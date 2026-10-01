@@ -60,6 +60,10 @@ export function acquisitionIdentity(source: ResolvedSource): Record<string, unkn
         materializerVersion: source.materializerVersion ?? 1,
       };
 }
+export function protectedCheckoutKey(source: ResolvedSource, viewMode: ViewMode = "auto"): string {
+  const identity = canonicalJson(acquisitionIdentity(source));
+  return hash(viewMode === "reflink-only" ? `${identity}\0reflink-only` : identity);
+}
 export function manifestDigest(sources: ResolvedSource[]): Digest {
   const identities = [...sources]
     .sort((a, b) => (a.destination < b.destination ? -1 : a.destination > b.destination ? 1 : 0))
@@ -441,8 +445,7 @@ export class SeedCache {
     signal?: AbortSignal,
     viewMode: ViewMode = "auto",
   ): Promise<{ key: string; path: string }> {
-    const identity = canonicalJson(acquisitionIdentity(source));
-    const key = hash(viewMode === "reflink-only" ? `${identity}\0reflink-only` : identity);
+    const key = protectedCheckoutKey(source, viewMode);
     const path = join(this.root, "checkouts", key, "tree");
     return this.lockAcquisition(
       join(this.root, "locks", "admission"),

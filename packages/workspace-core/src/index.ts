@@ -20,7 +20,7 @@ import {
   processIdentity,
   removeTree,
 } from "./fs.js";
-import { initializeCacheRoot, SeedCache } from "./seed-cache.js";
+import { initializeCacheRoot, protectedCheckoutKey, SeedCache } from "./seed-cache.js";
 import { resolveSources } from "./sources/index.js";
 import type {
   Ownership,
@@ -187,9 +187,7 @@ export class WorkspaceManager {
         contained(path, dest);
         await mkdir(dirname(dest), { recursive: true, mode: 0o700 });
         if (source.permissions === "read-only") {
-          const key = await import("./seed-cache.js").then((m) =>
-            import("./fs.js").then((f) => f.hash(canonicalJson(m.acquisitionIdentity(source)))),
-          );
+          const key = protectedCheckoutKey(source, this.spec.viewMode);
           const view: SourceView = {
             destination: source.destination,
             adapter: "read-only",
