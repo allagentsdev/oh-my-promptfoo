@@ -65,6 +65,12 @@ Subscribe to Node's `diagnostics_channel` named `allagents.workspace.progress` i
 
 Phases: `case-start`, `seed-start`, `seed-cache-hit`, `source-start`, `git-fetch-start`, `git-fetch-finished`, `source-finished`, `seed-ready`, `protected-copy-start`, `protected-copy-finished`, `workspace-ready`, `agent-start`, `agent-finished`, `case-finished`. `git-fetch-*` covers the single pinned-commit HTTPS fetch, without cloning the unrelated default branch; `source-*` covers actual materialization, not ref resolution. A cached seed emits `seed-cache-hit` and `seed-ready` without source events. `protected-copy-*` appears only when a new protected checkout requires a physical copy; cache reuse and successful reflinks omit it. A failing phase may have no matching finish, but each started provider case ends with `case-finished` and `outcome: \"error\"`. A native agent error marks both `agent-finished` and `case-finished` as errors. Event objects carry no timings; subscribers can record elapsed time locally. This channel is separate from `allagents.workspace.preparation`; its `{ phase, elapsedMs }` timing schema remains unchanged, with remote acquisition now reporting `git-init` and `git-fetch` instead of `git-clone`.
 
+The existing preparation timing channel also emits fixed `checkout-admission`,
+`checkout-copy-and-protect`, `checkout-inventory`, `checkout-stage-stamp`,
+`checkout-published-stamp`, `checkout-reuse-stamp`, and `checkout-verify-stamp`
+phases with elapsed milliseconds. These identify full-tree work without
+source identities; subscribing does not add copies or verification passes.
+
 ## Workspace lifetime
 
 Workspaces remain live through synchronous/asynchronous assertions. `Provider.cleanup()` closes calls, stops active process groups, removes private views, then releases leases. Promptfoo 0.122 does not guarantee cleanup on every CLI/Node path. Paths are transient and may survive until later dead-owner recovery or runner disposal. There is no cleanup timer. Call `cleanup()` explicitly when using providers directly. Dead-owner recovery uses process start identity and never removes live or unmarked roots; an unknown mount or legacy OverlayFS recovery record fails closed and retains leases for manual cleanup.

@@ -473,7 +473,11 @@ export class SeedCache {
                 stamp: string;
                 invalid?: boolean;
               }>(metadataPath, MAX_INVENTORY_JSON_BYTES);
-              if (metadata.invalid || (await treeStamp(path)) !== metadata.stamp) {
+              if (
+                metadata.invalid ||
+                (await measuredPhase("checkout-reuse-stamp", () => treeStamp(path))) !==
+                  metadata.stamp
+              ) {
                 await this.writeMetadata(
                   metadataPath,
                   { ...metadata, invalid: true },
@@ -486,12 +490,14 @@ export class SeedCache {
               }
             } else {
               const seedSource = join(this.seedPath(record.digest), source.destination);
-              await this.admit(
-                (await conservativeCopyBytes(seedSource)) * 1.1 +
-                  MAX_INVENTORY_JSON_BYTES +
-                  1024 ** 2,
-                record.digest,
-                key,
+              await measuredPhase("checkout-admission", async () =>
+                this.admit(
+                  (await conservativeCopyBytes(seedSource)) * 1.1 +
+                    MAX_INVENTORY_JSON_BYTES +
+                    1024 ** 2,
+                  record.digest,
+                  key,
+                ),
               );
               const stage = join(this.root, "staging", randomUUID());
               await mkdir(stage, { mode: 0o700 });
@@ -502,13 +508,15 @@ export class SeedCache {
                 identity: await processIdentity(),
               });
               try {
-                await prepareProtectedCopy(
-                  seedSource,
-                  join(stage, "tree"),
-                  viewMode,
-                  caseIndex,
-                  sourceIndex,
-                  sourceCount,
+                await measuredPhase("checkout-copy-and-protect", () =>
+                  prepareProtectedCopy(
+                    seedSource,
+                    join(stage, "tree"),
+                    viewMode,
+                    caseIndex,
+                    sourceIndex,
+                    sourceCount,
+                  ),
                 );
                 await this.writeMetadata(
                   join(stage, "metadata.json"),
@@ -516,8 +524,12 @@ export class SeedCache {
                     schemaVersion: 1,
                     package: PACKAGE,
                     digest: record.digest,
-                    inventory: await inventory(join(stage, "tree")),
-                    stamp: await treeStamp(join(stage, "tree")),
+                    inventory: await measuredPhase("checkout-inventory", () =>
+                      inventory(join(stage, "tree")),
+                    ),
+                    stamp: await measuredPhase("checkout-stage-stamp", () =>
+                      treeStamp(join(stage, "tree")),
+                    ),
                     createdAt: Date.now(),
                     lastUsed: Date.now(),
                   },
@@ -534,7 +546,10 @@ export class SeedCache {
                 );
                 await this.writeMetadata(
                   metadataPath,
-                  { ...published, stamp: await treeStamp(path) },
+                  {
+                    ...published,
+                    stamp: await measuredPhase("checkout-published-stamp", () => treeStamp(path)),
+                  },
                   record.digest,
                   key,
                 );
@@ -581,7 +596,9 @@ export class SeedCache {
       await this.lockAcquisition(this.digestLock(metadata.digest), async () => {
         if (
           metadata.invalid ||
-          (await treeStamp(join(this.root, "checkouts", key, "tree"))) !== metadata.stamp
+          (await measuredPhase("checkout-verify-stamp", () =>
+            treeStamp(join(this.root, "checkouts", key, "tree")),
+          )) !== metadata.stamp
         ) {
           await this.writeMetadata(
             metadataPath,
