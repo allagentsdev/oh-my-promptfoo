@@ -19,9 +19,11 @@ export type OciSource = {
   permissions?: "all" | "read-only";
 } & ({ digest: `sha256:${string}`; tag?: never } | { tag: string; digest?: never });
 export type WorkspaceSource = GitSource | OciSource;
+export type ViewMode = "auto" | "reflink-only";
 export interface WorkspaceSpec {
   sources: WorkspaceSource[];
   limits?: Partial<SourceLimits>;
+  viewMode?: ViewMode;
 }
 export type ResolvedSource =
   | (GitSource & { commit: string; materializerVersion?: number })

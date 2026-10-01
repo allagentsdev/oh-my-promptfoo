@@ -114,7 +114,12 @@ export class WorkspaceManager {
       undefined,
       this.acquisitionLockTimeoutMs,
     );
-    this.factory = new CheckoutFactory(this.root, this.cache.root, this.acquisitionLockTimeoutMs);
+    this.factory = new CheckoutFactory(
+      this.root,
+      this.cache.root,
+      this.acquisitionLockTimeoutMs,
+      this.spec.viewMode,
+    );
     try {
       const report = await this.cache.prune();
       if (report.errors.length)
@@ -194,7 +199,12 @@ export class WorkspaceManager {
           };
           record.views.push(view);
           await this.save(record);
-          const prepared = await this.cache.protectedSource(record, source, combined);
+          const prepared = await this.cache.protectedSource(
+            record,
+            source,
+            combined,
+            this.spec.viewMode,
+          );
           await symlink(prepared.path, dest);
         } else {
           const seedSource = join(this.cache.seedPath(record.digest), source.destination);

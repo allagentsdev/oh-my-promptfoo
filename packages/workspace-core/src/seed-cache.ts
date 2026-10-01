@@ -39,6 +39,7 @@ import type {
   RuntimeChannels,
   SeedMetadata,
   SourceLimits,
+  ViewMode,
 } from "./types.js";
 export const CACHE_CEILING = 50 * 1024 ** 3;
 export const CACHE_MAX_AGE = 30 * 24 * 60 * 60 * 1000;
@@ -438,8 +439,10 @@ export class SeedCache {
     record: RecoveryRecord,
     source: ResolvedSource,
     signal?: AbortSignal,
+    viewMode: ViewMode = "auto",
   ): Promise<{ key: string; path: string }> {
-    const key = hash(canonicalJson(acquisitionIdentity(source)));
+    const identity = canonicalJson(acquisitionIdentity(source));
+    const key = hash(viewMode === "reflink-only" ? `${identity}\0reflink-only` : identity);
     const path = join(this.root, "checkouts", key, "tree");
     return this.lockAcquisition(
       join(this.root, "locks", "admission"),
@@ -485,7 +488,7 @@ export class SeedCache {
                 identity: await processIdentity(),
               });
               try {
-                await prepareProtectedCopy(seedSource, join(stage, "tree"));
+                await prepareProtectedCopy(seedSource, join(stage, "tree"), viewMode);
                 await this.writeMetadata(
                   join(stage, "metadata.json"),
                   {

@@ -26,7 +26,7 @@ import {
   removeTree,
 } from "./fs.js";
 import { helperAvailable, helperInvoke } from "./helper.js";
-import type { AdapterKind, SourceView } from "./types.js";
+import type { AdapterKind, SourceView, ViewMode } from "./types.js";
 
 const HEADROOM = 256 * 1024 ** 2;
 function overlaySource(mount: string, lower: string, upper: string, work: string): string {
@@ -140,6 +140,7 @@ export class CheckoutFactory {
     private runtime: string,
     private cache: string,
     private acquisitionLockTimeoutMs = DEFAULT_LOCK_TIMEOUT_MS,
+    private viewMode: ViewMode = "auto",
   ) {}
   async selected(
     seedSource: string,
@@ -160,7 +161,7 @@ export class CheckoutFactory {
     const probeView: SourceView = {
       probe: true,
       destination,
-      adapter: "overlay",
+      adapter: this.viewMode === "reflink-only" ? "reflink" : "overlay",
       seedSource,
       path: join(state, "mount"),
       statePath: state,
@@ -199,6 +200,12 @@ export class CheckoutFactory {
     } catch {
       await removeTree(join(state, "a"));
       await removeTree(join(state, "b"));
+    }
+    if (this.viewMode === "reflink-only") {
+      await removeTree(state);
+      throw new Error(
+        "Reflink-only workspace requires verified reflink support for its source and runtime filesystem",
+      );
     }
     if (process.platform === "linux") {
       const stateB = join(stateRoot, `probe-${randomUUID()}`);
@@ -284,6 +291,8 @@ export class CheckoutFactory {
     return "copy";
   }
   async create(view: SourceView, gitSource = false): Promise<void> {
+    if (this.viewMode === "reflink-only" && view.adapter !== "reflink")
+      throw new Error("Reflink-only workspace refuses overlay and full-copy views");
     contained(this.runtime, view.path);
     await mkdir(dirname(view.path), { recursive: true, mode: 0o700 });
     if (view.adapter === "overlay") {
@@ -325,11 +334,22 @@ export class CheckoutFactory {
     else await operation();
   }
 }
-export async function prepareProtectedCopy(source: string, path: string): Promise<void> {
+export async function prepareProtectedCopy(
+  source: string,
+  path: string,
+  viewMode: ViewMode = "auto",
+): Promise<void> {
   try {
     await copyTree(source, path, true);
-  } catch {
+  } catch (error) {
     await removeTree(path);
+    if (viewMode === "reflink-only")
+      throw new Error(
+        "Reflink-only workspace requires reflink support for protected read-only sources",
+        {
+          cause: error,
+        },
+      );
     await copyTree(source, path, false);
   }
   await protect(path, false);

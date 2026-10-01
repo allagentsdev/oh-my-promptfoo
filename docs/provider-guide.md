@@ -19,6 +19,7 @@ Provider config is closed: only `delegate`, `workspace`, `fileChanges`, and `tim
 | `delegate.env` | No | Passes only the named environment values to the agent |
 | `workspace.sources` | Yes | Lists Git or OCI inputs; `[]` starts with an empty workspace |
 | `workspace.limits` | No | Narrows source count, download/extraction bytes, or acquisition timeout |
+| `workspace.viewMode` | No | `auto` (default) or `reflink-only`; the latter refuses OverlayFS and full-copy views, including protected read-only sources |
 | `fileChanges` | No | Captures bounded after-bytes and a diff; defaults to `false` |
 | `timeoutMs` | No | Limits the agent call |
 
@@ -31,13 +32,21 @@ Provider config is closed: only `delegate`, `workspace`, `fileChanges`, and `tim
 
 Use `permissions: read-only` for a protected source checkout. The default, `permissions: all`, creates a private writable source view. See the [source-permissions example](../examples/source-permissions/promptfooconfig.yaml) for labeled providers that run tests against both policies.
 
-Git sources accept credential-free HTTPS or `file://` repositories and a ref; responses record the resolved commit. Submodules and escaping links are rejected. HTTPS uses noninteractive askpass and a physically bounded staging filesystem; the [Linux helper](operations/linux-helper.md) is required when an unprivileged bounded mount is unavailable. With that helper, a local repository with a self-contained object store uses a size-capped shared clone and native checkout, repacks only the pinned commit's reachable objects into an independent Git store, then makes a capacity-checked copy into the immutable seed. Other local repositories use a bounded native clone or object streaming. No path changes the source repository.
+Git sources accept credential-free HTTPS or `file://` repositories and a ref; responses record the resolved commit. Submodules and escaping links are rejected. HTTPS uses noninteractive askpass and a physically bounded staging filesystem. A trusted runner can supply a private directory on an already-mounted, byte- and inode-bounded tmpfs via `ALLAGENTS_GIT_STAGING_ROOT`; the provider verifies the mount and physical capacity before starting Git, without sudo or unmounting it. Otherwise the [Linux helper](operations/linux-helper.md) provides bounded temporary mounts. With the helper, a local repository with a self-contained object store uses a size-capped shared clone and native checkout, repacks only the pinned commit's reachable objects into an independent Git store, then makes a capacity-checked copy into the immutable seed. Other local repositories use a bounded native clone or object streaming. No path changes the source repository.
 
 OCI sources have `type: oci`, `repository`, exactly one of `tag` or `digest`, and a `destination`. Supported manifests contain uncompressed regular files with unique `org.opencontainers.image.title` paths and SHA-256 descriptors. Descriptor limits are checked before blobs; actual streamed bytes and digests are checked before publication. Archives, compressed layers, special files, and escaping paths fail explicitly.
 
 Destinations must be relative, normalized, nonempty, nonoverlapping paths. A read-only source links a separate protected checkout into each private writable workspace. Matching rows can share protected source contents; scratch and generated files outside the source remain private. A row can unlink or replace its destination link without changing other rows. Modes are a cooperative guardrail; same-user processes can deliberately bypass modes. Unexpected protected-content mutation invalidates reuse. The immutable seed is never the delegate workspace.
 
 Select source policy with labeled providers and `defaultTest.providers` / `tests[].providers`; without a filter, a test runs against every configured provider. There is no workspace-wide permissions setting. Native sandbox settings apply to the whole workspace.
+
+### Unprivileged copy-on-write runners
+
+Set `workspace.viewMode: reflink-only` and `ALLAGENTS_NO_PRIVILEGED_HELPER=1` in the provider process. Every writable view and protected read-only checkout must pass a real `COPYFILE_FICLONE_FORCE` isolation probe; otherwise the call fails instead of trying OverlayFS, sudo, or a full copy. Keep the seed cache and runtime roots on compatible reflink-capable filesystems. `ALLAGENTS_NO_PRIVILEGED_HELPER=1` also forbids the legacy mount helper during acquisition and cleanup.
+
+For HTTPS Git, the runner image must provide a private `0700` directory owned by the runner inside a pre-mounted tmpfs, named by `ALLAGENTS_GIT_STAGING_ROOT`. It must be outside the seed cache: cache staging is renamed into the published seed on the same disk filesystem. The package checks the containing mount, its total byte and inode capacities against the configured source download/extraction limits, free capacity, and path ownership before launching Git. Git and its descendants use only this tmpfs for their temporary HOME and TMPDIR; the package cleans its marked children but never mounts, unmounts, or runs sudo. The image must reserve enough memory and swap for the tmpfs. Provision and smoke-test the actual runner; neither an mtime check nor an ordinary file copy is copy-on-write.
+
+This opt-in path requires a trusted, single-job runner with no concurrent untrusted process under the runner UID and no untrusted process that can add mounts in its namespace during acquisition or cleanup. Mode `0700` excludes other users, not another process with the same UID: such a process could rename staging paths between verification and Git's writes, bypassing the physical bound. The package cannot establish this host-level isolation from a path check. Do not configure `ALLAGENTS_GIT_STAGING_ROOT` on a shared or adversarial same-UID host; leave HTTPS acquisition fail-closed without the privileged helper.
 
 ## File-change evidence
 
@@ -81,7 +90,7 @@ Both direct and workspace-backed Copilot responses report `metadata.skillCalls` 
 
 ## Filesystem behavior
 
-Writable views try verified reflink, provider-visible OverlayFS, then disk-admitted full copy. Copy allocates a full source per retained row; insufficient capacity fails before copying. Large-repository writable rollout requires verified copy-on-write on the target runner. A successful small copy fallback does not clear that gate. Linux administrators can install the narrowly scoped helper using the repository's `scripts/workspace-helper.py` and its installation documentation. The provider invokes only that fixed root-owned helper, never arbitrary sudo commands.
+In `auto` mode, writable views try verified reflink, provider-visible OverlayFS, then disk-admitted full copy. Copy allocates a full source per retained row; insufficient capacity fails before copying. Large-repository writable rollout requires verified copy-on-write on the target runner. `reflink-only` instead rejects both fallbacks and requires forced reflinks for protected read-only sources too. Linux administrators can install the narrowly scoped helper using the repository's `scripts/workspace-helper.py` and its installation documentation for legacy mode; the no-helper mode above never invokes it.
 
 On Windows, protected source trees use scoped NTFS ACLs, and writable views use verified reflinks where supported or a disk-admitted independent copy. Linux-only OverlayFS and tmpfs acquisition are not available; HTTPS Git requires capacity-bounded staging and fails closed without it. Workspace cache locks and process identity require the system Windows PowerShell executable.
 

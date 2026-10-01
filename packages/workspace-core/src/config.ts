@@ -9,6 +9,7 @@ export const DEFAULT_LIMITS: SourceLimits = {
 export const RUNTIME_CHANNELS = [
   "ALLAGENTS_GIT_USERNAME",
   "ALLAGENTS_GIT_TOKEN",
+  "ALLAGENTS_GIT_STAGING_ROOT",
   "ALLAGENTS_ORAS_PATH",
   "ALLAGENTS_ORAS_AUTH_FILE",
   "ALLAGENTS_WORKSPACE_ROOT",
@@ -49,8 +50,14 @@ export function destination(value: unknown): string {
 }
 export function validateWorkspace(value: unknown): WorkspaceSpec {
   const config = object(value, "workspace");
-  exactKeys(config, ["sources", "limits"], "workspace");
+  exactKeys(config, ["sources", "limits", "viewMode"], "workspace");
   if (!Array.isArray(config.sources)) throw new Error("workspace.sources must be an array");
+  if (
+    config.viewMode !== undefined &&
+    config.viewMode !== "auto" &&
+    config.viewMode !== "reflink-only"
+  )
+    throw new Error("workspace.viewMode must be auto or reflink-only");
   const limits = { ...DEFAULT_LIMITS };
   if (config.limits !== undefined) {
     const authored = object(config.limits, "workspace.limits");
@@ -144,7 +151,7 @@ export function validateWorkspace(value: unknown): WorkspaceSpec {
     }
     return { ...source, destination: dest, permissions: source.permissions ?? "all" };
   });
-  return { sources, limits } as WorkspaceSpec;
+  return { sources, limits, viewMode: config.viewMode ?? "auto" } as WorkspaceSpec;
 }
 export function canonicalJson(value: unknown): string {
   if (value === null || typeof value === "boolean" || typeof value === "string")

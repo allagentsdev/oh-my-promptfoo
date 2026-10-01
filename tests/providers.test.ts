@@ -151,6 +151,48 @@ describe("closed configuration", () => {
   });
 });
 describe("workspace provider publication and lifetime", () => {
+  test("provider refuses unsafe HTTPS staging instead of trying a privileged helper", async () => {
+    const root = await mkdtemp(join(realpathSync(tmpdir()), "allagents-provider-stage-"));
+    roots.push(root);
+    const staging = join(root, "not-tmpfs");
+    await mkdir(staging, { mode: 0o700 });
+    const prior = process.env.ALLAGENTS_NO_PRIVILEGED_HELPER;
+    process.env.ALLAGENTS_NO_PRIVILEGED_HELPER = "1";
+    let provider: Provider | undefined;
+    try {
+      provider = new Provider({
+        config: {
+          delegate: { id: "openai:codex-sdk" },
+          workspace: {
+            sources: [
+              {
+                type: "git",
+                repository: "https://github.com/octocat/Hello-World.git",
+                ref: "7fd1a60b01f91b314f59955a4e4d4e80d8edf11d",
+                destination: "project",
+              },
+            ],
+          },
+        },
+        env: {
+          ALLAGENTS_CACHE_ROOT: join(root, "cache"),
+          ALLAGENTS_WORKSPACE_ROOT: join(root, "runtime"),
+          ALLAGENTS_GIT_STAGING_ROOT: staging,
+        },
+      });
+      const result = await provider.callApi("no delegate should run");
+      expect(result.error).toMatch(
+        /Git staging (root must reside on a uniquely identified tmpfs mount|tmpfs byte\/inode capacity)/,
+      );
+    } finally {
+      try {
+        await provider?.cleanup();
+      } finally {
+        if (prior === undefined) delete process.env.ALLAGENTS_NO_PRIVILEGED_HELPER;
+        else process.env.ALLAGENTS_NO_PRIVILEGED_HELPER = prior;
+      }
+    }
+  });
   async function workspaceProvider(fileChanges = false) {
     const path = await project("promptfoo", native);
     const repository = join(path, "source");

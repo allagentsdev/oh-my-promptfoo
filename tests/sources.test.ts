@@ -9,6 +9,7 @@ import {
   readdir,
   readFile,
   rm,
+  statfs,
   symlink,
   writeFile,
 } from "node:fs/promises";
@@ -18,6 +19,7 @@ import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { DEFAULT_LIMITS } from "../packages/workspace-core/src/config.ts";
 import { atomicJson, PACKAGE, processIdentity } from "../packages/workspace-core/src/fs.ts";
+import { helperAvailable, helperInvoke } from "../packages/workspace-core/src/helper.ts";
 import {
   materializeSources,
   resolveSources,
@@ -28,6 +30,11 @@ import {
   runSource,
   withPrivateAcquisition,
 } from "../packages/workspace-core/src/sources/process.ts";
+import {
+  createGitStagingChild,
+  removeGitStagingChild,
+  verifyGitStagingRoot,
+} from "../packages/workspace-core/src/sources/unprivileged-staging.ts";
 import type { WorkspaceSpec } from "../packages/workspace-core/src/types.ts";
 
 const exec = promisify(execFile);
@@ -226,6 +233,129 @@ describe("bounded Git acquisition", () => {
     } finally {
       process.env.PATH = original;
     }
+  });
+  test("no-privileged-helper mode refuses helper invocation without spawning sudo", async () => {
+    const previous = process.env.ALLAGENTS_NO_PRIVILEGED_HELPER;
+    process.env.ALLAGENTS_NO_PRIVILEGED_HELPER = "1";
+    try {
+      expect(await helperAvailable()).toBe(false);
+      await expect(helperInvoke("acquire-tmpfs", ["/does-not-exist", "4096"])).rejects.toThrow(
+        "forbidden",
+      );
+    } finally {
+      if (previous === undefined) delete process.env.ALLAGENTS_NO_PRIVILEGED_HELPER;
+      else process.env.ALLAGENTS_NO_PRIVILEGED_HELPER = previous;
+    }
+  });
+  test("external Git staging rejects symlinks, non-tmpfs, and excessive physical capacity", async () => {
+    if (process.platform !== "linux") return;
+    const { root, staging } = await fixture();
+    await chmod(root, 0o700);
+    await expect(verifyGitStagingRoot(root, DEFAULT_LIMITS)).rejects.toThrow("tmpfs");
+    const linked = join(root, "linked");
+    await symlink(root, linked);
+    await expect(verifyGitStagingRoot(linked, DEFAULT_LIMITS)).rejects.toThrow("symlink");
+    const candidate = await mkdtemp("/dev/shm/allagents-bounded-test-");
+    roots.push(candidate);
+    await chmod(candidate, 0o700);
+    await expect(
+      verifyGitStagingRoot(candidate, { ...DEFAULT_LIMITS, maxDownloadBytes: 4096 }),
+    ).rejects.toThrow("exceeds source limits");
+    const separate = await temporary();
+    await chmod(separate, 0o700);
+    const sentinel = join(root, "git-started");
+    const bin = join(root, "bin");
+    await mkdir(bin);
+    await writeFile(join(bin, "git"), `#!/bin/sh\necho started > '${sentinel}'\nexit 1\n`, {
+      mode: 0o700,
+    });
+    const previousPath = process.env.PATH;
+    process.env.PATH = bin;
+    try {
+      await expect(
+        materializeSources(
+          [
+            {
+              type: "git",
+              repository: "https://example.invalid/repository",
+              ref: "main",
+              commit: "0".repeat(40),
+              destination: "project",
+            },
+          ],
+          staging,
+          DEFAULT_LIMITS,
+          { ALLAGENTS_GIT_STAGING_ROOT: separate },
+        ),
+      ).rejects.toThrow("tmpfs");
+      expect(await readdir(root)).not.toContain("git-started");
+    } finally {
+      process.env.PATH = previousPath;
+    }
+  });
+  test("pre-mounted private tmpfs stages a real Git clone without a privileged helper", async () => {
+    if (process.platform !== "linux") return;
+    const { spec, staging } = await fixture();
+    const mount = await statfs("/dev/shm", { bigint: true });
+    const total = Number(mount.blocks * mount.bsize);
+    if (!Number.isSafeInteger(total) || total > 100 * 1024 ** 3) return;
+    const candidate = await mkdtemp("/dev/shm/allagents-bounded-test-");
+    roots.push(candidate);
+    await chmod(candidate, 0o700);
+    const previous = process.env.ALLAGENTS_NO_PRIVILEGED_HELPER;
+    process.env.ALLAGENTS_NO_PRIVILEGED_HELPER = "1";
+    try {
+      const limits = {
+        ...DEFAULT_LIMITS,
+        maxDownloadBytes: Math.ceil(total / 2),
+        maxExtractedBytes: Math.ceil(total / 2),
+      };
+      const sources = await resolveSources(spec, {});
+      await materializeSources(sources, staging, limits, {
+        ALLAGENTS_GIT_STAGING_ROOT: candidate,
+      });
+      expect(await readFile(join(staging, "project", "hello.txt"), "utf8")).toBe("hello\n");
+      expect(await readdir(candidate)).toEqual([]);
+      expect(await readdir(staging)).toEqual(["project"]);
+    } finally {
+      if (previous === undefined) delete process.env.ALLAGENTS_NO_PRIVILEGED_HELPER;
+      else process.env.ALLAGENTS_NO_PRIVILEGED_HELPER = previous;
+    }
+  });
+  test("staging reaper removes only dead marked children, preserving live and unmarked children", async () => {
+    if (process.platform !== "linux") return;
+    const root = await mkdtemp("/dev/shm/allagents-bounded-test-");
+    roots.push(root);
+    await chmod(root, 0o700);
+    const fs = await statfs(root, { bigint: true });
+    const total = Number(fs.blocks * fs.bsize);
+    if (!Number.isSafeInteger(total) || total > 100 * 1024 ** 3) return;
+    const limits = {
+      ...DEFAULT_LIMITS,
+      maxDownloadBytes: Math.ceil(total / 2),
+      maxExtractedBytes: Math.ceil(total / 2),
+    };
+    const dead = join(root, "allagents-bounded-git-00000000-0000-0000-0000-000000000001");
+    const live = join(root, "allagents-bounded-git-00000000-0000-0000-0000-000000000002");
+    const unmarked = join(root, "allagents-bounded-git-00000000-0000-0000-0000-000000000003");
+    for (const child of [dead, live, unmarked]) await mkdir(child, { mode: 0o700 });
+    const identity = await processIdentity();
+    for (const child of [dead, live])
+      await atomicJson(join(child, ".allagents-owner.json"), {
+        schemaVersion: 1,
+        package: PACKAGE,
+        kind: "bounded-git-acquisition",
+        path: child,
+        identity: child === dead ? { ...identity, boot: "previous-boot" } : identity,
+      });
+    const current = join(root, "allagents-bounded-git-00000000-0000-0000-0000-000000000004");
+    await createGitStagingChild(root, limits, current);
+    expect((await readdir(root)).sort()).toEqual([
+      "allagents-bounded-git-00000000-0000-0000-0000-000000000002",
+      "allagents-bounded-git-00000000-0000-0000-0000-000000000003",
+      "allagents-bounded-git-00000000-0000-0000-0000-000000000004",
+    ]);
+    await removeGitStagingChild(root, current);
   });
 });
 
