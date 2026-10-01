@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.1](https://github.com/allagentsdev/promptfoo-integration/compare/v1.2.0...v1.2.1) (2026-10-01)
+
+
+### Bug Fixes
+
+* **workspace:** reuse bounded tmpfs across Git sources ([#24](https://github.com/allagentsdev/promptfoo-integration/issues/24)) ([da1faa1](https://github.com/allagentsdev/promptfoo-integration/commit/da1faa1242246d09d843c7fcee91189a67116b53))
+
 ## [1.2.0](https://github.com/allagentsdev/promptfoo-integration/compare/v1.1.0...v1.2.0) (2026-10-01)
 
 
