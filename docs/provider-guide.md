@@ -63,6 +63,11 @@ The runner atomically publishes `manifest.json` only after preparing its sources
 
 With this channel set, the provider links each matching prepared checkout directly into each private row; it neither fetches that source nor copies it through the seed cache. Writable HTTPS Git and OCI sources are refused rather than fetched; local Git sources still follow ordinary acquisition and private-copy rules, with separate cache identity. Before delegate execution it checks Git HEAD, cleanliness and a full metadata tree stamp (including no writable files or directories on POSIX); after execution it checks again against that row's baseline. A failed check rejects the row and invalidates reuse in that manager, even if the delegate returns successfully. The root remains external and untouched by workspace cleanup and abandoned-record recovery. Without the channel, the normal bounded acquisition and protected-checkout behavior is unchanged. Read-only modes are cooperative against the same UID, not an isolation boundary: restrict the runner to a trusted job and dispose of the external root after its lifetime.
 
+Tree stamps fetch up to 64 sibling inode records concurrently, then hash them
+in the same depth-first order as earlier releases. Existing protected checkout
+stamps remain valid. This is still a full-tree metadata check, not a Git HEAD
+comparison.
+
 ## File-change evidence
 
 `fileChanges: true` captures generated/modified after-bytes as base64, SHA-256 hashes, executable modes, symlink target bytes, deleted paths, and a text diff. Renames are delete plus add. Capture uses an immutable baseline; agent commits, staging, replacement refs, and changed ignore rules cannot redefine it. Disabled capture does no baseline work and omits the key. Results are `complete`, `truncated` with explicit codes/omitted paths, or `failed` with no partial data. Fixed bounds: 90 seconds, 10,000 candidates, 2,000 files, 256 KiB/file, 4 MiB total bytes, 1 MiB diff, 4 MiB subprocess output, 1,000 omitted paths, and 8 MiB serialized metadata. Capture failure preserves a valid agent response.
