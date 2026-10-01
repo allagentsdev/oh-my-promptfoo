@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.4.1](https://github.com/allagentsdev/promptfoo-integration/compare/v1.4.0...v1.4.1) (2026-10-01)
+
+
+### Performance Improvements
+
+* parallelize protected tree stamp metadata reads ([#38](https://github.com/allagentsdev/promptfoo-integration/issues/38)) ([ef83c71](https://github.com/allagentsdev/promptfoo-integration/commit/ef83c71e58280d5171bee30e12c5f8e59a504c3d))
+
 ## [1.4.0](https://github.com/allagentsdev/promptfoo-integration/compare/v1.3.4...v1.4.0) (2026-10-01)
 
 
