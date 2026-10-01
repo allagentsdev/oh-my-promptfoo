@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.2.0](https://github.com/allagentsdev/promptfoo-integration/compare/v1.1.0...v1.2.0) (2026-10-01)
+
+
+### Features
+
+* **workspace:** remove OverlayFS and add copy-only mode ([#22](https://github.com/allagentsdev/promptfoo-integration/issues/22)) ([fc1f8e0](https://github.com/allagentsdev/promptfoo-integration/commit/fc1f8e0c36e3e8ef815d763da6fffac94294fb0f))
+
+Linux workspaces no longer mount OverlayFS. The default tries unprivileged
+reflinks, then admits a full copy only when disk space suffices; a large
+writable workspace that previously required OverlayFS may now fail admission.
+`copy-only` always uses independent copies and may increase peak disk use.
+
 ## [1.1.0](https://github.com/allagentsdev/promptfoo-integration/compare/v1.0.1...v1.1.0) (2026-09-30)
 
 
