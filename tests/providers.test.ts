@@ -43,7 +43,7 @@ async function project(moduleName: string, source: string): Promise<string> {
   await writeFile(join(dir, "index.js"), source);
   return path;
 }
-const native = `import {writeFile} from 'node:fs/promises';
+const native = `import {chmod,writeFile} from 'node:fs/promises';
 import {writeSync} from 'node:fs';
 export async function loadApiProvider(id, options) {
  return {async callApi(prompt,context,callOptions){
@@ -51,6 +51,7 @@ export async function loadApiProvider(id, options) {
   if(prompt==='unknown-frame')writeSync(1,JSON.stringify({version:1,type:'unsupported'})+'\\n');
   if(prompt==='duplicate')writeSync(1,JSON.stringify({version:1,type:'result',response:{output:'premature'}})+'\\n');
   if(prompt==='write')await writeFile(options.options.config.working_dir+'/generated.txt','generated durable content');
+  if(prompt==='tamper-protected'){const file=options.options.config.working_dir+'/repo/input.txt';await chmod(file,0o644);await writeFile(file,'modified protected source');}
   if(prompt==='sleep'){await new Promise(()=>{});}
   if(prompt==='large') return {output:'x'.repeat(17000000)};
   if(prompt==='cache') return {output:'old',cached:true};
@@ -325,6 +326,22 @@ describe("workspace provider publication and lifetime", () => {
       await provider.cleanup();
     }
   }, 15_000);
+  // POSIX owners can change a protected file's mode; Windows ACLs deny that mutation.
+  const onPosix = process.platform === "win32" ? test.skip : test;
+  onPosix(
+    "provider rejects protected checkout mutations made by a delegate",
+    async () => {
+      const { provider } = await workspaceProvider(false, true);
+      try {
+        const result = await provider.callApi("tamper-protected");
+        expect(result.error).toMatch(/Protected source checkout mutated/);
+        expect(result.output).toBeUndefined();
+      } finally {
+        await provider.cleanup();
+      }
+    },
+    15_000,
+  );
   test("parallel rows remain assertion-accessible with distinct writable workspace paths", async () => {
     const { provider } = await workspaceProvider();
     try {
