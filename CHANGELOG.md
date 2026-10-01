@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.0](https://github.com/allagentsdev/promptfoo-integration/compare/v1.2.1...v1.3.0) (2026-10-01)
+
+
+### Features
+
+* emit privacy-safe workspace eval progress milestones ([#26](https://github.com/allagentsdev/promptfoo-integration/issues/26)) ([1588641](https://github.com/allagentsdev/promptfoo-integration/commit/1588641349cab57c595c6c3711c66cc0a33375a1))
+
 ## [1.2.1](https://github.com/allagentsdev/promptfoo-integration/compare/v1.2.0...v1.2.1) (2026-10-01)
 
 
