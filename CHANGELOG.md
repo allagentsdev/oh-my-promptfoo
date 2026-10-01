@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.4.0](https://github.com/allagentsdev/promptfoo-integration/compare/v1.3.4...v1.4.0) (2026-10-01)
+
+
+### Features
+
+* consume trusted pinned Git views without rebuilding seed ([#36](https://github.com/allagentsdev/promptfoo-integration/issues/36)) ([35d4210](https://github.com/allagentsdev/promptfoo-integration/commit/35d42104344e8fa3f272ccf9e5ca9b4f8fd9297c))
+
 ## [1.3.4](https://github.com/allagentsdev/promptfoo-integration/compare/v1.3.3...v1.3.4) (2026-10-01)
 
 
