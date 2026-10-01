@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import type { Stats } from "node:fs";
 import {
   chmod,
   lstat,
@@ -604,8 +605,8 @@ export async function conservativeCopyBytes(root: string): Promise<number> {
 }
 export async function treeStamp(root: string, requireReadOnly = false): Promise<string> {
   const hash = createHash("sha256");
-  async function visit(path: string): Promise<void> {
-    const info = await lstat(path);
+  async function visit(path: string, known?: Stats): Promise<void> {
+    const info = known ?? (await lstat(path));
     if (
       requireReadOnly &&
       process.platform !== "win32" &&
@@ -623,9 +624,18 @@ export async function treeStamp(root: string, requireReadOnly = false): Promise<
         info.ctimeMs,
       ]),
     );
-    if (info.isDirectory())
-      for (const name of (await readdir(path)).sort()) await visit(join(path, name));
-    else if (info.isSymbolicLink()) {
+    if (info.isDirectory()) {
+      const names = (await readdir(path)).sort();
+      for (let offset = 0; offset < names.length; offset += 64) {
+        const batch: Promise<readonly [string, Stats]>[] = [];
+        for (let i = offset; i < Math.min(offset + 64, names.length); i++) {
+          const child = join(path, names[i]);
+          batch.push(lstat(child).then((stat) => [child, stat] as const));
+        }
+        // Fetch sibling metadata concurrently, then hash in the original depth-first order.
+        for (const [child, stat] of await Promise.all(batch)) await visit(child, stat);
+      }
+    } else if (info.isSymbolicLink()) {
       const target = await readlink(path);
       if (requireReadOnly) {
         const resolved = resolve(dirname(path), target);

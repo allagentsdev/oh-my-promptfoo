@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { execFileSync, spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { realpathSync } from "node:fs";
 import {
   chmod,
@@ -15,7 +16,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { basename, dirname, join, sep } from "node:path";
+import { basename, dirname, join, relative, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import { withLock } from "../packages/workspace-core/src/cache-lock.ts";
 import { CheckoutFactory } from "../packages/workspace-core/src/checkout.ts";
@@ -32,6 +33,7 @@ import {
   processIdentity,
   protect,
   removeTree,
+  treeStamp,
 } from "../packages/workspace-core/src/fs.ts";
 import {
   manifestDigest,
@@ -646,6 +648,43 @@ describe("workspace lifecycle", () => {
     await atomicJson(path, { ...metadata, lastUsed: Date.now() - 2 * 60 * 60_000 });
     await owner.prepare();
     expect((await json<{ lastUsed: number }>(path)).lastUsed).toBeGreaterThan(Date.now() - 60_000);
+    await owner.cleanup();
+  }, 30_000);
+  test("protected checkout retains its prior stamp across bounded stat traversal", async () => {
+    const f = await fixture();
+    f.spec.sources[0].permissions = "read-only";
+    const owner = manager(f.spec, f.channels);
+    const first = await owner.prepare();
+    const shared = await readlink(join(first.path, "project"));
+    const legacy = createHash("sha256");
+    async function visit(path: string): Promise<void> {
+      const info = await lstat(path);
+      legacy.update(
+        JSON.stringify([
+          relative(shared, path),
+          info.ino,
+          info.mode,
+          info.size,
+          info.mtimeMs,
+          info.ctimeMs,
+        ]),
+      );
+      if (info.isDirectory())
+        for (const name of (await readdir(path)).sort()) await visit(join(path, name));
+      else if (info.isSymbolicLink()) legacy.update(await readlink(path));
+    }
+    await visit(shared);
+    const priorStamp = legacy.digest("hex");
+    expect(await treeStamp(shared)).toBe(priorStamp);
+    const metadataPath = join(dirname(shared), "metadata.json");
+    await atomicJson(metadataPath, {
+      ...(await json<Record<string, unknown>>(metadataPath)),
+      stamp: priorStamp,
+    });
+    const reused = await owner.prepare();
+    expect(await readFile(join(reused.path, "project", "source.txt"), "utf8")).toBe(
+      "immutable input\n",
+    );
     await owner.cleanup();
   }, 30_000);
   test("protected checkout mutation invalidates future reuse instead of resetting a live checkout", async () => {
