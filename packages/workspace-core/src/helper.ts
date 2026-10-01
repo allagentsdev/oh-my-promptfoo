@@ -2,7 +2,10 @@ import { execFile } from "node:child_process";
 import { lstat } from "node:fs/promises";
 
 const HELPER = "/usr/local/libexec/allagents-workspace-helper";
+const PRIVILEGED_HELPER_DISABLED =
+  "Privileged workspace helper is forbidden by ALLAGENTS_NO_PRIVILEGED_HELPER";
 export async function helperAvailable(): Promise<boolean> {
+  if (process.env.ALLAGENTS_NO_PRIVILEGED_HELPER === "1") return false;
   const stat = await lstat(HELPER).catch((error: NodeJS.ErrnoException) => {
     if (error.code === "ENOENT") return undefined;
     throw error;
@@ -10,17 +13,19 @@ export async function helperAvailable(): Promise<boolean> {
   if (!stat) return false;
   if (!stat.isFile() || stat.isSymbolicLink() || stat.uid !== 0 || stat.mode & 0o022)
     throw new Error(
-      "Root-owned allagents-workspace-helper is required for bounded tmpfs / OverlayFS; install scripts/workspace-helper.py with the documented exact sudo policy",
+      "Root-owned allagents-workspace-helper is required for bounded tmpfs; install scripts/workspace-helper.py with the documented exact sudo policy",
     );
   return true;
 }
 export async function helperInvoke(
-  verb: "acquire-tmpfs" | "release-tmpfs" | "mount-overlay" | "release-overlay",
+  verb: "acquire-tmpfs" | "release-tmpfs",
   args: string[],
 ): Promise<void> {
+  if (process.env.ALLAGENTS_NO_PRIVILEGED_HELPER === "1")
+    throw new Error(PRIVILEGED_HELPER_DISABLED);
   if (!(await helperAvailable()))
     throw new Error(
-      "Root-owned allagents-workspace-helper is required for bounded tmpfs / OverlayFS; install scripts/workspace-helper.py with the documented exact sudo policy",
+      "Root-owned allagents-workspace-helper is required for bounded tmpfs; install scripts/workspace-helper.py with the documented exact sudo policy",
     );
   await new Promise<void>((resolve, reject) => {
     execFile(

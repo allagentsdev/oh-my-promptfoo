@@ -22,6 +22,11 @@ import { atomicJson, isMounted, json, MARKER, PACKAGE, processIdentity } from ".
 import { helperAvailable, helperInvoke } from "../helper.ts";
 import type { GitSource, ResolvedSource, RuntimeChannels, SourceLimits } from "../types.ts";
 import { type PhysicalWriter, runSource, withPrivateAcquisition } from "./process.ts";
+import {
+  createGitStagingChild,
+  removeGitStagingChild,
+  verifyGitStagingRoot,
+} from "./unprivileged-staging.ts";
 
 type ResolvedGit = Extract<ResolvedSource, { type: "git" }>;
 const safeGitArgs = [
@@ -114,6 +119,8 @@ export async function resolveGit(
   channels: RuntimeChannels,
   signal?: AbortSignal,
 ): Promise<ResolvedGit> {
+  if (channels.ALLAGENTS_GIT_STAGING_ROOT === "")
+    throw new Error("Git staging root cannot be empty");
   return withPrivateAcquisition(channels, async (root, env) => {
     if (!gitUsesRemoteAcquisition(source.repository)) {
       const repository = fileURLToPath(source.repository);
@@ -467,7 +474,21 @@ async function materializeBoundedGit(
         throw error;
       },
     ));
-  const bounded = join(staging, `bounded-git-${randomUUID()}`);
+  const externalRoot = channels.ALLAGENTS_GIT_STAGING_ROOT;
+  const cacheRoot =
+    basename(staging) === "tree" && basename(dirname(dirname(staging))) === "staging"
+      ? dirname(dirname(dirname(staging)))
+      : dirname(staging);
+  if (
+    externalRoot &&
+    (externalRoot === cacheRoot ||
+      externalRoot.startsWith(`${cacheRoot}${sep}`) ||
+      cacheRoot.startsWith(`${externalRoot}${sep}`))
+  )
+    throw new Error("Git staging tmpfs must be outside cache");
+  const bounded = externalRoot
+    ? join(externalRoot, `allagents-bounded-git-${randomUUID()}`)
+    : join(staging, `bounded-git-${randomUUID()}`);
   const recoveryPath = join(staging, ".allagents-acquisition.json");
   const record = {
     schemaVersion: 1,
@@ -477,25 +498,38 @@ async function materializeBoundedGit(
     path: bounded,
     state: "pending",
   };
+  if (externalRoot) await verifyGitStagingRoot(externalRoot, limits);
   await atomicJson(recoveryPath, record);
-  await mkdir(bounded, { mode: 0o700 });
+  if (!externalRoot) await mkdir(bounded, { mode: 0o700 });
   let acquisitionError: unknown;
+  let childCreated = false;
   try {
-    // A kernel-enforced aggregate physical bound exists before any writing Git child launches.
-    await helperInvoke("acquire-tmpfs", [
-      bounded,
-      String(limits.maxDownloadBytes + limits.maxExtractedBytes),
-    ]);
+    if (externalRoot) {
+      childCreated = true;
+      await createGitStagingChild(externalRoot, limits, bounded);
+    } else {
+      // Legacy helper mode remains the default when no external root is configured.
+      await helperInvoke("acquire-tmpfs", [
+        bounded,
+        String(limits.maxDownloadBytes + limits.maxExtractedBytes),
+      ]);
+    }
     await atomicJson(recoveryPath, { ...record, state: "active" });
     return await withPrivateAcquisition(channels, async (root, env) => {
       const gitEnv = local ? env : await gitCredentials(root, env, channels);
+      const acquisition = record.path;
+      // Git and its descendants must never use the unbounded private /tmp home for scratch.
+      const boundedEnv = externalRoot
+        ? { ...gitEnv, HOME: acquisition, TMPDIR: acquisition }
+        : gitEnv;
       const options = {
-        env: gitEnv,
+        env: boundedEnv,
         channels,
         signal,
-        privatePaths: [root, bounded, ...(repository ? [repository] : [])],
+        privatePaths: [root, acquisition, ...(repository ? [repository] : [])],
       };
-      const checkout = join(bounded, "repository");
+      const checkout = join(acquisition, "repository");
+      if (externalRoot) await verifyGitStagingRoot(externalRoot, limits);
       await measuredGitPhase("git-clone", () =>
         runSource(
           "git",
@@ -643,9 +677,48 @@ async function materializeBoundedGit(
     acquisitionError = error;
     throw error;
   } finally {
-    // A helper may mount successfully and fail before its parent receives completion.
-    // The already-published record owns that mount, even while still pending.
-    await detachAcquisition(bounded, recoveryPath, acquisitionError);
+    if (externalRoot)
+      await detachExternalAcquisition(
+        externalRoot,
+        bounded,
+        recoveryPath,
+        childCreated,
+        acquisitionError,
+      );
+    else {
+      // A helper may mount successfully and fail before receiving completion.
+      await detachAcquisition(bounded, recoveryPath, acquisitionError);
+    }
+  }
+}
+
+async function detachExternalAcquisition(
+  root: string,
+  path: string,
+  recordPath: string,
+  created: boolean,
+  acquisitionError: unknown,
+): Promise<void> {
+  try {
+    if (
+      created &&
+      (await lstat(path).then(
+        () => true,
+        (error: NodeJS.ErrnoException) => {
+          if (error.code === "ENOENT") return false;
+          throw error;
+        },
+      ))
+    )
+      await removeGitStagingChild(root, path);
+    await rm(recordPath, { force: true });
+  } catch (error) {
+    if (acquisitionError)
+      throw new AggregateError(
+        [acquisitionError, error],
+        "Source acquisition and staging cleanup failed; recovery record retained",
+      );
+    throw error;
   }
 }
 
@@ -746,8 +819,10 @@ export async function materializeGit(
   writer: PhysicalWriter,
   signal?: AbortSignal,
 ): Promise<number> {
+  if (channels.ALLAGENTS_GIT_STAGING_ROOT === "")
+    throw new Error("Git staging root cannot be empty");
   const destination = resolve(staging, source.destination);
-  if (!gitUsesRemoteAcquisition(source.repository)) {
+  if (!channels.ALLAGENTS_GIT_STAGING_ROOT && !gitUsesRemoteAcquisition(source.repository)) {
     const stage = dirname(staging);
     const cache = dirname(dirname(stage));
     const packageStage =

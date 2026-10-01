@@ -7,6 +7,7 @@ import {
   type FileChanges,
 } from "../../workspace-core/src/file-changes.js";
 import {
+  RUNTIME_CHANNELS,
   type WorkspaceHandle,
   WorkspaceManager,
   type WorkspaceSpec,
@@ -102,15 +103,7 @@ export class Provider extends Calls {
     this.basePath = basePath;
     this.providerId = options.id ?? "allagents:workspace";
     const channels: Record<string, string | undefined> = {};
-    for (const key of [
-      "ALLAGENTS_GIT_USERNAME",
-      "ALLAGENTS_GIT_TOKEN",
-      "ALLAGENTS_ORAS_PATH",
-      "ALLAGENTS_ORAS_AUTH_FILE",
-      "ALLAGENTS_WORKSPACE_ROOT",
-      "ALLAGENTS_CACHE_ROOT",
-    ])
-      channels[key] = options.env?.[key] ?? process.env[key];
+    for (const key of RUNTIME_CHANNELS) channels[key] = options.env?.[key] ?? process.env[key];
     this.manager = new WorkspaceManager(
       this.config.workspace as unknown as WorkspaceSpec,
       channels,
