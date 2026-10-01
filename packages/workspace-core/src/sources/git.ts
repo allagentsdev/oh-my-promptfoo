@@ -538,24 +538,22 @@ async function materializeBoundedGit(
       const checkout = join(acquisition, "repository");
       if (externalRoot) await verifyGitStagingRoot(externalRoot, physicalLimits);
       if (!local) publishProgress("git-fetch-start", caseIndex, sourceIndex, sourceCount);
-      await measuredGitPhase("git-clone", () =>
-        runSource(
-          "git",
-          [
-            ...safeGitArgs,
-            "clone",
-            "--no-checkout",
-            ...(localShared
-              ? ["--shared"]
-              : ["--no-local", "--no-hardlinks", ...(local ? [] : ["--depth=1"])]),
-            "--",
-            localShared ? repository! : source.repository,
-            checkout,
-          ],
-          options,
-        ),
-      );
       if (local) {
+        await measuredGitPhase("git-clone", () =>
+          runSource(
+            "git",
+            [
+              ...safeGitArgs,
+              "clone",
+              "--no-checkout",
+              ...(localShared ? ["--shared"] : ["--no-local", "--no-hardlinks"]),
+              "--",
+              localShared ? repository! : source.repository,
+              checkout,
+            ],
+            options,
+          ),
+        );
         try {
           await runSource(
             "git",
@@ -570,19 +568,25 @@ async function materializeBoundedGit(
           );
         }
       } else {
-        await runSource(
-          "git",
-          [
-            ...safeGitArgs,
-            "-C",
-            checkout,
-            "fetch",
-            "--depth=1",
-            "--no-tags",
-            "origin",
-            source.commit,
-          ],
-          options,
+        // Cloning the default branch first downloads an unrelated history for a pinned commit.
+        await measuredGitPhase("git-init", () =>
+          runSource("git", [...safeGitArgs, "init", "--quiet", checkout], options),
+        );
+        await measuredGitPhase("git-fetch", () =>
+          runSource(
+            "git",
+            [
+              ...safeGitArgs,
+              "-C",
+              checkout,
+              "fetch",
+              "--depth=1",
+              "--no-tags",
+              source.repository,
+              source.commit,
+            ],
+            options,
+          ),
         );
       }
       if (!local) publishProgress("git-fetch-finished", caseIndex, sourceIndex, sourceCount, "ok");
