@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.2](https://github.com/allagentsdev/promptfoo-integration/compare/v1.3.1...v1.3.2) (2026-10-01)
+
+
+### Performance Improvements
+
+* fetch only pinned HTTPS Git commit ([#30](https://github.com/allagentsdev/promptfoo-integration/issues/30)) ([48ce619](https://github.com/allagentsdev/promptfoo-integration/commit/48ce619f1c158bb5270700d2b9f0799880241033))
+
 ## [1.3.1](https://github.com/allagentsdev/promptfoo-integration/compare/v1.3.0...v1.3.1) (2026-10-01)
 
 
