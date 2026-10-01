@@ -58,6 +58,9 @@ export interface SourceView {
   path: string;
   statePath?: string;
   checkoutKey?: string;
+  prebuiltRoot?: string;
+  prebuiltKey?: string;
+  prebuiltStamp?: string;
 }
 export interface RecoveryRecord {
   schemaVersion: 1;

@@ -15,7 +15,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { hostname } from "node:os";
-import { basename, dirname, join, relative, resolve, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { Ownership, ProcessIdentity, TreeEntry } from "./types.js";
 export const PACKAGE = "@allagents/promptfoo-integration" as const;
 export const MARKER = ".allagents-owner.json";
@@ -602,10 +602,17 @@ export async function conservativeCopyBytes(root: string): Promise<number> {
   } else if (info.isFile()) result += Math.ceil(info.size / 4096) * 4096;
   return result;
 }
-export async function treeStamp(root: string): Promise<string> {
+export async function treeStamp(root: string, requireReadOnly = false): Promise<string> {
   const hash = createHash("sha256");
   async function visit(path: string): Promise<void> {
     const info = await lstat(path);
+    if (
+      requireReadOnly &&
+      process.platform !== "win32" &&
+      !info.isSymbolicLink() &&
+      (info.mode & 0o222) !== 0
+    )
+      throw new Error("Prepared source checkout contains writable entries");
     hash.update(
       JSON.stringify([
         relative(root, path),
@@ -618,7 +625,22 @@ export async function treeStamp(root: string): Promise<string> {
     );
     if (info.isDirectory())
       for (const name of (await readdir(path)).sort()) await visit(join(path, name));
-    else if (info.isSymbolicLink()) hash.update(await readlink(path));
+    else if (info.isSymbolicLink()) {
+      const target = await readlink(path);
+      if (requireReadOnly) {
+        const resolved = resolve(dirname(path), target);
+        if (isAbsolute(target) || (resolved !== root && !resolved.startsWith(`${root}${sep}`)))
+          throw new Error("Prepared source symlink escapes checkout");
+        try {
+          const actual = await realpath(path);
+          if (actual !== root && !actual.startsWith(`${root}${sep}`))
+            throw new Error("Prepared source symlink escapes checkout");
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+        }
+      }
+      hash.update(target);
+    }
   }
   await visit(root);
   return hash.digest("hex");
