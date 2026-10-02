@@ -95,6 +95,10 @@ These events do not appear during pre-agent preparation. Each includes
 finished phase carries `outcome: "ok" | "error"`; a failing Git check does not
 start the stamp phase. The checks and mutation rejection are unchanged; the
 event pairs allow subscribers to time each step without exposing source identity.
+Distinct protected sources are checked concurrently, so their phase events
+may interleave. Each source still checks pinned HEAD and Git cleanliness
+before its full stamp, and the provider waits for every check to settle before
+returning success or reporting a mutation.
 
 The existing preparation timing channel also emits fixed `checkout-admission`,
 `checkout-copy-and-protect`, `checkout-inventory`, `checkout-stage-stamp`,

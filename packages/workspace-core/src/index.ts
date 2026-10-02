@@ -437,40 +437,50 @@ export class WorkspaceManager {
     if (ordinal !== undefined)
       for (const view of handle.adapters) if (view.prebuiltKey) sourceCount++;
     let sourceIndex = 0;
+    const checks: Promise<void>[] = [];
     for (const view of handle.adapters) {
-      if (view.checkoutKey) await this.cache.checkProtected(view.checkoutKey);
+      if (view.checkoutKey) checks.push(this.cache.checkProtected(view.checkoutKey));
       if (view.prebuiltKey) {
-        sourceIndex++;
-        const source = handle.sources.find((item) => item.destination === view.destination);
-        if (
-          !source ||
-          source.type !== "git" ||
-          preparedKey(source) !== view.prebuiltKey ||
-          !view.prebuiltRoot ||
-          this.channels.ALLAGENTS_PREBUILT_ROOT !== view.prebuiltRoot ||
-          !view.prebuiltStamp ||
-          this.invalidPrebuilt.has(view.prebuiltKey)
-        )
-          throw new Error("Prepared source identity mismatch");
-        try {
-          const prepared = await PreparedSources.open(
-            view.prebuiltRoot,
-            this.spec,
-            this.channels,
-            roots(this.channels).cache,
-            roots(this.channels).runtime,
-          );
-          await prepared.check(
-            source,
-            view.prebuiltStamp,
-            ordinal !== undefined ? { caseIndex: ordinal, sourceIndex, sourceCount } : undefined,
-          );
-        } catch (error) {
-          this.invalidPrebuilt.add(view.prebuiltKey);
-          throw error;
-        }
+        const viewSourceIndex = ++sourceIndex;
+        checks.push(
+          (async () => {
+            const source = handle.sources.find((item) => item.destination === view.destination);
+            if (
+              !source ||
+              source.type !== "git" ||
+              preparedKey(source) !== view.prebuiltKey ||
+              !view.prebuiltRoot ||
+              this.channels.ALLAGENTS_PREBUILT_ROOT !== view.prebuiltRoot ||
+              !view.prebuiltStamp ||
+              this.invalidPrebuilt.has(view.prebuiltKey)
+            )
+              throw new Error("Prepared source identity mismatch");
+            try {
+              const prepared = await PreparedSources.open(
+                view.prebuiltRoot,
+                this.spec,
+                this.channels,
+                roots(this.channels).cache,
+                roots(this.channels).runtime,
+              );
+              await prepared.check(
+                source,
+                view.prebuiltStamp,
+                ordinal !== undefined
+                  ? { caseIndex: ordinal, sourceIndex: viewSourceIndex, sourceCount }
+                  : undefined,
+              );
+            } catch (error) {
+              this.invalidPrebuilt.add(view.prebuiltKey);
+              throw error;
+            }
+          })(),
+        );
       }
     }
+    // Do not release a workspace while another protected checkout is still being verified.
+    const results = await Promise.allSettled(checks);
+    for (const result of results) if (result.status === "rejected") throw result.reason;
   }
   async release(handle: WorkspaceHandle): Promise<void> {
     await this.initialization;
