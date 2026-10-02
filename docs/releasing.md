@@ -2,11 +2,11 @@
 
 ## First release as oh-my-promptfoo
 
-`oh-my-promptfoo` is a new npm package. Version 1.6.0 is its first stable release. The Release Please workflow waits until it is published, so it does not treat a release of an earlier package name as the current release.
+`oh-my-promptfoo` is a new npm package. Version 1.6.0 is its first stable release. The Release Please workflow treats this package separately from releases under earlier names.
 
-After the rename is merged and validation passes, tag the reviewed main commit `v1.6.0` and create a draft GitHub release. From a clean checkout of that tag, install dependencies with `bun install --frozen-lockfile`, build, and run the packed-package and Promptfoo E2E checks. Sign in with `npm login --auth-type=web` and publish with `npm publish ./packages/oh-my-promptfoo --access public --tag latest --provenance=false`. Verify the installed registry package with `bun scripts/smoke-packed-package.ts --registry 1.6.0` and `bun scripts/e2e.ts --registry 1.6.0` before making the GitHub release public.
+The first release was tagged `v1.6.0` at reviewed main commit `50c5684` and published with `npm login --auth-type=web` and `npm publish ./packages/oh-my-promptfoo --access public --tag latest --provenance=false`. Packed-package checks, installed-registry consumers, and Promptfoo E2E passed before the GitHub release became public.
 
-Configure npm trusted publishing for the renamed repository before running later automated releases. Keep `@allagents/promptfoo-x` and `@allagents/promptfoo-integration` installable, and deprecate them with a message pointing to `oh-my-promptfoo` after registry verification succeeds.
+Trusted publishing is configured for the renamed repository's preview and stable workflows. Published versions of `@allagents/promptfoo-x` remain installable and are deprecated with a pointer to `oh-my-promptfoo`. `@allagents/promptfoo-integration` is no longer available from the npm registry.
 
 ## Later releases
 
@@ -18,6 +18,6 @@ After the initial stable release, Release Please prepares version and changelog 
 
 4. If publishing fails before npm accepts the package, the GitHub release remains draft. npm may accept a package before its version and dist-tag become queryable; the publisher waits up to five minutes for indexing rather than immediately treating that lag as a failure. Rerun `publish.yml` for the same stable tag after a transient failure: an already-published version is verified, never republished. If registry consumer checks expose a real defect after npm acceptance, that version is immutable; fix it on `main` and publish a corrective version. Rerun `release-please.yml` only if dispatch itself failed.
 
-Configure npm trusted publishers for organization `allagentsdev`, repository `oh-my-promptfoo`, GitHub environment `npm`: `release-please.yml` publishes `next` previews and `publish.yml` publishes stable `latest`, each with direct `npm publish` allowed. Both jobs need `id-token: write` and npm 11.6.2; no npm token is stored in GitHub. See [npm's trusted-publishing setup](https://docs.npmjs.com/trusted-publishers/).
+npm trusted publishers for organization `allagentsdev`, repository `oh-my-promptfoo`, GitHub environment `npm` are configured for `release-please.yml` (`next` previews) and `publish.yml` (stable `latest`), each with direct `npm publish` allowed. Both jobs need `id-token: write` and npm 11.6.2; no npm token is stored in GitHub. See [npm's trusted-publishing setup](https://docs.npmjs.com/trusted-publishers/).
 
 The initial `1.0.0-rc.1` was published manually without provenance. `1.0.0` was the first stable OIDC release from commit `e10a9d3`; an immediate npm indexing read failed, and the successful rerun verified the accepted package without republishing. `1.0.1-next.11` became the first automatic `next` preview, and merging Release Please PR #13 published `1.0.1` under `latest` from its reviewed merge commit. Those three OIDC-published versions have signed provenance; the manual `rc.1` does not. Published version bytes and metadata cannot be changed retroactively.
