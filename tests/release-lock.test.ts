@@ -20,7 +20,7 @@ test("release lock sync updates only the public workspace without running projec
     await writeFile(join(root, "package.json"), JSON.stringify({ version: "1.1.0" }));
     await writeFile(
       join(root, "packages", "oh-my-promptfoo", "package.json"),
-      JSON.stringify({ name: "@allagents/oh-my-promptfoo", version: "1.1.0" }),
+      JSON.stringify({ name: "oh-my-promptfoo", version: "1.1.0" }),
     );
     const lockPath = join(root, "bun.lock");
     await writeFile(
@@ -28,7 +28,7 @@ test("release lock sync updates only the public workspace without running projec
       `{
   "workspaces": {
     "packages/oh-my-promptfoo": {
-      "name": "@allagents/oh-my-promptfoo",
+      "name": "oh-my-promptfoo",
       "version": "1.0.0",
     },
     "packages/workspace-core": {

@@ -86,7 +86,7 @@ The Promptfoo row trace containing delegated agent activity. It carries normaliz
 
 ## Integration
 
-A versioned Promptfoo-facing package maintained in this repository. The first package is `@allagents/oh-my-promptfoo`; it contains the workspace-owning provider, lower-level Copilot SDK provider, and seed-cache maintenance CLI.
+A versioned Promptfoo-facing package maintained in this repository. The first package is `oh-my-promptfoo`; it contains the workspace-owning provider, lower-level Copilot SDK provider, and seed-cache maintenance CLI.
 
 ## Assertion
 

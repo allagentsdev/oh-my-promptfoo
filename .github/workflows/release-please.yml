@@ -45,8 +45,8 @@ jobs:
             throw Error(`npm view failed (${npm.status}): ${npm.stderr}`);
           const published = npm.status === 0;
           if (published && JSON.parse(npm.stdout) !== version) throw Error('Unexpected registry version');
-          if (manifest.name === '@allagents/oh-my-promptfoo' && version === '1.6.0' && !published) {
-            console.log('Waiting for the first @allagents/oh-my-promptfoo publication');
+          if (manifest.name === 'oh-my-promptfoo' && version === '1.6.0' && !published) {
+            console.log('Waiting for the first oh-my-promptfoo publication');
             process.exit(0);
           }
           const release = spawnSync('gh', ['release', 'view', `v${version}`, '--json', 'isDraft,tagName,targetCommitish'], { encoding: 'utf8' });
@@ -291,7 +291,7 @@ jobs:
             if (!match) throw Error(`Expected a stable package version, got ${value}`);
             return match.slice(1).map(Number);
           };
-          if (root.version !== manifest.version || nextRoot.version !== nextManifest.version || manifest.name !== nextManifest.name || manifest.name !== '@allagents/oh-my-promptfoo')
+          if (root.version !== manifest.version || nextRoot.version !== nextManifest.version || manifest.name !== nextManifest.name || manifest.name !== 'oh-my-promptfoo')
             throw Error('Release Please must update matching versions of the expected public package');
           const current = parseVersion(manifest.version);
           const pending = parseVersion(nextManifest.version);
@@ -338,7 +338,7 @@ jobs:
         run: |
           node --input-type=module <<'JS'
           import { spawnSync } from 'node:child_process';
-          const name = '@allagents/oh-my-promptfoo';
+          const name = 'oh-my-promptfoo';
           const version = process.env.PREVIEW_VERSION;
           const view = (selector, field) => {
             const result = spawnSync('npm', ['view', selector, field, '--json', '--registry=https://registry.npmjs.org'], { encoding: 'utf8' });

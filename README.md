@@ -1,13 +1,13 @@
-# @allagents/oh-my-promptfoo
+# oh-my-promptfoo
 
 Run coding-agent evaluations with stock Promptfoo. This package provides two entry points:
 
-If you installed `@allagents/promptfoo-x` or `@allagents/promptfoo-integration`, switch the install name and `package:` provider IDs to `@allagents/oh-my-promptfoo`. Existing workspace caches remain compatible.
+If you installed `@allagents/promptfoo-x` or `@allagents/promptfoo-integration`, switch the install name and `package:` provider IDs to `oh-my-promptfoo`. Existing workspace caches remain compatible.
 
 | Use case | Promptfoo provider |
 | --- | --- |
-| Create a private writable workspace, optionally seeded from Git or OCI, then run Codex, Claude, or Copilot in it | `package:@allagents/oh-my-promptfoo:Provider` |
-| Run Copilot in an existing directory that you manage | `package:@allagents/oh-my-promptfoo:CopilotSdkProvider` |
+| Create a private writable workspace, optionally seeded from Git or OCI, then run Codex, Claude, or Copilot in it | `package:oh-my-promptfoo:Provider` |
+| Run Copilot in an existing directory that you manage | `package:oh-my-promptfoo:CopilotSdkProvider` |
 
 `Provider` owns the workspace for each evaluation row. `CopilotSdkProvider` uses your existing directory. Both return results to ordinary Promptfoo assertions; the package does not grade responses.
 
@@ -16,7 +16,7 @@ If you installed `@allagents/promptfoo-x` or `@allagents/promptfoo-integration`,
 Requires Node 22.22+, Linux, macOS, or Windows, and Promptfoo 0.122.x. On Windows, workspace cache locks and process identity require the system Windows PowerShell executable.
 
 ```sh
-npm install --save-dev promptfoo@0.122.0 @allagents/oh-my-promptfoo
+npm install --save-dev promptfoo@0.122.0 oh-my-promptfoo
 # Add this only if you use Copilot, directly or as a workspace delegate:
 npm install --save-dev @github/copilot-sdk@1.0.6
 ```
@@ -31,7 +31,7 @@ Set the credential for the agent you select before running an evaluation. OCI so
 # promptfooconfig.yaml
 prompts: ["{{task}}"]
 providers:
-  - id: package:@allagents/oh-my-promptfoo:Provider
+  - id: package:oh-my-promptfoo:Provider
     config:
       delegate:
         id: openai:codex-sdk
@@ -73,7 +73,7 @@ The workspace stays available while Promptfoo runs assertions. `metadata.workspa
 # promptfooconfig.yaml
 prompts: ["{{task}}"]
 providers:
-  - id: package:@allagents/oh-my-promptfoo:CopilotSdkProvider
+  - id: package:oh-my-promptfoo:CopilotSdkProvider
     config:
       working_dir: "{{env.COPILOT_WORKING_DIR}}"
       env:

@@ -10,7 +10,7 @@
 
 ## Decision
 
-Rename the GitHub repository to `allagentsdev/oh-my-promptfoo` and publish the package as `@allagents/oh-my-promptfoo`, starting at 1.6.0. Keep the Promptfoo provider IDs explicit: `package:@allagents/oh-my-promptfoo:Provider` and `package:@allagents/oh-my-promptfoo:CopilotSdkProvider`.
+Rename the GitHub repository to `allagentsdev/oh-my-promptfoo` and publish the unscoped package `oh-my-promptfoo`, starting at 1.6.0. The unscoped name matches the repository and keeps installation and YAML references short. Keep the Promptfoo provider IDs explicit: `package:oh-my-promptfoo:Provider` and `package:oh-my-promptfoo:CopilotSdkProvider`.
 
 Keep the previously published `@allagents/promptfoo-x` and `@allagents/promptfoo-integration` packages installable for existing users. Deprecate their versions with a pointer to the new package after its registry verification succeeds. Do not reuse their package names for new releases.
 

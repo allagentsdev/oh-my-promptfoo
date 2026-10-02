@@ -1,5 +1,5 @@
 {
-  "name": "@allagents/oh-my-promptfoo",
+  "name": "oh-my-promptfoo",
   "version": "1.6.0",
   "description": "Workspace-owning coding agent providers for Promptfoo",
   "type": "module",

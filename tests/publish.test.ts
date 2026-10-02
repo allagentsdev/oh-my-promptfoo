@@ -67,7 +67,7 @@ async function fixture() {
   );
   await writeFile(
     join(root, "packages", "oh-my-promptfoo", "package.json"),
-    `${JSON.stringify({ name: "@allagents/oh-my-promptfoo", version: "1.0.0", private: true })}\n`,
+    `${JSON.stringify({ name: "oh-my-promptfoo", version: "1.0.0", private: true })}\n`,
   );
   const registry = join(root, "registry-state");
   await writeFile(registry, JSON.stringify({ versions: [], tags: {}, published: [] }));

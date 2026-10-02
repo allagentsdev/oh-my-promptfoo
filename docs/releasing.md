@@ -2,11 +2,11 @@
 
 ## First release as oh-my-promptfoo
 
-`@allagents/oh-my-promptfoo` is a new npm package. Version 1.6.0 is its first stable release. The Release Please workflow waits until it is published, so it does not treat a release of an earlier package name as the current release.
+`oh-my-promptfoo` is a new npm package. Version 1.6.0 is its first stable release. The Release Please workflow waits until it is published, so it does not treat a release of an earlier package name as the current release.
 
 After the rename is merged and validation passes, tag the reviewed main commit `v1.6.0` and create a draft GitHub release. From a clean checkout of that tag, install dependencies with `bun install --frozen-lockfile`, build, and run the packed-package and Promptfoo E2E checks. Sign in with `npm login --auth-type=web` and publish with `npm publish ./packages/oh-my-promptfoo --access public --tag latest --provenance=false`. Verify the installed registry package with `bun scripts/smoke-packed-package.ts --registry 1.6.0` and `bun scripts/e2e.ts --registry 1.6.0` before making the GitHub release public.
 
-Configure npm trusted publishing for the renamed repository before running later automated releases. Keep `@allagents/promptfoo-x` and `@allagents/promptfoo-integration` installable, and deprecate them with a message pointing to `@allagents/oh-my-promptfoo` after registry verification succeeds.
+Configure npm trusted publishing for the renamed repository before running later automated releases. Keep `@allagents/promptfoo-x` and `@allagents/promptfoo-integration` installable, and deprecate them with a message pointing to `oh-my-promptfoo` after registry verification succeeds.
 
 ## Later releases
 

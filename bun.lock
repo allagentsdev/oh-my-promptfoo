@@ -24,7 +24,7 @@
       },
     },
     "packages/oh-my-promptfoo": {
-      "name": "@allagents/oh-my-promptfoo",
+      "name": "oh-my-promptfoo",
       "version": "1.6.0",
       "bin": {
         "allagents-promptfoo": "./dist/cli.js",
@@ -49,7 +49,7 @@
 
     "@ai-sdk/provider-utils": ["@ai-sdk/provider-utils@4.0.56", "", { "dependencies": { "@ai-sdk/provider": "3.0.18", "@standard-schema/spec": "^1.1.0", "eventsource-parser": "^3.0.8", "undici": "^6.28.0" }, "peerDependencies": { "zod": "^3.25.76 || ^4.1.8" } }, "sha512-Svfg3OwsLRqkDDn/lTk6x3Dmrlft+u3Xs2M5YvVqpuDY9sftY125xJ9jnref63W/CrFln0j7Ij3/YgG9WHpOqA=="],
 
-    "@allagents/oh-my-promptfoo": ["@allagents/oh-my-promptfoo@workspace:packages/oh-my-promptfoo"],
+    "oh-my-promptfoo": ["oh-my-promptfoo@workspace:packages/oh-my-promptfoo"],
 
     "@allagents/workspace-core": ["@allagents/workspace-core@workspace:packages/workspace-core"],
 
