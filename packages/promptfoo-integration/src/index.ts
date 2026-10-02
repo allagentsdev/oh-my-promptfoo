@@ -120,7 +120,15 @@ export class Provider extends Calls {
     try {
       const result = await this.callCase(prompt, context, options, caseIndex);
       outcome = Object.hasOwn(result, "error") ? "error" : "ok";
-      return result;
+      if (caseIndex === undefined) return result;
+      const metadata = result.metadata;
+      return {
+        ...result,
+        metadata: {
+          ...(metadata && typeof metadata === "object" && !Array.isArray(metadata) ? metadata : {}),
+          allagentsCaseIndex: caseIndex,
+        },
+      };
     } finally {
       publishProgress("case-finished", caseIndex, undefined, undefined, outcome);
     }
