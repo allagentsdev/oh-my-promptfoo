@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.0](https://github.com/allagentsdev/promptfoo-x/compare/v1.5.2...v1.6.0) (2026-10-02)
+
+
+### Features
+
+* support workspace subdirectory working dirs ([#49](https://github.com/allagentsdev/promptfoo-x/issues/49)) ([8cb20f8](https://github.com/allagentsdev/promptfoo-x/commit/8cb20f86f163c5d7deb7bba7e45d0d54a0293145))
+
 ## [1.5.2](https://github.com/allagentsdev/promptfoo-x/compare/v1.5.1...v1.5.2) (2026-10-02)
 
 
