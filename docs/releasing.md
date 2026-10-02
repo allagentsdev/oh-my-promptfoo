@@ -1,10 +1,10 @@
 # Releasing to npm
 
-## First release under the new name
+## First release under the new name (completed)
 
 `@allagents/promptfoo-x` is a new npm package; the published `@allagents/promptfoo-integration` package cannot be renamed in place. Version 1.5.0 is the first stable release under the new name. The Release Please workflow waits until that version exists on npm so it cannot mistake the old `v1.4.2` GitHub release for a release of the new package.
 
-After the rename change is merged and its validation passes, tag the reviewed main commit `v1.5.0` and create a draft GitHub release at that tag. An `@allagents` npm owner must first publish a `1.5.0-rc.1` prerelease to establish the new package name. From a clean checkout of `v1.5.0`, run the following commands while authenticated to npm:
+After the rename merged and validation passed, the reviewed main commit was tagged `v1.5.0` and a draft GitHub release was created. An `@allagents` npm owner published `1.5.0-rc.1` to establish the new package name, using these commands from a clean checkout of the tag:
 
 ```sh
 bun install --frozen-lockfile
@@ -17,7 +17,7 @@ npm pkg set version=1.5.0-rc.1 --prefix "$bootstrap_dir/unpacked/package"
 npm publish "$bootstrap_dir/unpacked/package" --access public --tag bootstrap --provenance=false
 ```
 
-The bootstrap prerelease has no provenance and does not move the `latest` tag. Once `@allagents/promptfoo-x@1.5.0-rc.1` appears on npm, configure trusted publishers for `allagentsdev/promptfoo-x` and the `publish.yml` and `release-please.yml` workflows. Dispatch `publish.yml` for `v1.5.0`; it builds and publishes stable `1.5.0` with OIDC provenance, verifies registry consumers, then makes the GitHub release public. Finally dispatch `release-please.yml` to resume automatic future releases.
+The bootstrap prerelease has no provenance. npm initially assigned its `latest` tag to that prerelease despite `--tag bootstrap`. Trusted publishers were then configured for `allagentsdev/promptfoo-x` and the `publish.yml` and `release-please.yml` workflows. The [stable publish run](https://github.com/allagentsdev/promptfoo-x/actions/runs/36961465621) built and published `1.5.0` with OIDC provenance, moved `latest` to the stable version, verified registry consumers, and made the GitHub release public. `release-please.yml` was dispatched afterward to resume automatic future releases.
 
 Keep the old npm package available. After the new package passes registry verification, deprecate the old package with a message pointing users to `@allagents/promptfoo-x`; do not unpublish it.
 
