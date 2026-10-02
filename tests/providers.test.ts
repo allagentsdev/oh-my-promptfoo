@@ -64,6 +64,7 @@ export async function loadApiProvider(id, options) {
   if(prompt==='duplicate')writeSync(1,JSON.stringify({version:1,type:'result',response:{output:'premature'}})+'\\n');
   if(prompt==='write')await writeFile(options.options.config.working_dir+'/generated.txt','generated durable content');
   if(prompt==='tamper-protected'){const file=options.options.config.working_dir+'/repo/input.txt';await chmod(file,0o644);await writeFile(file,'modified protected source');}
+  if(prompt==='tamper-secondary'){const file=options.options.config.working_dir+'/secondary/input.txt';await chmod(file,0o644);await writeFile(file,'modified protected source');}
   if(prompt==='tamper-protected-metadata'){const file=options.options.config.working_dir+'/repo/.git/HEAD';await utimes(file,new Date(0),new Date(0));}
   if(prompt==='sleep'){await new Promise(()=>{});}
   if(prompt==='large') return {output:'x'.repeat(17000000)};
@@ -371,6 +372,83 @@ describe("workspace provider publication and lifetime", () => {
       expect(checksFor(firstCase)).toEqual(successfulChecks(firstCase));
       expect(checksFor(reuseCase)).toEqual(successfulChecks(reuseCase));
       expect(await readdir(join(options.env.ALLAGENTS_CACHE_ROOT, "published"))).toEqual([]);
+      const secondUrl = "https://invalid.example.test/secondary.git";
+      const secondSource = {
+        ...source,
+        repository: secondUrl,
+        destination: "secondary",
+      };
+      const secondKey = createHash("sha256")
+        .update(JSON.stringify([secondUrl, commit, "secondary"]))
+        .digest("hex");
+      const secondRoot = join(prepared, "sources", secondKey);
+      await mkdir(secondRoot, { recursive: true, mode: 0o700 });
+      await git("git", [
+        "clone",
+        "-q",
+        "--bare",
+        "--no-hardlinks",
+        repository,
+        join(secondRoot, "mirror"),
+      ]);
+      await chmod(join(secondRoot, "mirror"), 0o700);
+      await cp(repository, join(secondRoot, "seed"), { recursive: true });
+      await chmod(join(secondRoot, "seed"), 0o700);
+      await cp(repository, join(secondRoot, "protected"), { recursive: true });
+      await protect(join(secondRoot, "protected"), false);
+      await atomicJson(join(prepared, "manifest.json"), {
+        schemaVersion: 1,
+        sources: [
+          { repository: repositoryUrl, commit, destination: "repo" },
+          { repository: secondUrl, commit, destination: "secondary" },
+        ],
+      });
+      const concurrent = new Provider({
+        ...options,
+        config: {
+          ...options.config,
+          workspace: { ...options.config.workspace, sources: [source, secondSource] },
+        },
+      });
+      try {
+        const pair = await concurrent.callApi("clean");
+        expect(pair.error).toBeUndefined();
+        const pairCase = checkedCaseIndex(pair.metadata);
+        const pairChecks = checksFor(pairCase);
+        const secondGitStart = pairChecks.findIndex(
+          (event) => event.phase === "protected-git-check-start" && event.sourceIndex === 2,
+        );
+        const firstStampFinish = pairChecks.findIndex(
+          (event) => event.phase === "protected-stamp-finished" && event.sourceIndex === 1,
+        );
+        expect(secondGitStart).toBeGreaterThanOrEqual(0);
+        expect(firstStampFinish).toBeGreaterThanOrEqual(0);
+        expect(secondGitStart).toBeLessThan(firstStampFinish);
+        const altered = await concurrent.callApi("tamper-secondary");
+        expect(altered.error).toContain("Prepared source checkout failed integrity verification");
+        const alteredCase = checkedCaseIndex(altered.metadata);
+        const alteredChecks = checksFor(alteredCase);
+        expect(alteredChecks).toContainEqual({
+          phase: "protected-stamp-finished",
+          caseIndex: alteredCase,
+          sourceIndex: 1,
+          sourceCount: 2,
+          outcome: "ok",
+        });
+        expect(alteredChecks).toContainEqual({
+          phase: "protected-git-check-finished",
+          caseIndex: alteredCase,
+          sourceIndex: 2,
+          sourceCount: 2,
+          outcome: "error",
+        });
+      } finally {
+        await concurrent.cleanup();
+        await atomicJson(join(prepared, "manifest.json"), {
+          schemaVersion: 1,
+          sources: [{ repository: repositoryUrl, commit, destination: "repo" }],
+        });
+      }
       const mixed = new Provider({
         ...options,
         config: {
