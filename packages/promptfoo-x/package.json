@@ -1,6 +1,6 @@
 {
   "name": "@allagents/promptfoo-x",
-  "version": "1.5.1",
+  "version": "1.5.2",
   "description": "Workspace-owning coding agent providers for Promptfoo",
   "type": "module",
   "main": "./dist/index.cjs",
