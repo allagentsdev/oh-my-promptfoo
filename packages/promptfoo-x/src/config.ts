@@ -1,4 +1,5 @@
 import { resolve } from "node:path";
+import { destination } from "../../workspace-core/src/config.js";
 import type { WorkspaceSpec } from "../../workspace-core/src/types.js";
 
 export type JsonObject = Record<string, unknown>;
@@ -59,6 +60,7 @@ export type Delegate = CodexDelegate | ClaudeDelegate | CopilotDelegate;
 export interface ProviderConfig {
   delegate: Delegate;
   workspace: WorkspaceSpec;
+  workingDir?: string;
   fileChanges?: boolean;
   timeoutMs?: number;
 }
@@ -295,7 +297,18 @@ export function envelope(options: ProviderOptions): { config: JsonObject; basePa
   return { config, basePath: resolve((basePath as string | undefined) ?? process.cwd()) };
 }
 export function validateProviderConfig(value: unknown): ProviderConfig {
-  const c = closed(value, ["delegate", "workspace", "fileChanges", "timeoutMs"], "config");
+  const c = closed(
+    value,
+    ["delegate", "workspace", "workingDir", "fileChanges", "timeoutMs"],
+    "config",
+  );
+  if (c.workingDir !== undefined) {
+    try {
+      destination(c.workingDir);
+    } catch {
+      throw new Error("config.workingDir must be a normalized contained relative path");
+    }
+  }
   if (c.fileChanges !== undefined && typeof c.fileChanges !== "boolean")
     throw new Error("config.fileChanges must be boolean");
   if (

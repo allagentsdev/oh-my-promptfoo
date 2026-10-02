@@ -127,6 +127,17 @@ describe("closed configuration", () => {
         workspace,
       }),
     ).toThrow();
+    for (const workingDir of [
+      "",
+      ".",
+      "../outside",
+      "repo/../outside",
+      "/tmp/outside",
+      "repo\\nested",
+    ])
+      expect(() =>
+        validateProviderConfig({ delegate: { id: "openai:codex-sdk" }, workspace, workingDir }),
+      ).toThrow(/config\.workingDir/);
   });
   test("accepts endpoint objects and rejects credentials or unsupported fields", () => {
     expect(
@@ -635,7 +646,7 @@ describe("workspace provider publication and lifetime", () => {
       "modified protected source",
     );
   }, 30_000);
-  async function workspaceProvider(fileChanges = false, readOnly = false) {
+  async function workspaceProvider(fileChanges = false, readOnly = false, workingDir?: string) {
     const path = await project("promptfoo", native);
     const repository = join(path, "source");
     await mkdir(repository);
@@ -681,6 +692,7 @@ describe("workspace provider publication and lifetime", () => {
           viewMode: readOnly ? "copy-only" : "auto",
         },
         fileChanges,
+        ...(workingDir ? { workingDir } : {}),
       },
       env: {
         ALLAGENTS_CACHE_ROOT: join(path, "cache"),
@@ -689,6 +701,36 @@ describe("workspace provider publication and lifetime", () => {
     });
     return { path, provider };
   }
+  test("starts the agent in a materialized repository when workingDir is set", async () => {
+    for (const readOnly of [false, true]) {
+      const { provider } = await workspaceProvider(false, readOnly, "repo");
+      try {
+        const result = await provider.callApi(readOnly ? "success" : "write");
+        const root = (result.metadata as any).workspace.path as string;
+        expect((result.metadata as any).options.options.config.working_dir).toBe(
+          join(root, "repo"),
+        );
+        if (!readOnly) {
+          expect(await readFile(join(root, "repo", "generated.txt"), "utf8")).toBe(
+            "generated durable content",
+          );
+          await expect(access(join(root, "generated.txt"))).rejects.toThrow();
+        }
+      } finally {
+        await provider.cleanup();
+      }
+    }
+  }, 30_000);
+  test("rejects a configured working directory that was not materialized", async () => {
+    const { provider } = await workspaceProvider(false, false, "missing");
+    try {
+      const result = await provider.callApi("success");
+      expect(result.error).toContain("config.workingDir");
+      expect(result.metadata).toBeUndefined();
+    } finally {
+      await provider.cleanup();
+    }
+  }, 15_000);
   test("progress follows seed acquisition, protected copy, reuse and agent outcomes without private data", async () => {
     const { path, provider } = await workspaceProvider(false, true);
     const events: Record<string, unknown>[] = [];

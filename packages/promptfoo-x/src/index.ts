@@ -1,5 +1,5 @@
 import { realpath, stat } from "node:fs/promises";
-import { resolve } from "node:path";
+import { relative, resolve, sep } from "node:path";
 import {
   type Baseline,
   captureFileChanges,
@@ -160,6 +160,9 @@ export class Provider extends Calls {
         let published = false;
         try {
           handle = await this.manager.prepare(signal, caseIndex);
+          const workingDir = this.config.workingDir
+            ? await workspaceWorkingDir(handle, this.config.workingDir)
+            : handle.path;
           if (this.config.fileChanges) {
             try {
               baseline = await establishBaseline(handle);
@@ -177,7 +180,7 @@ export class Provider extends Calls {
                 type: "call",
                 delegate: this.config.delegate.id,
                 basePath: this.basePath,
-                workingDir: handle.path,
+                workingDir,
                 config: merged,
                 prompt,
                 context: ctx,
@@ -250,6 +253,33 @@ export class Provider extends Calls {
     })();
     return this.cleanupPromise;
   }
+}
+
+async function workspaceWorkingDir(handle: WorkspaceHandle, path: string): Promise<string> {
+  const workingDir = resolve(handle.path, path);
+  let actual: string;
+  try {
+    actual = await realpath(workingDir);
+    if (!(await stat(actual)).isDirectory()) throw new Error("not a directory");
+  } catch {
+    throw new Error("config.workingDir must identify an existing directory in the workspace");
+  }
+  const roots = [
+    await realpath(handle.path),
+    ...(await Promise.all(
+      handle.adapters
+        .filter((view) => view.adapter === "read-only")
+        .map((view) => realpath(view.path)),
+    )),
+  ];
+  if (
+    !roots.some((root) => {
+      const rel = relative(root, actual);
+      return !rel || (rel !== ".." && !rel.startsWith(`..${sep}`) && !rel.startsWith(sep));
+    })
+  )
+    throw new Error("config.workingDir must stay inside the workspace or a protected source");
+  return workingDir;
 }
 
 export class CopilotSdkProvider extends Calls {

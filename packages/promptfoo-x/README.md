@@ -44,15 +44,16 @@ providers:
             repository: https://github.com/allagentsdev/promptfoo-x.git
             ref: main
             destination: project
+      workingDir: project
 tests:
   - vars:
-      task: Read project/README.md and write a summary to summary.txt at the workspace root.
+      task: Read README.md and write a summary to summary.txt in this repository.
     assert:
       - type: javascript
         value: |
           return import('node:fs').then(fs => {
             const root = context.providerResponse.metadata.workspace.path;
-            return fs.readFileSync(root + '/summary.txt', 'utf8').length > 0;
+            return fs.readFileSync(root + '/project/summary.txt', 'utf8').length > 0;
           });
 ```
 
@@ -95,6 +96,7 @@ Run this configuration with `npx promptfoo eval --config promptfooconfig.yaml` a
 | `config.delegate.config` | `Provider` | Agent-specific settings, such as model and sandbox mode |
 | `config.delegate.env` | `Provider` | Explicit credentials passed to the delegated agent |
 | `config.workspace.sources` | `Provider` | Required array of Git or OCI sources; `[]` creates an empty workspace |
+| `config.workingDir` | `Provider` | Optional relative directory inside the prepared workspace; defaults to its root |
 | `config.fileChanges` | `Provider` | Optional bounded file-change evidence; defaults to `false` |
 | `config.working_dir` | `CopilotSdkProvider` | Required existing directory |
 | `config.env`, `config.permissions` | `CopilotSdkProvider` | Explicit Copilot credentials and permissions |
