@@ -1,6 +1,6 @@
 prompts: ["{{task}}"]
 providers:
-  - id: package:@allagents/promptfoo-x:default
+  - id: package:@allagents/promptfoo-x:Provider
     label: repo-readonly
     config:
       delegate:
@@ -16,7 +16,7 @@ providers:
             ref: main
             destination: project
             permissions: read-only
-  - id: package:@allagents/promptfoo-x:default
+  - id: package:@allagents/promptfoo-x:Provider
     label: repo-writable
     config:
       delegate:

@@ -1,6 +1,6 @@
 prompts: ["{{task}}"]
 providers:
-  - id: package:@allagents/promptfoo-x:default
+  - id: package:@allagents/promptfoo-x:Provider
     config:
       delegate:
         id: copilot-sdk

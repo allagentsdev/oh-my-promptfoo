@@ -83,7 +83,7 @@ try {
   );
   const commit = run("git", ["rev-parse", "HEAD"], source).trim();
   const wrapper = (id: string, label: string, permissions: string) => ({
-    id: "package:@allagents/promptfoo-x:default",
+    id: "package:@allagents/promptfoo-x:Provider",
     label,
     config: {
       delegate: {

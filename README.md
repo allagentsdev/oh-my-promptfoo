@@ -4,7 +4,7 @@ Run coding-agent evaluations with stock Promptfoo. This package provides two ent
 
 | Use case | Promptfoo provider |
 | --- | --- |
-| Create a private writable workspace, optionally seeded from Git or OCI, then run Codex, Claude, or Copilot in it | `package:@allagents/promptfoo-x:default` |
+| Create a private writable workspace, optionally seeded from Git or OCI, then run Codex, Claude, or Copilot in it | `package:@allagents/promptfoo-x:Provider` |
 | Run Copilot in an existing directory that you manage | `package:@allagents/promptfoo-x:CopilotSdkProvider` |
 
 `Provider` owns the workspace for each evaluation row. `CopilotSdkProvider` uses your existing directory. Both return results to ordinary Promptfoo assertions; the package does not grade responses.
@@ -29,7 +29,7 @@ Set the credential for the agent you select before running an evaluation. OCI so
 # promptfooconfig.yaml
 prompts: ["{{task}}"]
 providers:
-  - id: package:@allagents/promptfoo-x:default
+  - id: package:@allagents/promptfoo-x:Provider
     config:
       delegate:
         id: openai:codex-sdk
