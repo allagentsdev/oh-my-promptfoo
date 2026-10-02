@@ -5,7 +5,7 @@ type: feat
 status: proposed
 ---
 
-> Historical plan: The current repository and npm package are `promptfoo-x`; see [ADR 0002](../adr/0002-rename-promptfoo-x.md).
+> Historical plan: The current repository and npm package are `oh-my-promptfoo`; see [ADR 0003](../adr/0003-rename-oh-my-promptfoo.md).
 
 # Promptfoo agent integrations implementation plan
 
