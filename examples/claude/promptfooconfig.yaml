@@ -1,6 +1,6 @@
 prompts: ["{{task}}"]
 providers:
-  - id: package:@allagents/promptfoo-x:Provider
+  - id: package:@allagents/oh-my-promptfoo:Provider
     config:
       delegate:
         id: anthropic:claude-agent-sdk

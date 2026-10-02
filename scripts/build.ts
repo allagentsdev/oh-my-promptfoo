@@ -2,8 +2,8 @@ import { copyFile } from "node:fs/promises";
 import { build } from "tsup";
 
 await build({
-  entry: { index: "packages/promptfoo-x/src/index.ts" },
-  outDir: "packages/promptfoo-x/dist",
+  entry: { index: "packages/oh-my-promptfoo/src/index.ts" },
+  outDir: "packages/oh-my-promptfoo/dist",
   format: ["esm", "cjs"],
   dts: true,
   clean: true,
@@ -16,10 +16,10 @@ await build({
 });
 await build({
   entry: {
-    "delegate-runner": "packages/promptfoo-x/src/delegate-runner.ts",
-    cli: "packages/promptfoo-x/src/cli.ts",
+    "delegate-runner": "packages/oh-my-promptfoo/src/delegate-runner.ts",
+    cli: "packages/oh-my-promptfoo/src/cli.ts",
   },
-  outDir: "packages/promptfoo-x/dist",
+  outDir: "packages/oh-my-promptfoo/dist",
   format: ["esm"],
   splitting: false,
   shims: true,
@@ -30,5 +30,5 @@ await build({
     js: '#!/usr/bin/env node\nimport {createRequire as __allagentsCreateRequire} from "node:module";const require=__allagentsCreateRequire(import.meta.url);',
   },
 });
-await copyFile("LICENSE", "packages/promptfoo-x/LICENSE");
-await copyFile("README.md", "packages/promptfoo-x/README.md");
+await copyFile("LICENSE", "packages/oh-my-promptfoo/LICENSE");
+await copyFile("README.md", "packages/oh-my-promptfoo/README.md");

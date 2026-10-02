@@ -11,7 +11,7 @@ test("release lock sync updates only the public workspace without running projec
   const root = await mkdtemp(join(tmpdir(), "allagents-release-lock-"));
   const toolRoot = await mkdtemp(join(tmpdir(), "allagents-release-tools-"));
   try {
-    await mkdir(join(root, "packages", "promptfoo-x"), { recursive: true });
+    await mkdir(join(root, "packages", "oh-my-promptfoo"), { recursive: true });
     await writeFile(join(root, "bunfig.toml"), '[run]\npreload = ["./preload.js"]\n');
     await writeFile(
       join(root, "preload.js"),
@@ -19,16 +19,16 @@ test("release lock sync updates only the public workspace without running projec
     );
     await writeFile(join(root, "package.json"), JSON.stringify({ version: "1.1.0" }));
     await writeFile(
-      join(root, "packages", "promptfoo-x", "package.json"),
-      JSON.stringify({ name: "@allagents/promptfoo-x", version: "1.1.0" }),
+      join(root, "packages", "oh-my-promptfoo", "package.json"),
+      JSON.stringify({ name: "@allagents/oh-my-promptfoo", version: "1.1.0" }),
     );
     const lockPath = join(root, "bun.lock");
     await writeFile(
       lockPath,
       `{
   "workspaces": {
-    "packages/promptfoo-x": {
-      "name": "@allagents/promptfoo-x",
+    "packages/oh-my-promptfoo": {
+      "name": "@allagents/oh-my-promptfoo",
       "version": "1.0.0",
     },
     "packages/workspace-core": {
@@ -44,7 +44,7 @@ test("release lock sync updates only the public workspace without running projec
     expect(await Bun.file(join(root, "preload-ran")).exists()).toBe(false);
     const updated = await readFile(lockPath, "utf8");
     const workspaces = parse(updated).workspaces;
-    expect(workspaces["packages/promptfoo-x"].version).toBe("1.1.0");
+    expect(workspaces["packages/oh-my-promptfoo"].version).toBe("1.1.0");
     expect(workspaces["packages/workspace-core"].version).toBe("1.0.0");
     expect(run().status).toBe(0);
     expect(await readFile(lockPath, "utf8")).toBe(updated);

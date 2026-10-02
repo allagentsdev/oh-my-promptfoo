@@ -1,11 +1,13 @@
-# @allagents/promptfoo-x
+# @allagents/oh-my-promptfoo
 
 Run coding-agent evaluations with stock Promptfoo. This package provides two entry points:
 
+If you installed `@allagents/promptfoo-x` or `@allagents/promptfoo-integration`, switch the install name and `package:` provider IDs to `@allagents/oh-my-promptfoo`. Existing workspace caches remain compatible.
+
 | Use case | Promptfoo provider |
 | --- | --- |
-| Create a private writable workspace, optionally seeded from Git or OCI, then run Codex, Claude, or Copilot in it | `package:@allagents/promptfoo-x:Provider` |
-| Run Copilot in an existing directory that you manage | `package:@allagents/promptfoo-x:CopilotSdkProvider` |
+| Create a private writable workspace, optionally seeded from Git or OCI, then run Codex, Claude, or Copilot in it | `package:@allagents/oh-my-promptfoo:Provider` |
+| Run Copilot in an existing directory that you manage | `package:@allagents/oh-my-promptfoo:CopilotSdkProvider` |
 
 `Provider` owns the workspace for each evaluation row. `CopilotSdkProvider` uses your existing directory. Both return results to ordinary Promptfoo assertions; the package does not grade responses.
 
@@ -14,7 +16,7 @@ Run coding-agent evaluations with stock Promptfoo. This package provides two ent
 Requires Node 22.22+, Linux, macOS, or Windows, and Promptfoo 0.122.x. On Windows, workspace cache locks and process identity require the system Windows PowerShell executable.
 
 ```sh
-npm install --save-dev promptfoo@0.122.0 @allagents/promptfoo-x
+npm install --save-dev promptfoo@0.122.0 @allagents/oh-my-promptfoo
 # Add this only if you use Copilot, directly or as a workspace delegate:
 npm install --save-dev @github/copilot-sdk@1.0.6
 ```
@@ -29,7 +31,7 @@ Set the credential for the agent you select before running an evaluation. OCI so
 # promptfooconfig.yaml
 prompts: ["{{task}}"]
 providers:
-  - id: package:@allagents/promptfoo-x:Provider
+  - id: package:@allagents/oh-my-promptfoo:Provider
     config:
       delegate:
         id: openai:codex-sdk
@@ -41,7 +43,7 @@ providers:
       workspace:
         sources:
           - type: git
-            repository: https://github.com/allagentsdev/promptfoo-x.git
+            repository: https://github.com/allagentsdev/oh-my-promptfoo.git
             ref: main
             destination: project
       workingDir: project
@@ -61,7 +63,7 @@ tests:
 npx promptfoo eval --config promptfooconfig.yaml
 ```
 
-The workspace stays available while Promptfoo runs assertions. `metadata.workspace.path` is a transient local path, not a durable artifact. For Codex, Claude, and Copilot variants, see the [workspace examples](https://github.com/allagentsdev/promptfoo-x/tree/main/examples).
+The workspace stays available while Promptfoo runs assertions. `metadata.workspace.path` is a transient local path, not a durable artifact. For Codex, Claude, and Copilot variants, see the [workspace examples](https://github.com/allagentsdev/oh-my-promptfoo/tree/main/examples).
 
 ## Run Copilot in an existing directory
 
@@ -71,7 +73,7 @@ The workspace stays available while Promptfoo runs assertions. `metadata.workspa
 # promptfooconfig.yaml
 prompts: ["{{task}}"]
 providers:
-  - id: package:@allagents/promptfoo-x:CopilotSdkProvider
+  - id: package:@allagents/oh-my-promptfoo:CopilotSdkProvider
     config:
       working_dir: "{{env.COPILOT_WORKING_DIR}}"
       env:
@@ -84,7 +86,7 @@ tests:
         value: .+
 ```
 
-Copilot's default permissions deny writes, shell, and network. Set `config.permissions` explicitly when a test needs them. The [direct Copilot example](https://github.com/allagentsdev/promptfoo-x/blob/main/examples/copilot/promptfooconfig.yaml) shows write permission.
+Copilot's default permissions deny writes, shell, and network. Set `config.permissions` explicitly when a test needs them. The [direct Copilot example](https://github.com/allagentsdev/oh-my-promptfoo/blob/main/examples/copilot/promptfooconfig.yaml) shows write permission.
 
 Run this configuration with `npx promptfoo eval --config promptfooconfig.yaml` after setting `COPILOT_WORKING_DIR` and `COPILOT_GITHUB_TOKEN`.
 
@@ -101,4 +103,4 @@ Run this configuration with `npx promptfoo eval --config promptfooconfig.yaml` a
 | `config.working_dir` | `CopilotSdkProvider` | Required existing directory |
 | `config.env`, `config.permissions` | `CopilotSdkProvider` | Explicit Copilot credentials and permissions |
 
-Promptfoo's `package:` reference needs the exported class suffix shown above; the npm package name alone is not a provider ID. See the [provider guide](https://github.com/allagentsdev/promptfoo-x/blob/main/docs/provider-guide.md) for source permissions, response metadata, cleanup, caching, and full configuration details.
+Promptfoo's `package:` reference needs the exported class suffix shown above; the npm package name alone is not a provider ID. See the [provider guide](https://github.com/allagentsdev/oh-my-promptfoo/blob/main/docs/provider-guide.md) for source permissions, response metadata, cleanup, caching, and full configuration details.

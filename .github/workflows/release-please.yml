@@ -37,7 +37,7 @@ jobs:
           import { spawnSync } from 'node:child_process';
           import { appendFileSync, readFileSync } from 'node:fs';
           const root = JSON.parse(readFileSync('package.json', 'utf8'));
-          const manifest = JSON.parse(readFileSync('packages/promptfoo-x/package.json', 'utf8'));
+          const manifest = JSON.parse(readFileSync('packages/oh-my-promptfoo/package.json', 'utf8'));
           if (root.version !== manifest.version) throw Error('Root and public package versions differ');
           const version = manifest.version;
           const npm = spawnSync('npm', ['view', `${manifest.name}@${version}`, 'version', '--json', '--registry=https://registry.npmjs.org'], { encoding: 'utf8' });
@@ -45,8 +45,8 @@ jobs:
             throw Error(`npm view failed (${npm.status}): ${npm.stderr}`);
           const published = npm.status === 0;
           if (published && JSON.parse(npm.stdout) !== version) throw Error('Unexpected registry version');
-          if (manifest.name === '@allagents/promptfoo-x' && version === '1.5.0' && !published) {
-            console.log('Waiting for the first @allagents/promptfoo-x publication');
+          if (manifest.name === '@allagents/oh-my-promptfoo' && version === '1.6.0' && !published) {
+            console.log('Waiting for the first @allagents/oh-my-promptfoo publication');
             process.exit(0);
           }
           const release = spawnSync('gh', ['release', 'view', `v${version}`, '--json', 'isDraft,tagName,targetCommitish'], { encoding: 'utf8' });
@@ -82,7 +82,7 @@ jobs:
           node --input-type=module <<'JS'
           import { execFileSync } from 'node:child_process';
           import { readFileSync } from 'node:fs';
-          const { version } = JSON.parse(readFileSync('packages/promptfoo-x/package.json', 'utf8'));
+          const { version } = JSON.parse(readFileSync('packages/oh-my-promptfoo/package.json', 'utf8'));
           const prs = JSON.parse(execFileSync('gh', ['pr', 'list', '--state', 'merged', '--label', 'autorelease: pending', '--json', 'number,title', '--limit', '100'], { encoding: 'utf8' }));
           const matches = prs.filter(pr => pr.title === `chore(release): release ${version}`);
           if (matches.length > 1) throw Error('Ambiguous merged release pull request');
@@ -95,7 +95,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN || github.token }}
         run: |
-          pr=$(gh pr list --state open --base main --label 'autorelease: pending' --json number,headRefName --jq '[.[] | select(.headRefName == "release-please--branches--main--components--promptfoo-x")][0].number')
+          pr=$(gh pr list --state open --base main --label 'autorelease: pending' --json number,headRefName --jq '[.[] | select(.headRefName == "release-please--branches--main--components--oh-my-promptfoo")][0].number')
           if [ -n "$pr" ] && [ "$pr" != null ] && [ "$(gh pr view "$pr" --json isDraft --jq .isDraft)" = false ]; then
             gh pr ready "$pr" --undo
           fi
@@ -132,7 +132,7 @@ jobs:
           const sha = gh(['api', `repos/${repo}/commits/${tag}`, '--jq', '.sha']);
           if (release.targetCommitish !== sha) throw Error('Draft release target differs from the stable tag commit');
           const prs = JSON.parse(gh(['pr', 'list', '--state', 'merged', '--base', 'main', '--json', 'title,headRefName,headRepositoryOwner,mergeCommit', '--limit', '100']));
-          const expected = 'release-please--branches--main--components--promptfoo-x';
+          const expected = 'release-please--branches--main--components--oh-my-promptfoo';
           const owner = repo.split('/')[0];
           const matches = prs.filter(pr => pr.title === `chore(release): release ${version}` && pr.headRefName === expected && pr.headRepositoryOwner?.login === owner);
           if (matches.length !== 1 || matches[0].mergeCommit?.oid !== sha) throw Error('Draft tag must point at the merged Release Please pull request commit');
@@ -159,7 +159,7 @@ jobs:
           import { appendFileSync } from 'node:fs';
           const reported = JSON.parse(process.env.RELEASE_PRS || '[]');
           if (reported.length > 1) throw Error('Expected at most one release pull request');
-          const expected = 'release-please--branches--main--components--promptfoo-x';
+          const expected = 'release-please--branches--main--components--oh-my-promptfoo';
           const owner = process.env.GITHUB_REPOSITORY.split('/')[0];
           const accept = pr => {
             if (pr.state !== 'OPEN' || pr.baseRefName !== 'main' || pr.headRefName !== expected || pr.headRepositoryOwner?.login !== owner)
@@ -209,7 +209,7 @@ jobs:
         id: lock
         run: |
           node "$RUNNER_TEMP/release-tools/sync-release-lock.ts" "$GITHUB_WORKSPACE"
-          if ! git diff --quiet -- package.json packages/promptfoo-x/package.json; then
+          if ! git diff --quiet -- package.json packages/oh-my-promptfoo/package.json; then
             echo 'Bun unexpectedly modified a package manifest' >&2
             exit 1
           fi
@@ -277,21 +277,21 @@ jobs:
           const sha = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
           if (sha !== process.env.GITHUB_SHA) throw Error('Preview must use the triggering main commit');
           const pr = JSON.parse(gh(['pr', 'view', process.env.RELEASE_PR, '--json', 'state,isDraft,title,headRefName,headRefOid,headRepositoryOwner,baseRefName']));
-          const expected = 'release-please--branches--main--components--promptfoo-x';
+          const expected = 'release-please--branches--main--components--oh-my-promptfoo';
           if (pr.state !== 'OPEN' || pr.isDraft || pr.baseRefName !== 'main' || pr.headRefName !== expected || pr.headRepositoryOwner?.login !== repo.split('/')[0])
             throw Error('Expected an open, synchronized Release Please pull request on main');
           if (!/^[a-f0-9]{40}$/.test(pr.headRefOid)) throw Error('Invalid release pull request head');
           const fromPr = path => JSON.parse(Buffer.from(JSON.parse(gh(['api', '-X', 'GET', `repos/${repo}/contents/${path}`, '-f', `ref=${pr.headRefOid}`])).content, 'base64').toString('utf8'));
           const root = JSON.parse(readFileSync('package.json', 'utf8'));
-          const manifest = JSON.parse(readFileSync('packages/promptfoo-x/package.json', 'utf8'));
+          const manifest = JSON.parse(readFileSync('packages/oh-my-promptfoo/package.json', 'utf8'));
           const nextRoot = fromPr('package.json');
-          const nextManifest = fromPr('packages/promptfoo-x/package.json');
+          const nextManifest = fromPr('packages/oh-my-promptfoo/package.json');
           const parseVersion = value => {
             const match = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.exec(value ?? '');
             if (!match) throw Error(`Expected a stable package version, got ${value}`);
             return match.slice(1).map(Number);
           };
-          if (root.version !== manifest.version || nextRoot.version !== nextManifest.version || manifest.name !== nextManifest.name || manifest.name !== '@allagents/promptfoo-x')
+          if (root.version !== manifest.version || nextRoot.version !== nextManifest.version || manifest.name !== nextManifest.name || manifest.name !== '@allagents/oh-my-promptfoo')
             throw Error('Release Please must update matching versions of the expected public package');
           const current = parseVersion(manifest.version);
           const pending = parseVersion(nextManifest.version);
@@ -310,7 +310,7 @@ jobs:
           bun install --frozen-lockfile
           node --input-type=module <<'JS'
           import { readFileSync, writeFileSync } from 'node:fs';
-          for (const path of ['package.json', 'packages/promptfoo-x/package.json']) {
+          for (const path of ['package.json', 'packages/oh-my-promptfoo/package.json']) {
             const manifest = JSON.parse(readFileSync(path, 'utf8'));
             manifest.version = process.env.PREVIEW_VERSION;
             writeFileSync(path, `${JSON.stringify(manifest, null, 2)}\n`);
@@ -338,7 +338,7 @@ jobs:
         run: |
           node --input-type=module <<'JS'
           import { spawnSync } from 'node:child_process';
-          const name = '@allagents/promptfoo-x';
+          const name = '@allagents/oh-my-promptfoo';
           const version = process.env.PREVIEW_VERSION;
           const view = (selector, field) => {
             const result = spawnSync('npm', ['view', selector, field, '--json', '--registry=https://registry.npmjs.org'], { encoding: 'utf8' });
@@ -363,7 +363,7 @@ jobs:
             if (previous !== version || view(`${name}@${version}`, 'gitHead') !== process.env.GITHUB_SHA)
               throw Error('Published preview must match this commit and the npm next tag');
           } else {
-            const result = spawnSync('npm', ['publish', '--tag', 'next', '--provenance', '--access', 'public', '--registry=https://registry.npmjs.org'], { cwd: 'packages/promptfoo-x', stdio: 'inherit' });
+            const result = spawnSync('npm', ['publish', '--tag', 'next', '--provenance', '--access', 'public', '--registry=https://registry.npmjs.org'], { cwd: 'packages/oh-my-promptfoo', stdio: 'inherit' });
             if (result.error) throw result.error;
             if (result.status !== 0) throw Error(`npm publish failed (${result.status ?? result.signal})`);
             const deadline = Date.now() + 5 * 60_000;

@@ -1,6 +1,6 @@
 prompts: ["{{task}}"]
 providers:
-  - id: package:@allagents/promptfoo-x:CopilotSdkProvider
+  - id: package:@allagents/oh-my-promptfoo:CopilotSdkProvider
     config:
       working_dir: "{{env.COPILOT_WORKING_DIR}}"
       permissions:

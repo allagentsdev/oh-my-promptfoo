@@ -23,7 +23,11 @@ function run(command: string, args: string[], cwd: string) {
 const temp = await mkdtemp(join(realpathSync(tmpdir()), "allagents-pack-"));
 try {
   const packed = JSON.parse(
-    run("npm", ["pack", "--json", "--pack-destination", temp], join(repo, "packages/promptfoo-x")),
+    run(
+      "npm",
+      ["pack", "--json", "--pack-destination", temp],
+      join(repo, "packages/oh-my-promptfoo"),
+    ),
   )[0];
   const names = packed.files.map((f: { path: string }) => f.path);
   for (const name of [
@@ -38,7 +42,7 @@ try {
     if (!names.includes(name)) throw new Error(`Missing packed file ${name}`);
   if (names.some((n: string) => /tests|fixtures|workspace-core|\.env/.test(n)))
     throw new Error("Private/test files in package");
-  const manifest = JSON.parse(await readFile("packages/promptfoo-x/package.json", "utf8"));
+  const manifest = JSON.parse(await readFile("packages/oh-my-promptfoo/package.json", "utf8"));
   if (
     manifest.dependencies?.["@allagents/workspace-core"] ||
     Object.keys(manifest.exports).join() !== "." ||
@@ -46,7 +50,7 @@ try {
   )
     throw new Error("Public manifest contract mismatch");
   const tarball = join(temp, packed.filename);
-  const installation = registryVersion ? `@allagents/promptfoo-x@${registryVersion}` : tarball;
+  const installation = registryVersion ? `@allagents/oh-my-promptfoo@${registryVersion}` : tarball;
   const expectedVersion = registryVersion ?? manifest.version;
   const pnpm =
     spawnSync("pnpm", ["--version"], { encoding: "utf8" }).status === 0
@@ -80,13 +84,13 @@ try {
     }
     await writeFile(
       join(cwd, "smoke.mjs"),
-      `import Default,{Provider,CopilotSdkProvider} from '@allagents/promptfoo-x';import{createRequire}from'node:module';import{readFileSync}from'node:fs';const require=createRequire(import.meta.url);const c=require('@allagents/promptfoo-x');if(Default!==Provider||typeof Provider!=='function'||typeof CopilotSdkProvider!=='function'||typeof c.Provider!=='function'||typeof c.CopilotSdkProvider!=='function')throw Error('Exports');const manifest=JSON.parse(readFileSync(new URL('../package.json',import.meta.resolve('@allagents/promptfoo-x')),'utf8'));if(manifest.version!==${JSON.stringify(expectedVersion)})throw Error('Loaded package version mismatch');if(process.argv[2]==='without-copilot'){let absent=false;try{require.resolve('@github/copilot-sdk');}catch(error){if(error.code!=='MODULE_NOT_FOUND')throw error;absent=true;}if(!absent)throw Error('Copilot SDK unexpectedly installed');}else{const peer=JSON.parse(readFileSync('node_modules/@github/copilot-sdk/package.json','utf8'));if(peer.version!=='1.0.6')throw Error('Copilot SDK version mismatch');await import('@github/copilot-sdk');}console.log('exports and loaded version passed');`,
+      `import Default,{Provider,CopilotSdkProvider} from '@allagents/oh-my-promptfoo';import{createRequire}from'node:module';import{readFileSync}from'node:fs';const require=createRequire(import.meta.url);const c=require('@allagents/oh-my-promptfoo');if(Default!==Provider||typeof Provider!=='function'||typeof CopilotSdkProvider!=='function'||typeof c.Provider!=='function'||typeof c.CopilotSdkProvider!=='function')throw Error('Exports');const manifest=JSON.parse(readFileSync(new URL('../package.json',import.meta.resolve('@allagents/oh-my-promptfoo')),'utf8'));if(manifest.version!==${JSON.stringify(expectedVersion)})throw Error('Loaded package version mismatch');if(process.argv[2]==='without-copilot'){let absent=false;try{require.resolve('@github/copilot-sdk');}catch(error){if(error.code!=='MODULE_NOT_FOUND')throw error;absent=true;}if(!absent)throw Error('Copilot SDK unexpectedly installed');}else{const peer=JSON.parse(readFileSync('node_modules/@github/copilot-sdk/package.json','utf8'));if(peer.version!=='1.0.6')throw Error('Copilot SDK version mismatch');await import('@github/copilot-sdk');}console.log('exports and loaded version passed');`,
     );
     run("node", ["smoke.mjs", "without-copilot"], cwd);
-    run("node", ["node_modules/@allagents/promptfoo-x/dist/cli.js", "--help"], cwd);
+    run("node", ["node_modules/@allagents/oh-my-promptfoo/dist/cli.js", "--help"], cwd);
     run(manager.command, [...manager.args, "@github/copilot-sdk@1.0.6"], cwd);
     run("node", ["smoke.mjs", "with-copilot"], cwd);
-    run("node", ["node_modules/@allagents/promptfoo-x/dist/cli.js", "--help"], cwd);
+    run("node", ["node_modules/@allagents/oh-my-promptfoo/dist/cli.js", "--help"], cwd);
     console.log(
       `${manager.name}: ${registryVersion ? "registry" : "packed"} ${expectedVersion} ESM/CommonJS exports and CLI passed without Copilot and with actual Copilot SDK 1.0.6`,
     );

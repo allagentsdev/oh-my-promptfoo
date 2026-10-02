@@ -1,25 +1,12 @@
 # Releasing to npm
 
-## First release under the new name (completed)
+## First release as oh-my-promptfoo
 
-`@allagents/promptfoo-x` is a new npm package; the published `@allagents/promptfoo-integration` package cannot be renamed in place. Version 1.5.0 is the first stable release under the new name. The Release Please workflow waits until that version exists on npm so it cannot mistake the old `v1.4.2` GitHub release for a release of the new package.
+`@allagents/oh-my-promptfoo` is a new npm package. Version 1.6.0 is its first stable release. The Release Please workflow waits until it is published, so it does not treat a release of an earlier package name as the current release.
 
-After the rename merged and validation passed, the reviewed main commit was tagged `v1.5.0` and a draft GitHub release was created. An `@allagents` npm owner published `1.5.0-rc.1` to establish the new package name, using these commands from a clean checkout of the tag:
+After the rename is merged and validation passes, tag the reviewed main commit `v1.6.0` and create a draft GitHub release. From a clean checkout of that tag, install dependencies with `bun install --frozen-lockfile`, build, and run the packed-package and Promptfoo E2E checks. Sign in with `npm login --auth-type=web` and publish with `npm publish ./packages/oh-my-promptfoo --access public --tag latest --provenance=false`. Verify the installed registry package with `bun scripts/smoke-packed-package.ts --registry 1.6.0` and `bun scripts/e2e.ts --registry 1.6.0` before making the GitHub release public.
 
-```sh
-bun install --frozen-lockfile
-bun run build
-bootstrap_dir=$(mktemp -d)
-npm pack ./packages/promptfoo-x --pack-destination "$bootstrap_dir"
-mkdir "$bootstrap_dir/unpacked"
-tar -xzf "$bootstrap_dir"/allagents-promptfoo-x-1.5.0.tgz -C "$bootstrap_dir/unpacked"
-npm pkg set version=1.5.0-rc.1 --prefix "$bootstrap_dir/unpacked/package"
-npm publish "$bootstrap_dir/unpacked/package" --access public --tag bootstrap --provenance=false
-```
-
-The bootstrap prerelease has no provenance. npm initially assigned its `latest` tag to that prerelease despite `--tag bootstrap`. Trusted publishers were then configured for `allagentsdev/promptfoo-x` and the `publish.yml` and `release-please.yml` workflows. The [stable publish run](https://github.com/allagentsdev/promptfoo-x/actions/runs/36961465621) built and published `1.5.0` with OIDC provenance, moved `latest` to the stable version, verified registry consumers, and made the GitHub release public. `release-please.yml` was dispatched afterward to resume automatic future releases.
-
-Keep the old npm package available. After the new package passes registry verification, deprecate the old package with a message pointing users to `@allagents/promptfoo-x`; do not unpublish it.
+Configure npm trusted publishing for the renamed repository before running later automated releases. Keep `@allagents/promptfoo-x` and `@allagents/promptfoo-integration` installable, and deprecate them with a message pointing to `@allagents/oh-my-promptfoo` after registry verification succeeds.
 
 ## Later releases
 
@@ -31,6 +18,6 @@ After the initial stable release, Release Please prepares version and changelog 
 
 4. If publishing fails before npm accepts the package, the GitHub release remains draft. npm may accept a package before its version and dist-tag become queryable; the publisher waits up to five minutes for indexing rather than immediately treating that lag as a failure. Rerun `publish.yml` for the same stable tag after a transient failure: an already-published version is verified, never republished. If registry consumer checks expose a real defect after npm acceptance, that version is immutable; fix it on `main` and publish a corrective version. Rerun `release-please.yml` only if dispatch itself failed.
 
-Configure npm trusted publishers for organization `allagentsdev`, repository `promptfoo-x`, GitHub environment `npm`: `release-please.yml` publishes `next` previews and `publish.yml` publishes stable `latest`, each with direct `npm publish` allowed. Both jobs need `id-token: write` and npm 11.6.2; no npm token is stored in GitHub. See [npm's trusted-publishing setup](https://docs.npmjs.com/trusted-publishers/).
+Configure npm trusted publishers for organization `allagentsdev`, repository `oh-my-promptfoo`, GitHub environment `npm`: `release-please.yml` publishes `next` previews and `publish.yml` publishes stable `latest`, each with direct `npm publish` allowed. Both jobs need `id-token: write` and npm 11.6.2; no npm token is stored in GitHub. See [npm's trusted-publishing setup](https://docs.npmjs.com/trusted-publishers/).
 
 The initial `1.0.0-rc.1` was published manually without provenance. `1.0.0` was the first stable OIDC release from commit `e10a9d3`; an immediate npm indexing read failed, and the successful rerun verified the accepted package without republishing. `1.0.1-next.11` became the first automatic `next` preview, and merging Release Please PR #13 published `1.0.1` under `latest` from its reviewed merge commit. Those three OIDC-published versions have signed provenance; the manual `rc.1` does not. Published version bytes and metadata cannot be changed retroactively.

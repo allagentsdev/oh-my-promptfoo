@@ -13,7 +13,7 @@ if (
 )
   throw new Error("Publish through the OIDC-authorized GitHub Actions Publish workflow");
 
-const manifest = JSON.parse(await readFile("packages/promptfoo-x/package.json", "utf8"));
+const manifest = JSON.parse(await readFile("packages/oh-my-promptfoo/package.json", "utf8"));
 const rootManifest = JSON.parse(await readFile("package.json", "utf8"));
 if (rootManifest.version !== manifest.version)
   throw new Error(
@@ -63,7 +63,7 @@ if (existing === undefined) {
       "latest",
       "--registry=https://registry.npmjs.org",
     ],
-    { cwd: "packages/promptfoo-x", stdio: "inherit" },
+    { cwd: "packages/oh-my-promptfoo", stdio: "inherit" },
   );
   if (result.error) throw result.error;
   if (result.status !== 0)

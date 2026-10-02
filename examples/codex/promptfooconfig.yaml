@@ -1,6 +1,6 @@
 prompts: ["{{task}}"]
 providers:
-  - id: package:@allagents/promptfoo-x:Provider
+  - id: package:@allagents/oh-my-promptfoo:Provider
     config:
       delegate:
         id: openai:codex-sdk
@@ -12,7 +12,7 @@ providers:
       workspace:
         sources:
           - type: git
-            repository: https://github.com/allagentsdev/promptfoo-x.git
+            repository: https://github.com/allagentsdev/oh-my-promptfoo.git
             ref: main
             destination: project
 tests:
