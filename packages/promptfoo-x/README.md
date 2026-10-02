@@ -19,8 +19,6 @@ npm install --save-dev promptfoo@0.122.0 @allagents/promptfoo-x
 npm install --save-dev @github/copilot-sdk@1.0.6
 ```
 
-If you used `@allagents/promptfoo-integration`, install the new package and update its `package:` references in your YAML. The old npm package remains available for existing installs.
-
 Set the credential for the agent you select before running an evaluation. OCI sources also require an ORAS 1.x executable supplied through `ALLAGENTS_ORAS_PATH`.
 
 ## Prepare a workspace and run an agent
