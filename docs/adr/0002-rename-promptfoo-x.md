@@ -10,7 +10,7 @@ Users repeat the package name in each Promptfoo `package:` provider reference. T
 
 ## Decision
 
-Rename the GitHub repository to `allagentsdev/promptfoo-x` and publish future versions as `@allagents/promptfoo-x`. The workspace provider is available as `package:@allagents/promptfoo-x:default`; the direct Copilot provider remains `package:@allagents/promptfoo-x:CopilotSdkProvider`. Promptfoo requires the export suffix after the package name.
+Rename the GitHub repository to `allagentsdev/promptfoo-x` and publish future versions as `@allagents/promptfoo-x`. Use the named workspace provider as `package:@allagents/promptfoo-x:Provider`; the direct Copilot provider remains `package:@allagents/promptfoo-x:CopilotSdkProvider`. Promptfoo requires the export suffix after the package name. The published `:default` alias remains available for compatibility.
 
 The new npm name requires a separate first publication. Publish a manually authenticated `1.5.0-rc.1` under the `bootstrap` tag to establish the name, then publish stable 1.5.0 through the trusted GitHub Actions workflow. Keep `@allagents/promptfoo-integration` available for existing installs and document the migration.
 

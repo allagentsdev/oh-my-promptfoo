@@ -2,7 +2,7 @@
 
 The [README](../README.md) has quick starts for the workspace-owning `Provider` and the direct `CopilotSdkProvider`. This guide records their configuration, response, and resource behavior. The [examples](../examples) include Codex, Claude, Copilot, Git/OCI, source permissions, and cache use.
 
-Both providers use stock Promptfoo. Their YAML IDs are `package:@allagents/promptfoo-x:default` and `package:@allagents/promptfoo-x:CopilotSdkProvider`.
+Both providers use stock Promptfoo. Their YAML IDs are `package:@allagents/promptfoo-x:Provider` and `package:@allagents/promptfoo-x:CopilotSdkProvider`.
 
 ## Provider response and assertions
 
