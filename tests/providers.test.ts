@@ -29,14 +29,14 @@ import {
   validateCopilotConfig,
   validateDelegateConfig,
   validateProviderConfig,
-} from "../packages/promptfoo-integration/src/config";
-import { CopilotSdkProvider, Provider } from "../packages/promptfoo-integration/src/index";
+} from "../packages/promptfoo-x/src/config";
+import { CopilotSdkProvider, Provider } from "../packages/promptfoo-x/src/index";
 import {
   type CallFrame,
   jsonSafe,
   runDelegate,
   wireContext,
-} from "../packages/promptfoo-integration/src/protocol";
+} from "../packages/promptfoo-x/src/protocol";
 import { atomicJson, MARKER, protect, removeTree } from "../packages/workspace-core/src/fs";
 
 const roots: string[] = [];
@@ -258,7 +258,9 @@ describe("workspace provider publication and lifetime", () => {
       repository,
       join(prepared, "sources", key, "mirror"),
     ]);
+    await chmod(join(prepared, "sources", key, "mirror"), 0o700);
     await cp(repository, join(prepared, "sources", key, "seed"), { recursive: true });
+    await chmod(join(prepared, "sources", key, "seed"), 0o700);
     await cp(repository, protectedPath, { recursive: true });
     await protect(protectedPath, false);
     await chmod(prepared, 0o700);
@@ -972,7 +974,7 @@ describe("native tracing relay", () => {
 });
 
 test("native peer resolution selects the evaluation project import condition", async () => {
-  const { resolvePeer } = await import("../packages/promptfoo-integration/src/protocol.ts");
+  const { resolvePeer } = await import("../packages/promptfoo-x/src/protocol.ts");
   const path = await project("promptfoo", native);
   const root = join(path, "node_modules/promptfoo");
   await writeFile(

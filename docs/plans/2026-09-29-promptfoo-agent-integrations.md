@@ -5,6 +5,8 @@ type: feat
 status: proposed
 ---
 
+> Historical plan: The current repository and npm package are `promptfoo-x`; see [ADR 0002](../adr/0002-rename-promptfoo-x.md).
+
 # Promptfoo agent integrations implementation plan
 
 ## Goal

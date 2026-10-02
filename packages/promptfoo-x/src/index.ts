@@ -87,8 +87,9 @@ class Calls {
 export class Provider extends Calls {
   // Promptfoo 0.122 unwraps a module's default before selecting its named
   // package export. Keep the ordinary default class while exposing that loader's
-  // two named constructors on the same function object.
+  // named constructors and a default alias on the same function object.
   static readonly Provider = Provider;
+  static readonly default = Provider;
   static get CopilotSdkProvider(): typeof CopilotSdkProvider {
     return CopilotSdkProvider;
   }

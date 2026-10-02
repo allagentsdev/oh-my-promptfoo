@@ -2,7 +2,7 @@
 
 The [README](../README.md) has quick starts for the workspace-owning `Provider` and the direct `CopilotSdkProvider`. This guide records their configuration, response, and resource behavior. The [examples](../examples) include Codex, Claude, Copilot, Git/OCI, source permissions, and cache use.
 
-Both providers use stock Promptfoo. Their YAML IDs are `package:@allagents/promptfoo-integration:Provider` and `package:@allagents/promptfoo-integration:CopilotSdkProvider`.
+Both providers use stock Promptfoo. Their YAML IDs are `package:@allagents/promptfoo-x:default` and `package:@allagents/promptfoo-x:CopilotSdkProvider`.
 
 ## Provider response and assertions
 
@@ -57,7 +57,7 @@ This opt-in path requires a trusted, single-job runner with no concurrent untrus
 
 ### Trusted prebuilt Git views
 
-For a trusted single-job runner, `ALLAGENTS_PREBUILT_ROOT` can point to an existing absolute, owned private `0700` directory, outside the seed-cache and workspace roots. It is a provider runtime channel (via loader `options.env` or the runner's process environment), not authored workspace configuration or delegate environment. The provider never creates or deletes this root. It rejects symlink ancestors, unowned or group-writable prepared directories, and a missing or malformed ownership marker (`.allagents-owner.json` containing `{"schemaVersion":1,"package":"@allagents/promptfoo-integration","kind":"prebuilt-sources"}`).
+For a trusted single-job runner, `ALLAGENTS_PREBUILT_ROOT` can point to an existing absolute, owned private `0700` directory, outside the seed-cache and workspace roots. It is a provider runtime channel (via loader `options.env` or the runner's process environment), not authored workspace configuration or delegate environment. The provider never creates or deletes this root. It rejects symlink ancestors, unowned or group-writable prepared directories, and a missing or malformed ownership marker (`.allagents-owner.json` containing `{"schemaVersion":1,"package":"@allagents/promptfoo-integration","kind":"prebuilt-sources"}`). The old package name remains the on-disk owner identifier for compatibility with existing prepared workspaces.
 
 The runner atomically publishes `manifest.json` only after preparing its sources: `{"schemaVersion":1,"sources":[{"repository":"https://…","commit":"<40 lowercase hex>","destination":"project"}]}`. Each record must match **exactly** one pinned, credential-free HTTPS, `read-only` Git source from `workspace.sources` (including the repository URL spelling, commit in `ref`, and normalized destination). Order is immaterial; missing, duplicate and unexpected records fail closed. For each record, compute `key = SHA256(UTF8(JSON.stringify([repository, commit, destination])))` in lowercase hexadecimal and prepare a physically independent checkout at `<root>/sources/<key>/protected`; its `.git` directory must be local, HEAD pinned and working tree clean. The runner also prepares a clean original at `<root>/sources/<key>/seed` and a Git object mirror at `<root>/sources/<key>/mirror`; these are runner-owned, not provider cache entries. Publish the root and manifest privately only after verifying the checkout and any asset hashes.
 
@@ -112,7 +112,7 @@ Both commands report removed/retained entries and allocated bytes and return non
 
 ## Direct Copilot configuration
 
-Direct Copilot uses `package:@allagents/promptfoo-integration:CopilotSdkProvider` with an existing `working_dir`; use an absolute path in evaluation configs. Optional fields are `model`, `reasoning_effort`, `timeoutMs`, `permissions`, and explicit `env`. Its optional BYOK `provider` is an endpoint object with required `baseUrl` and supported SDK fields (`type`, `wireApi`, `apiKey`, `wireModel`, `azure.apiVersion`); strings and embedded URL credentials are rejected. Defaults deny writes, shell, and network. Copilot tool events produce tool spans; skill inference from assistant text is disabled.
+Direct Copilot uses `package:@allagents/promptfoo-x:CopilotSdkProvider` with an existing `working_dir`; use an absolute path in evaluation configs. Optional fields are `model`, `reasoning_effort`, `timeoutMs`, `permissions`, and explicit `env`. Its optional BYOK `provider` is an endpoint object with required `baseUrl` and supported SDK fields (`type`, `wireApi`, `apiKey`, `wireModel`, `azure.apiVersion`); strings and embedded URL credentials are rejected. Defaults deny writes, shell, and network. Copilot tool events produce tool spans; skill inference from assistant text is disabled.
 
 Both direct and workspace-backed Copilot responses report `metadata.skillCalls` and `metadata.copilot.skillSupport: true`. Only successful local `read`, `read_file`, or `view` tool events targeting an existing `.agents/skills/<name>/SKILL.md`, `.claude/skills/<name>/SKILL.md`, or `.github/skills/<name>/SKILL.md` inside the working directory produce `{ name, path, source: "read-tool" }`. Failed or unfinished reads, assistant text, other tool names, MCP tools, symlinked skill paths, and paths escaping the workspace do not count; other skill invocation mechanisms are not observed.
 

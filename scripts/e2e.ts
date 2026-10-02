@@ -37,11 +37,7 @@ function run(command: string, args: string[], dir = cwd, accepted = [0]) {
 }
 try {
   const packed = JSON.parse(
-    run(
-      "npm",
-      ["pack", "--json", "--pack-destination", cwd],
-      join(repo, "packages/promptfoo-integration"),
-    ),
+    run("npm", ["pack", "--json", "--pack-destination", cwd], join(repo, "packages/promptfoo-x")),
   )[0];
   await writeFile(
     join(cwd, "package.json"),
@@ -52,13 +48,11 @@ try {
     "--legacy-peer-deps",
     "--no-audit",
     "--no-fund",
-    registryVersion
-      ? `@allagents/promptfoo-integration@${registryVersion}`
-      : join(cwd, packed.filename),
+    registryVersion ? `@allagents/promptfoo-x@${registryVersion}` : join(cwd, packed.filename),
     "promptfoo@0.122.0",
   ]);
   const installedManifest = JSON.parse(
-    await readFile(join(cwd, "node_modules/@allagents/promptfoo-integration/package.json"), "utf8"),
+    await readFile(join(cwd, "node_modules/@allagents/promptfoo-x/package.json"), "utf8"),
   );
   if (registryVersion && installedManifest.version !== registryVersion)
     throw new Error("Registry package version mismatch");
@@ -89,7 +83,7 @@ try {
   );
   const commit = run("git", ["rev-parse", "HEAD"], source).trim();
   const wrapper = (id: string, label: string, permissions: string) => ({
-    id: "package:@allagents/promptfoo-integration:Provider",
+    id: "package:@allagents/promptfoo-x:default",
     label,
     config: {
       delegate: {
@@ -258,7 +252,7 @@ try {
     prompts: ["direct-row"],
     providers: [
       {
-        id: "package:@allagents/promptfoo-integration:CopilotSdkProvider",
+        id: "package:@allagents/promptfoo-x:CopilotSdkProvider",
         config: { working_dir: directDir },
       },
     ],
@@ -303,13 +297,13 @@ try {
     throw Error("Native error response or skipped assertion behavior changed");
   await writeFile(
     join(cwd, "abandoned.mjs"),
-    `import {Provider} from '@allagents/promptfoo-integration';const provider=new Provider(${JSON.stringify({ config: wrapper("openai:codex-sdk", "abandoned", "all").config })});const response=await provider.callApi('abandoned');if(response.error)throw Error(response.error);console.log(response.metadata.workspace.path);`,
+    `import {Provider} from '@allagents/promptfoo-x';const provider=new Provider(${JSON.stringify({ config: wrapper("openai:codex-sdk", "abandoned", "all").config })});const response=await provider.callApi('abandoned');if(response.error)throw Error(response.error);console.log(response.metadata.workspace.path);`,
   );
   const abandoned = run("node", ["abandoned.mjs"]).trim();
   await import("node:fs/promises").then((fs) => fs.access(abandoned));
   await writeFile(
     join(cwd, "recover.mjs"),
-    `import {Provider} from '@allagents/promptfoo-integration';const provider=new Provider(${JSON.stringify({ config: wrapper("openai:codex-sdk", "recovery", "all").config })});await provider.cleanup();`,
+    `import {Provider} from '@allagents/promptfoo-x';const provider=new Provider(${JSON.stringify({ config: wrapper("openai:codex-sdk", "recovery", "all").config })});await provider.cleanup();`,
   );
   run("node", ["recover.mjs"]);
   try {
