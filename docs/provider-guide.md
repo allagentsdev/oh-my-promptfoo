@@ -83,7 +83,18 @@ containing an execution `error`, so a Promptfoo `afterEach` hook can associate
 the final scored row with its actual workspace call even when prompts or grades
 complete out of order. Without a subscriber, response metadata is unchanged.
 
-Phases: `case-start`, `seed-start`, `seed-cache-hit`, `source-start`, `git-fetch-start`, `git-fetch-finished`, `source-finished`, `seed-ready`, `protected-copy-start`, `protected-copy-finished`, `workspace-ready`, `agent-start`, `agent-finished`, `case-finished`. `git-fetch-*` covers the single pinned-commit HTTPS fetch, without cloning the unrelated default branch; `source-*` covers actual materialization, not ref resolution. A cached seed emits `seed-cache-hit` and `seed-ready` without source events. `protected-copy-*` appears only when a new protected checkout requires a physical copy; cache reuse and successful reflinks omit it. A failing phase may have no matching finish, but each started provider case ends with `case-finished` and `outcome: \"error\"`. A native agent error marks both `agent-finished` and `case-finished` as errors. Event objects carry no timings; subscribers can record elapsed time locally. This channel is separate from `allagents.workspace.preparation`; its `{ phase, elapsedMs }` timing schema remains unchanged, with remote acquisition now reporting `git-init` and `git-fetch` instead of `git-clone`.
+Phases: `case-start`, `seed-start`, `seed-cache-hit`, `source-start`, `git-fetch-start`, `git-fetch-finished`, `source-finished`, `seed-ready`, `protected-copy-start`, `protected-copy-finished`, `workspace-ready`, `agent-start`, `agent-finished`, `protected-git-check-start`, `protected-git-check-finished`, `protected-stamp-start`, `protected-stamp-finished`, `case-finished`. `git-fetch-*` covers the single pinned-commit HTTPS fetch, without cloning the unrelated default branch; `source-*` covers actual materialization, not ref resolution. A cached seed emits `seed-cache-hit` and `seed-ready` without source events. `protected-copy-*` appears only when a new protected checkout requires a physical copy; cache reuse and successful reflinks omit it. A failing phase may have no matching finish, but each started provider case ends with `case-finished` and `outcome: \"error\"`. A native agent error marks both `agent-finished` and `case-finished` as errors. Event objects carry no timings; subscribers can record elapsed time locally. This channel is separate from `allagents.workspace.preparation`; its `{ phase, elapsedMs }` timing schema remains unchanged, with remote acquisition now reporting `git-init` and `git-fetch` instead of `git-clone`.
+
+Post-agent verification of each prepared read-only Git source emits
+`protected-git-check-start` / `protected-git-check-finished` around pinned HEAD
+and clean-worktree checks, followed by `protected-stamp-start` /
+`protected-stamp-finished` around the full metadata stamp and baseline comparison.
+These events do not appear during pre-agent preparation. Each includes
+`caseIndex`, `sourceIndex` (one-based among prepared read-only Git sources), and
+`sourceCount` (the number of those sources), all positive safe integers. A
+finished phase carries `outcome: "ok" | "error"`; a failing Git check does not
+start the stamp phase. The checks and mutation rejection are unchanged; the
+event pairs allow subscribers to time each step without exposing source identity.
 
 The existing preparation timing channel also emits fixed `checkout-admission`,
 `checkout-copy-and-protect`, `checkout-inventory`, `checkout-stage-stamp`,

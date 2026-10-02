@@ -197,7 +197,7 @@ export class Provider extends Calls {
             publishProgress("agent-finished", caseIndex, undefined, undefined, "error");
             throw error;
           }
-          await this.manager.validateProtected(handle);
+          await this.manager.validateProtected(handle, caseIndex);
           const metadata = response.metadata === undefined ? {} : response.metadata;
           if (!metadata || typeof metadata !== "object" || Array.isArray(metadata))
             throw new Error("Delegate metadata must be a JSON object");

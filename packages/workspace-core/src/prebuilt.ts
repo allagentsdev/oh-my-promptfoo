@@ -3,6 +3,7 @@ import { lstat } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { destination } from "./config.js";
 import { assertNoSymlinkAncestors, contained, json, MARKER, PACKAGE, treeStamp } from "./fs.js";
+import { publishProgress } from "./progress.js";
 import { runSource, sourceEnvironment } from "./sources/process.js";
 import type { GitSource, ResolvedSource, RuntimeChannels, WorkspaceSpec } from "./types.js";
 
@@ -169,7 +170,11 @@ export class PreparedSources {
     return contained(this.root, join(this.root, "sources", preparedKey(source), "protected"));
   }
 
-  async check(source: Entry, baseline?: string): Promise<string> {
+  async check(
+    source: Entry,
+    baseline?: string,
+    progress?: { caseIndex: number; sourceIndex: number; sourceCount: number },
+  ): Promise<string> {
     const key = preparedKey(source);
     if (this.invalid.has(key))
       throw new Error("Prepared source checkout mutated; reuse invalidated");
@@ -211,15 +216,55 @@ export class PreparedSources {
           privatePaths: [this.root, path],
           limit: 4096,
         });
-      if ((await run(["rev-parse", "--verify", "HEAD"])).toString().trim() !== source.commit)
-        throw new Error("Prepared source HEAD differs from pinned commit");
-      if ((await run(["status", "--porcelain=v1", "-z", "--untracked-files=all"])).length)
-        throw new Error("Prepared source Git worktree is not clean");
-      const stamp = await treeStamp(path, true);
-      const expected = baseline ?? this.stamps.get(key);
-      if (expected && expected !== stamp) throw new Error("Prepared source checkout mutated");
-      this.stamps.set(key, stamp);
-      return stamp;
+      if (progress)
+        publishProgress(
+          "protected-git-check-start",
+          progress.caseIndex,
+          progress.sourceIndex,
+          progress.sourceCount,
+        );
+      let gitOutcome: "ok" | "error" = "error";
+      try {
+        if ((await run(["rev-parse", "--verify", "HEAD"])).toString().trim() !== source.commit)
+          throw new Error("Prepared source HEAD differs from pinned commit");
+        if ((await run(["status", "--porcelain=v1", "-z", "--untracked-files=all"])).length)
+          throw new Error("Prepared source Git worktree is not clean");
+        gitOutcome = "ok";
+      } finally {
+        if (progress)
+          publishProgress(
+            "protected-git-check-finished",
+            progress.caseIndex,
+            progress.sourceIndex,
+            progress.sourceCount,
+            gitOutcome,
+          );
+      }
+      if (progress)
+        publishProgress(
+          "protected-stamp-start",
+          progress.caseIndex,
+          progress.sourceIndex,
+          progress.sourceCount,
+        );
+      let stampOutcome: "ok" | "error" = "error";
+      try {
+        const stamp = await treeStamp(path, true);
+        const expected = baseline ?? this.stamps.get(key);
+        if (expected && expected !== stamp) throw new Error("Prepared source checkout mutated");
+        this.stamps.set(key, stamp);
+        stampOutcome = "ok";
+        return stamp;
+      } finally {
+        if (progress)
+          publishProgress(
+            "protected-stamp-finished",
+            progress.caseIndex,
+            progress.sourceIndex,
+            progress.sourceCount,
+            stampOutcome,
+          );
+      }
     } catch {
       this.invalid.add(key);
       throw new Error("Prepared source checkout failed integrity verification");

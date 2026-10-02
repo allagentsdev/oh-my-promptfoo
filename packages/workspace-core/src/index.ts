@@ -427,11 +427,20 @@ export class WorkspaceManager {
     if (mounts.some((path) => path === root || path.startsWith(`${root}/`)))
       throw new Error("Unknown mount blocks workspace removal and lease release");
   }
-  async validateProtected(handle: WorkspaceHandle): Promise<void> {
+  async validateProtected(handle: WorkspaceHandle, caseIndex?: number): Promise<void> {
     await this.initialization;
+    const ordinal =
+      caseIndex !== undefined && Number.isSafeInteger(caseIndex) && caseIndex > 0
+        ? caseIndex
+        : undefined;
+    let sourceCount = 0;
+    if (ordinal !== undefined)
+      for (const view of handle.adapters) if (view.prebuiltKey) sourceCount++;
+    let sourceIndex = 0;
     for (const view of handle.adapters) {
       if (view.checkoutKey) await this.cache.checkProtected(view.checkoutKey);
       if (view.prebuiltKey) {
+        sourceIndex++;
         const source = handle.sources.find((item) => item.destination === view.destination);
         if (
           !source ||
@@ -451,7 +460,11 @@ export class WorkspaceManager {
             roots(this.channels).cache,
             roots(this.channels).runtime,
           );
-          await prepared.check(source, view.prebuiltStamp);
+          await prepared.check(
+            source,
+            view.prebuiltStamp,
+            ordinal !== undefined ? { caseIndex: ordinal, sourceIndex, sourceCount } : undefined,
+          );
         } catch (error) {
           this.invalidPrebuilt.add(view.prebuiltKey);
           throw error;
