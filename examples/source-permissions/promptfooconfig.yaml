@@ -1,6 +1,6 @@
 prompts: ["{{task}}"]
 providers:
-  - id: package:@allagents/promptfoo-x:Provider
+  - id: package:oh-my-promptfoo:Provider
     label: repo-readonly
     config:
       delegate:
@@ -12,11 +12,11 @@ providers:
       workspace:
         sources:
           - type: git
-            repository: https://github.com/allagentsdev/promptfoo-x.git
+            repository: https://github.com/allagentsdev/oh-my-promptfoo.git
             ref: main
             destination: project
             permissions: read-only
-  - id: package:@allagents/promptfoo-x:Provider
+  - id: package:oh-my-promptfoo:Provider
     label: repo-writable
     config:
       delegate:
@@ -28,7 +28,7 @@ providers:
       workspace:
         sources:
           - type: git
-            repository: https://github.com/allagentsdev/promptfoo-x.git
+            repository: https://github.com/allagentsdev/oh-my-promptfoo.git
             ref: main
             destination: project
             permissions: all

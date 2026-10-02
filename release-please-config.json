@@ -6,7 +6,7 @@
       "extra-files": [
         {
           "type": "json",
-          "path": "packages/promptfoo-x/package.json",
+          "path": "packages/oh-my-promptfoo/package.json",
           "jsonpath": "$.version"
         }
       ]

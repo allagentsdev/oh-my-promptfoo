@@ -29,14 +29,14 @@ import {
   validateCopilotConfig,
   validateDelegateConfig,
   validateProviderConfig,
-} from "../packages/promptfoo-x/src/config";
-import { CopilotSdkProvider, Provider } from "../packages/promptfoo-x/src/index";
+} from "../packages/oh-my-promptfoo/src/config";
+import { CopilotSdkProvider, Provider } from "../packages/oh-my-promptfoo/src/index";
 import {
   type CallFrame,
   jsonSafe,
   runDelegate,
   wireContext,
-} from "../packages/promptfoo-x/src/protocol";
+} from "../packages/oh-my-promptfoo/src/protocol";
 import { atomicJson, MARKER, protect, removeTree } from "../packages/workspace-core/src/fs";
 
 const roots: string[] = [];
@@ -1244,7 +1244,7 @@ describe("native tracing relay", () => {
 });
 
 test("native peer resolution selects the evaluation project import condition", async () => {
-  const { resolvePeer } = await import("../packages/promptfoo-x/src/protocol.ts");
+  const { resolvePeer } = await import("../packages/oh-my-promptfoo/src/protocol.ts");
   const path = await project("promptfoo", native);
   const root = join(path, "node_modules/promptfoo");
   await writeFile(

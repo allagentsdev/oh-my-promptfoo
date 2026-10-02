@@ -2,7 +2,7 @@
 
 The [README](../README.md) has quick starts for the workspace-owning `Provider` and the direct `CopilotSdkProvider`. This guide records their configuration, response, and resource behavior. The [examples](../examples) include Codex, Claude, Copilot, Git/OCI, source permissions, and cache use.
 
-Both providers use stock Promptfoo. Their YAML IDs are `package:@allagents/promptfoo-x:Provider` and `package:@allagents/promptfoo-x:CopilotSdkProvider`.
+Both providers use stock Promptfoo. Their YAML IDs are `package:oh-my-promptfoo:Provider` and `package:oh-my-promptfoo:CopilotSdkProvider`.
 
 ## Provider response and assertions
 
@@ -135,7 +135,7 @@ Both commands report removed/retained entries and allocated bytes and return non
 
 ## Direct Copilot configuration
 
-Direct Copilot uses `package:@allagents/promptfoo-x:CopilotSdkProvider` with an existing `working_dir`; use an absolute path in evaluation configs. Optional fields are `model`, `reasoning_effort`, `timeoutMs`, `permissions`, and explicit `env`. Its optional BYOK `provider` is an endpoint object with required `baseUrl` and supported SDK fields (`type`, `wireApi`, `apiKey`, `wireModel`, `azure.apiVersion`); strings and embedded URL credentials are rejected. Defaults deny writes, shell, and network. Copilot tool events produce tool spans; skill inference from assistant text is disabled.
+Direct Copilot uses `package:oh-my-promptfoo:CopilotSdkProvider` with an existing `working_dir`; use an absolute path in evaluation configs. Optional fields are `model`, `reasoning_effort`, `timeoutMs`, `permissions`, and explicit `env`. Its optional BYOK `provider` is an endpoint object with required `baseUrl` and supported SDK fields (`type`, `wireApi`, `apiKey`, `wireModel`, `azure.apiVersion`); strings and embedded URL credentials are rejected. Defaults deny writes, shell, and network. Copilot tool events produce tool spans; skill inference from assistant text is disabled.
 
 Both direct and workspace-backed Copilot responses report `metadata.skillCalls` and `metadata.copilot.skillSupport: true`. Only successful local `read`, `read_file`, or `view` tool events targeting an existing `.agents/skills/<name>/SKILL.md`, `.claude/skills/<name>/SKILL.md`, or `.github/skills/<name>/SKILL.md` inside the working directory produce `{ name, path, source: "read-tool" }`. Failed or unfinished reads, assistant text, other tool names, MCP tools, symlinked skill paths, and paths escaping the workspace do not count; other skill invocation mechanisms are not observed.
 

@@ -47,7 +47,7 @@ async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "allagents-publish-test-"));
   await mkdir(join(root, "scripts"));
   await mkdir(join(root, "bin"));
-  await mkdir(join(root, "packages", "promptfoo-x"), { recursive: true });
+  await mkdir(join(root, "packages", "oh-my-promptfoo"), { recursive: true });
   await copyFile(
     join(import.meta.dir, "..", "scripts", "publish.ts"),
     join(root, "scripts", "publish.ts"),
@@ -66,8 +66,8 @@ async function fixture() {
     `${JSON.stringify({ version: "1.0.0", private: true })}\n`,
   );
   await writeFile(
-    join(root, "packages", "promptfoo-x", "package.json"),
-    `${JSON.stringify({ name: "@allagents/promptfoo-x", version: "1.0.0", private: true })}\n`,
+    join(root, "packages", "oh-my-promptfoo", "package.json"),
+    `${JSON.stringify({ name: "oh-my-promptfoo", version: "1.0.0", private: true })}\n`,
   );
   const registry = join(root, "registry-state");
   await writeFile(registry, JSON.stringify({ versions: [], tags: {}, published: [] }));

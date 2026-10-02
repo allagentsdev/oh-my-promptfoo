@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.6.0 (2026-10-03)
+
+- Publish the package as `oh-my-promptfoo`.
+- Preserve provider behavior and existing workspace cache ownership markers.
+
 ## [1.5.2](https://github.com/allagentsdev/promptfoo-x/compare/v1.5.1...v1.5.2) (2026-10-02)
 
 

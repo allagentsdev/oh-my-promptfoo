@@ -1,6 +1,6 @@
 # ADR 0002: Use a short Promptfoo package name
 
-- Status: Accepted
+- Status: Superseded for naming by [ADR 0003](0003-rename-oh-my-promptfoo.md)
 - Date: 2026-10-02
 - Supersedes: the repository and npm package names in [ADR 0001](0001-publish-workspace-owning-agent-providers.md)
 
