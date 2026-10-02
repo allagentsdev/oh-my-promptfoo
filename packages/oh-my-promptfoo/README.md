@@ -2,7 +2,7 @@
 
 Run coding-agent evaluations with stock Promptfoo. This package provides two entry points:
 
-If you installed `@allagents/promptfoo-x` or `@allagents/promptfoo-integration`, switch the install name and `package:` provider IDs to `oh-my-promptfoo`. Existing workspace caches remain compatible.
+Existing workspace caches remain compatible with earlier releases.
 
 | Use case | Promptfoo provider |
 | --- | --- |

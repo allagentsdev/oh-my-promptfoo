@@ -6,7 +6,7 @@
 
 The first release was tagged `v1.6.0` at reviewed main commit `50c5684` and published with `npm login --auth-type=web` and `npm publish ./packages/oh-my-promptfoo --access public --tag latest --provenance=false`. Packed-package checks, installed-registry consumers, and Promptfoo E2E passed before the GitHub release became public.
 
-Trusted publishing is configured for the renamed repository's preview and stable workflows. Published versions of `@allagents/promptfoo-x` remain installable and are deprecated with a pointer to `oh-my-promptfoo`. `@allagents/promptfoo-integration` is no longer available from the npm registry.
+Trusted publishing is configured for the renamed repository's preview and stable workflows. The earlier npm packages have been removed from the registry; `oh-my-promptfoo` is the installable package.
 
 ## Later releases
 
