@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.4.2](https://github.com/allagentsdev/promptfoo-integration/compare/v1.4.1...v1.4.2) (2026-10-02)
+
+
+### Bug Fixes
+
+* expose workspace case ordinal for graded rows ([#40](https://github.com/allagentsdev/promptfoo-integration/issues/40)) ([d73ce95](https://github.com/allagentsdev/promptfoo-integration/commit/d73ce958069508c46812ea03080aaec6d140faba))
+
 ## [1.4.1](https://github.com/allagentsdev/promptfoo-integration/compare/v1.4.0...v1.4.1) (2026-10-01)
 
 
