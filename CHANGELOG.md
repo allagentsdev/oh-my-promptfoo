@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.5.1](https://github.com/allagentsdev/promptfoo-x/compare/v1.5.0...v1.5.1) (2026-10-02)
+
+
+### Performance Improvements
+
+* measure protected Git and stamp checks by ordinal ([#45](https://github.com/allagentsdev/promptfoo-x/issues/45)) ([b35e060](https://github.com/allagentsdev/promptfoo-x/commit/b35e06062240e286945ea0e8ec10d60cdfeadb1e))
+
 ## 1.5.0 (2026-10-02)
 
 - Publish the package under the new `@allagents/promptfoo-x` name.
