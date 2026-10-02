@@ -6,11 +6,11 @@ Both providers use stock Promptfoo. Their YAML IDs are `package:@allagents/promp
 
 ## Provider response and assertions
 
-Each workspace-provider call returns a distinct absolute `metadata.workspace.path`, an immutable manifest digest, resolved source commits/digests, and `cleanup: best-effort-evaluation`. Native output, raw response, usage, cost, and metadata (including `skillCalls`) keep their original locations. Codex's root Git check is bypassed internally because repositories are nested below the workspace root. A native top-level `error` remains an execution error; Promptfoo skips assertions for that row.
+Each workspace-provider call returns a distinct absolute `metadata.workspace.path`, an immutable manifest digest, resolved source commits/digests, and `cleanup: best-effort-evaluation`. Native output, raw response, usage, cost, and metadata (including `skillCalls`) keep their original locations. Codex's root Git check is bypassed internally because workspace roots may contain nested repositories. A native top-level `error` remains an execution error; Promptfoo skips assertions for that row.
 
 ## Workspace provider configuration
 
-Provider config is closed: only `delegate`, `workspace`, `fileChanges`, and `timeoutMs` are accepted. The delegates are exactly `openai:codex-sdk`, `anthropic:claude-agent-sdk`, and `copilot-sdk`. Prompt-level config can change allowed `delegate.config` fields only. Authored working directories, sessions, executable overrides, discovery, arbitrary native passthroughs, environment inheritance, acquisition variables, and cache controls are rejected. The wrapper forces execution and rejects cached responses. Use explicit `delegate.env` for model credentials.
+Provider config is closed: only `delegate`, `workspace`, `workingDir`, `fileChanges`, and `timeoutMs` are accepted. The delegates are exactly `openai:codex-sdk`, `anthropic:claude-agent-sdk`, and `copilot-sdk`. Prompt-level config can change allowed `delegate.config` fields only. Delegate-level working directories, sessions, executable overrides, discovery, arbitrary native passthroughs, environment inheritance, acquisition variables, and cache controls are rejected. The wrapper forces execution and rejects cached responses. Use explicit `delegate.env` for model credentials.
 
 | Field | Required | Purpose |
 | --- | --- | --- |
@@ -20,6 +20,7 @@ Provider config is closed: only `delegate`, `workspace`, `fileChanges`, and `tim
 | `workspace.sources` | Yes | Lists Git or OCI inputs; `[]` starts with an empty workspace |
 | `workspace.limits` | No | Narrows source count, download/extraction bytes, or acquisition timeout |
 | `workspace.viewMode` | No | `auto` (default) tries reflinks then disk-admitted physical copies; `copy-only` skips reflinks and uses disk-admitted physical copies for writable views and protected read-only checkouts |
+| `workingDir` | No | Starts the agent in an existing directory relative to the prepared workspace root, such as `project`; defaults to the root. The path must be normalized and contained. A protected read-only source can be selected. |
 | `fileChanges` | No | Captures bounded after-bytes and a diff; defaults to `false` |
 | `timeoutMs` | No | Limits the agent call |
 
