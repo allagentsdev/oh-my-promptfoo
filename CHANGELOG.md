@@ -6,6 +6,12 @@
 - Expose the workspace provider as `package:@allagents/promptfoo-x:default`.
 - Keep existing cache ownership markers compatible with earlier installations.
 
+## [1.4.2](https://github.com/allagentsdev/promptfoo-x/compare/v1.4.1...v1.4.2) (2026-10-02)
+
+### Bug Fixes
+
+* expose workspace case ordinal for graded rows ([#40](https://github.com/allagentsdev/promptfoo-x/issues/40)) ([d73ce95](https://github.com/allagentsdev/promptfoo-x/commit/d73ce958069508c46812ea03080aaec6d140faba))
+
 ## [1.4.1](https://github.com/allagentsdev/promptfoo-x/compare/v1.4.0...v1.4.1) (2026-10-01)
 
 

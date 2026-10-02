@@ -2,7 +2,7 @@
 
 ## First release under the new name
 
-`@allagents/promptfoo-x` is a new npm package; the published `@allagents/promptfoo-integration` package cannot be renamed in place. Version 1.5.0 is the first stable release under the new name. The Release Please workflow waits until that version exists on npm so it cannot mistake the old `v1.4.1` GitHub release for a release of the new package.
+`@allagents/promptfoo-x` is a new npm package; the published `@allagents/promptfoo-integration` package cannot be renamed in place. Version 1.5.0 is the first stable release under the new name. The Release Please workflow waits until that version exists on npm so it cannot mistake the old `v1.4.2` GitHub release for a release of the new package.
 
 After the rename change is merged and its validation passes, tag the reviewed main commit `v1.5.0` and create a draft GitHub release at that tag. An `@allagents` npm owner must first publish a `1.5.0-rc.1` prerelease to establish the new package name. From a clean checkout of `v1.5.0`, run the following commands while authenticated to npm:
 

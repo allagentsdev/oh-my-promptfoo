@@ -76,6 +76,13 @@ comparison.
 
 Subscribe to Node's `diagnostics_channel` named `allagents.workspace.progress` in the evaluation process to observe workspace-provider case boundaries. Without a subscriber, no progress events are constructed or emitted. Events are plain objects with only `phase`, optional positive safe-integer `caseIndex` and `sourceIndex`, optional nonnegative safe-integer `sourceCount`, and optional `outcome: \"ok\" | \"error\"`. `caseIndex` identifies a call within the process; `sourceIndex` is a one-based ordinal in sorted destination order, never a repository name. Counters are not persisted between processes. No event includes source paths, URLs, refs, credentials, prompts, model output, errors or grader details.
 
+With a subscriber, the workspace provider also returns
+`response.metadata.allagentsCaseIndex`, the same ordinal as that call's
+`case-start` and `case-finished` events. This includes provider responses
+containing an execution `error`, so a Promptfoo `afterEach` hook can associate
+the final scored row with its actual workspace call even when prompts or grades
+complete out of order. Without a subscriber, response metadata is unchanged.
+
 Phases: `case-start`, `seed-start`, `seed-cache-hit`, `source-start`, `git-fetch-start`, `git-fetch-finished`, `source-finished`, `seed-ready`, `protected-copy-start`, `protected-copy-finished`, `workspace-ready`, `agent-start`, `agent-finished`, `case-finished`. `git-fetch-*` covers the single pinned-commit HTTPS fetch, without cloning the unrelated default branch; `source-*` covers actual materialization, not ref resolution. A cached seed emits `seed-cache-hit` and `seed-ready` without source events. `protected-copy-*` appears only when a new protected checkout requires a physical copy; cache reuse and successful reflinks omit it. A failing phase may have no matching finish, but each started provider case ends with `case-finished` and `outcome: \"error\"`. A native agent error marks both `agent-finished` and `case-finished` as errors. Event objects carry no timings; subscribers can record elapsed time locally. This channel is separate from `allagents.workspace.preparation`; its `{ phase, elapsedMs }` timing schema remains unchanged, with remote acquisition now reporting `git-init` and `git-fetch` instead of `git-clone`.
 
 The existing preparation timing channel also emits fixed `checkout-admission`,

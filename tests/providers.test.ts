@@ -469,22 +469,24 @@ describe("workspace provider publication and lifetime", () => {
     const listener = (message: unknown) => events.push(message as Record<string, unknown>);
     subscribe("allagents.workspace.progress", listener);
     try {
-      expect((await provider.callApi("private-first-prompt")).error).toBeUndefined();
-      expect((await provider.callApi("error")).error).toBe("native failure");
+      const success = await provider.callApi("private-first-prompt");
+      expect(success.error).toBeUndefined();
+      const failure = await provider.callApi("error");
+      expect(failure.error).toBe("native failure");
       const aborted = new AbortController();
       aborted.abort();
-      expect(
-        (
-          await provider.callApi("private-aborted-prompt", undefined, {
-            abortSignal: aborted.signal,
-          })
-        ).error,
-      ).toBeDefined();
+      const cancellation = await provider.callApi("private-aborted-prompt", undefined, {
+        abortSignal: aborted.signal,
+      });
+      expect(cancellation.error).toBeDefined();
       const first = events[0].caseIndex;
       const second = events.find((event) => event.phase === "seed-cache-hit")?.caseIndex;
       const third = events.at(-1)?.caseIndex;
       expect([first, second, third].every((index) => Number.isSafeInteger(index))).toBe(true);
       expect(new Set([first, second, third]).size).toBe(3);
+      expect(success.metadata).toEqual(expect.objectContaining({ allagentsCaseIndex: first }));
+      expect(failure.metadata).toEqual(expect.objectContaining({ allagentsCaseIndex: second }));
+      expect(cancellation.metadata).toEqual(expect.objectContaining({ allagentsCaseIndex: third }));
       expect(events).toEqual([
         { phase: "case-start", caseIndex: first },
         { phase: "seed-start", caseIndex: first, sourceCount: 1 },

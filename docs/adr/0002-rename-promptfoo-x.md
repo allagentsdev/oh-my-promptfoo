@@ -6,7 +6,7 @@
 
 ## Context
 
-Users repeat the package name in each Promptfoo `package:` provider reference. The published package is `@allagents/promptfoo-integration` at version 1.4.1. The longer name makes evaluation YAML harder to read.
+Users repeat the package name in each Promptfoo `package:` provider reference. The published package is `@allagents/promptfoo-integration` at version 1.4.2. The longer name makes evaluation YAML harder to read.
 
 ## Decision
 
