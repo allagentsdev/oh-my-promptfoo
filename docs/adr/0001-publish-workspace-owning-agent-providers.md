@@ -1,6 +1,6 @@
 # ADR 0001: Publish a workspace-owning Promptfoo integration package
 
-- Status: Proposed
+- Status: Superseded for naming by [ADR 0002](0002-rename-promptfoo-x.md)
 - Date: 2026-09-29
 
 ## Context

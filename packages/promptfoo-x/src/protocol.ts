@@ -179,9 +179,7 @@ function runnerPath(): string {
   if (existsSync(built)) return built;
   const source = join(here, "delegate-runner.ts");
   if (process.versions.bun && existsSync(source)) return source;
-  throw new Error(
-    "Delegate runner is missing; build or reinstall @allagents/promptfoo-integration",
-  );
+  throw new Error("Delegate runner is missing; build or reinstall @allagents/promptfoo-x");
 }
 export function resolvePeer(basePath: string, name: string): string {
   try {
@@ -339,7 +337,7 @@ export async function runDelegate(
             const parentSpan = typeof f.parentId === "string" ? spans.get(f.parentId) : undefined;
             spans.set(
               f.id,
-              trace.getTracer("@allagents/promptfoo-integration").startSpan(
+              trace.getTracer("@allagents/promptfoo-x").startSpan(
                 f.id.startsWith("native:")
                   ? redact(f.name, sensitive)
                   : `execute_tool ${attrs["gen_ai.tool.name"]}`,

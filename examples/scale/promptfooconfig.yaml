@@ -1,6 +1,6 @@
 prompts: ['{{task}}']
 providers:
-  - id: package:@allagents/promptfoo-integration:Provider
+  - id: package:@allagents/promptfoo-x:default
     config:
       delegate:
         id: openai:codex-sdk

@@ -1,6 +1,6 @@
 {
-  "name": "@allagents/promptfoo-integration",
-  "version": "1.4.2",
+  "name": "@allagents/promptfoo-x",
+  "version": "1.5.0",
   "description": "Workspace-owning coding agent providers for Promptfoo",
   "type": "module",
   "main": "./dist/index.cjs",
@@ -27,8 +27,8 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/allagentsdev/promptfoo-integration.git",
-    "directory": "packages/promptfoo-integration"
+    "url": "git+https://github.com/allagentsdev/promptfoo-x.git",
+    "directory": "packages/promptfoo-x"
   },
   "publishConfig": {
     "access": "public",

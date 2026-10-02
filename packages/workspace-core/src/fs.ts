@@ -18,6 +18,7 @@ import {
 import { hostname } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { Ownership, ProcessIdentity, TreeEntry } from "./types.js";
+// Keep the existing on-disk owner identity so renamed-package installs can reuse their caches.
 export const PACKAGE = "@allagents/promptfoo-integration" as const;
 export const MARKER = ".allagents-owner.json";
 export function contained(root: string, path: string): string {
