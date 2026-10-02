@@ -25,7 +25,7 @@
     },
     "packages/promptfoo-integration": {
       "name": "@allagents/promptfoo-integration",
-      "version": "1.4.1",
+      "version": "1.4.2",
       "bin": {
         "allagents-promptfoo": "./dist/cli.js",
       },
