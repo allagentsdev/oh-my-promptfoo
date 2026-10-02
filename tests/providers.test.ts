@@ -55,7 +55,7 @@ async function project(moduleName: string, source: string): Promise<string> {
   await writeFile(join(dir, "index.js"), source);
   return path;
 }
-const native = `import {chmod,writeFile} from 'node:fs/promises';
+const native = `import {chmod,utimes,writeFile} from 'node:fs/promises';
 import {writeSync} from 'node:fs';
 export async function loadApiProvider(id, options) {
  return {async callApi(prompt,context,callOptions){
@@ -64,6 +64,7 @@ export async function loadApiProvider(id, options) {
   if(prompt==='duplicate')writeSync(1,JSON.stringify({version:1,type:'result',response:{output:'premature'}})+'\\n');
   if(prompt==='write')await writeFile(options.options.config.working_dir+'/generated.txt','generated durable content');
   if(prompt==='tamper-protected'){const file=options.options.config.working_dir+'/repo/input.txt';await chmod(file,0o644);await writeFile(file,'modified protected source');}
+  if(prompt==='tamper-protected-metadata'){const file=options.options.config.working_dir+'/repo/.git/HEAD';await utimes(file,new Date(0),new Date(0));}
   if(prompt==='sleep'){await new Promise(()=>{});}
   if(prompt==='large') return {output:'x'.repeat(17000000)};
   if(prompt==='cache') return {output:'old',cached:true};
@@ -288,6 +289,50 @@ describe("workspace provider publication and lifetime", () => {
       },
     };
     const provider = new Provider(options);
+    const events: Record<string, unknown>[] = [];
+    const listener = (message: unknown) => {
+      if (message && typeof message === "object" && "phase" in message)
+        events.push(message as Record<string, unknown>);
+    };
+    const checkPhases: Record<string, true> = {
+      "protected-git-check-start": true,
+      "protected-git-check-finished": true,
+      "protected-stamp-start": true,
+      "protected-stamp-finished": true,
+    };
+    const checksFor = (caseIndex: number) =>
+      events.filter((event) => event.caseIndex === caseIndex && checkPhases[String(event.phase)]);
+    const checkedCaseIndex = (metadata: unknown): number => {
+      if (
+        !metadata ||
+        typeof metadata !== "object" ||
+        !("allagentsCaseIndex" in metadata) ||
+        typeof metadata.allagentsCaseIndex !== "number" ||
+        !Number.isSafeInteger(metadata.allagentsCaseIndex) ||
+        metadata.allagentsCaseIndex < 1
+      )
+        throw new Error("Provider response missing progress case ordinal");
+      return metadata.allagentsCaseIndex;
+    };
+    const successfulChecks = (caseIndex: number) => [
+      { phase: "protected-git-check-start", caseIndex, sourceIndex: 1, sourceCount: 1 },
+      {
+        phase: "protected-git-check-finished",
+        caseIndex,
+        sourceIndex: 1,
+        sourceCount: 1,
+        outcome: "ok",
+      },
+      { phase: "protected-stamp-start", caseIndex, sourceIndex: 1, sourceCount: 1 },
+      {
+        phase: "protected-stamp-finished",
+        caseIndex,
+        sourceIndex: 1,
+        sourceCount: 1,
+        outcome: "ok",
+      },
+    ];
+    subscribe("allagents.workspace.progress", listener);
     try {
       const first = await provider.callApi("clean");
       expect(first.error).toBeUndefined();
@@ -308,7 +353,23 @@ describe("workspace provider publication and lifetime", () => {
       });
       const linked = await readlink(join(workspace.path, "repo"));
       expect(linked).toBe(protectedPath);
-      expect((await provider.callApi("clean-reuse")).error).toBeUndefined();
+      const reuse = await provider.callApi("clean-reuse");
+      expect(reuse.error).toBeUndefined();
+      const firstCase = checkedCaseIndex(first.metadata);
+      const reuseCase = checkedCaseIndex(reuse.metadata);
+      expect(reuseCase).not.toBe(firstCase);
+      expect(
+        events.filter((event) => event.caseIndex === firstCase).map((event) => event.phase),
+      ).toEqual([
+        "case-start",
+        "workspace-ready",
+        "agent-start",
+        "agent-finished",
+        ...successfulChecks(firstCase).map((event) => event.phase),
+        "case-finished",
+      ]);
+      expect(checksFor(firstCase)).toEqual(successfulChecks(firstCase));
+      expect(checksFor(reuseCase)).toEqual(successfulChecks(reuseCase));
       expect(await readdir(join(options.env.ALLAGENTS_CACHE_ROOT, "published"))).toEqual([]);
       const mixed = new Provider({
         ...options,
@@ -396,13 +457,100 @@ describe("workspace provider publication and lifetime", () => {
       } finally {
         unsubscribe("allagents.workspace.progress", onProgress);
       }
+      const delegateError = await provider.callApi("error");
+      expect(delegateError.error).toBe("native failure");
+      const errorCase = checkedCaseIndex(delegateError.metadata);
+      expect(checksFor(errorCase)).toEqual(successfulChecks(errorCase));
+      const metadataPrepared = join(path, "prepared-metadata");
+      await cp(prepared, metadataPrepared, { recursive: true });
+      await chmod(metadataPrepared, 0o700);
       const tamper = await provider.callApi("tamper-protected");
       expect(tamper.error).toContain("Prepared source checkout failed integrity verification");
+      const tamperCase = checkedCaseIndex(tamper.metadata);
+      expect(checksFor(tamperCase)).toEqual([
+        {
+          phase: "protected-git-check-start",
+          caseIndex: tamperCase,
+          sourceIndex: 1,
+          sourceCount: 1,
+        },
+        {
+          phase: "protected-git-check-finished",
+          caseIndex: tamperCase,
+          sourceIndex: 1,
+          sourceCount: 1,
+          outcome: "error",
+        },
+      ]);
+      expect(events.filter((event) => event.caseIndex === tamperCase).at(-1)).toEqual({
+        phase: "case-finished",
+        caseIndex: tamperCase,
+        outcome: "error",
+      });
+      const metadataProvider = new Provider({
+        ...options,
+        env: { ...options.env, ALLAGENTS_PREBUILT_ROOT: metadataPrepared },
+      });
+      try {
+        const metadataTamper = await metadataProvider.callApi("tamper-protected-metadata");
+        expect(metadataTamper.error).toContain(
+          "Prepared source checkout failed integrity verification",
+        );
+        const metadataCase = checkedCaseIndex(metadataTamper.metadata);
+        expect(checksFor(metadataCase)).toEqual([
+          {
+            phase: "protected-git-check-start",
+            caseIndex: metadataCase,
+            sourceIndex: 1,
+            sourceCount: 1,
+          },
+          {
+            phase: "protected-git-check-finished",
+            caseIndex: metadataCase,
+            sourceIndex: 1,
+            sourceCount: 1,
+            outcome: "ok",
+          },
+          {
+            phase: "protected-stamp-start",
+            caseIndex: metadataCase,
+            sourceIndex: 1,
+            sourceCount: 1,
+          },
+          {
+            phase: "protected-stamp-finished",
+            caseIndex: metadataCase,
+            sourceIndex: 1,
+            sourceCount: 1,
+            outcome: "error",
+          },
+        ]);
+        expect((await metadataProvider.callApi("clean")).error).toContain("invalidated");
+      } finally {
+        await metadataProvider.cleanup();
+      }
+      const diagnostics = JSON.stringify(events);
+      for (const forbidden of [
+        path,
+        repositoryUrl,
+        commit,
+        "tamper-protected",
+        "tamper-protected-metadata",
+        "native failure",
+      ])
+        expect(diagnostics).not.toContain(forbidden);
+      for (const event of events)
+        expect(
+          Object.keys(event).every((key) =>
+            ["phase", "caseIndex", "sourceIndex", "sourceCount", "outcome"].includes(key),
+          ),
+        ).toBe(true);
       expect((await provider.callApi("write")).error).toContain("invalidated");
       expect(await readFile(join(protectedPath, "input.txt"), "utf8")).toBe(
         "modified protected source",
       );
     } finally {
+      unsubscribe("allagents.workspace.progress", listener);
       await provider.cleanup();
     }
     expect(await readFile(join(protectedPath, "input.txt"), "utf8")).toBe(
