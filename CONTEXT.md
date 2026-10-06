@@ -86,8 +86,12 @@ The Promptfoo row trace containing delegated agent activity. It carries normaliz
 
 ## Integration
 
-A versioned Promptfoo-facing package maintained in this repository. The first package is `oh-my-promptfoo`; it contains the workspace-owning provider, lower-level Copilot SDK provider, and seed-cache maintenance CLI.
+A versioned Promptfoo-facing package maintained in this repository. The first package is `oh-my-promptfoo`; it contains the workspace-owning provider, lower-level Copilot SDK provider, a reusable batched rubric assertion, and seed-cache maintenance CLI.
 
 ## Assertion
 
 A deterministic or model-graded Promptfoo check that contributes to the evaluation score and pass/fail result. Assertions may inspect unchanged delegate output, the live workspace, optional durable file changes, skills, or the agent trajectory. The integration does not introduce a second grading engine.
+
+## Batched rubric assertion
+
+A Promptfoo JavaScript assertion that asks one judge to score multiple named criteria and returns their individual results alongside a weighted overall score. It is independent of the agent and workspace providers, and is not a native `llm-rubric` assertion.

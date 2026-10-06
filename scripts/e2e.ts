@@ -1,6 +1,8 @@
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
+import { once } from "node:events";
 import { realpathSync } from "node:fs";
 import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { removeTree } from "../packages/workspace-core/src/fs";
@@ -18,19 +20,16 @@ if (
 const repo = resolve(".");
 const cwd = await mkdtemp(join(realpathSync(tmpdir()), "allagents-e2e-"));
 const workspaceParent = await mkdtemp(join(realpathSync(tmpdir()), "allagents-e2e-workspaces-"));
+const testEnvironment = {
+  ...process.env,
+  PROMPTFOO_DISABLE_TELEMETRY: "1",
+  PROMPTFOO_DISABLE_UPDATE: "1",
+  PROMPTFOO_CONFIG_DIR: join(cwd, "pf-state"),
+  ALLAGENTS_CACHE_ROOT: join(workspaceParent, "cache"),
+  ALLAGENTS_WORKSPACE_ROOT: join(workspaceParent, "runtime"),
+};
 function run(command: string, args: string[], dir = cwd, accepted = [0]) {
-  const r = spawnSync(command, args, {
-    cwd: dir,
-    encoding: "utf8",
-    env: {
-      ...process.env,
-      PROMPTFOO_DISABLE_TELEMETRY: "1",
-      PROMPTFOO_DISABLE_UPDATE: "1",
-      PROMPTFOO_CONFIG_DIR: join(cwd, "pf-state"),
-      ALLAGENTS_CACHE_ROOT: join(workspaceParent, "cache"),
-      ALLAGENTS_WORKSPACE_ROOT: join(workspaceParent, "runtime"),
-    },
-  });
+  const r = spawnSync(command, args, { cwd: dir, encoding: "utf8", env: testEnvironment });
   if (r.status === null || !accepted.includes(r.status))
     throw Error(`${command} failed (${r.status})\n${r.stdout}\n${r.stderr}`);
   return r.stdout;
@@ -273,6 +272,121 @@ try {
     ],
   });
   if (direct.stats.successes !== 1) throw Error("Direct Copilot named constructor failed");
+  const judgeRequests: {
+    url: string | undefined;
+    body: { model: string; messages: { role: string; content: string }[] };
+  }[] = [];
+  const judge = createServer(async (request, response) => {
+    let body = "";
+    for await (const chunk of request) body += chunk;
+    judgeRequests.push({ url: request.url, body: JSON.parse(body) });
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(
+      JSON.stringify({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                components: [
+                  { metric: "accuracy", score: 1, reason: "Grounded" },
+                  { metric: "clarity", score: 0.7, reason: "Clear" },
+                ],
+              }),
+            },
+          },
+        ],
+      }),
+    );
+  });
+  judge.listen(0, "127.0.0.1");
+  await once(judge, "listening");
+  try {
+    const address = judge.address();
+    if (!address || typeof address === "string") throw Error("Missing local judge port");
+    const name = "packaged-assertion";
+    await writeFile(
+      join(cwd, `${name}.json`),
+      JSON.stringify({
+        prompts: ["review"],
+        providers: ["echo"],
+        tests: [
+          {
+            assert: [
+              {
+                type: "javascript",
+                value: "package:oh-my-promptfoo/assertions:llmAssert",
+                config: {
+                  threshold: 0.7,
+                  components: [
+                    { metric: "accuracy", value: "Ground claims", weight: 3 },
+                    { metric: "clarity", value: "Explain clearly" },
+                  ],
+                },
+              },
+            ],
+          },
+        ],
+      }),
+    );
+    const child = spawn(
+      "node",
+      [
+        cli,
+        "eval",
+        "--config",
+        `${name}.json`,
+        "--no-cache",
+        "--no-progress-bar",
+        "--output",
+        `${name}-results.json`,
+      ],
+      {
+        cwd,
+        env: {
+          ...testEnvironment,
+          OPENAI_MODEL: "fake-grader",
+          OPENAI_API_KEY: "local-only",
+          OPENAI_BASE_URL: `http://127.0.0.1:${address.port}/v1`,
+        },
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
+    let stdout = "";
+    let stderr = "";
+    child.stdout.setEncoding("utf8").on("data", (chunk: string) => {
+      stdout += chunk;
+    });
+    child.stderr.setEncoding("utf8").on("data", (chunk: string) => {
+      stderr += chunk;
+    });
+    const [status] = await once(child, "close");
+    if (status !== 0) throw Error(`Packed assertion CLI failed:\n${stdout}\n${stderr}`);
+    const exported = JSON.parse(await readFile(join(cwd, `${name}-results.json`), "utf8")).results;
+    const grade = exported.results[0]?.gradingResult;
+    const componentGrades = grade?.componentResults?.filter(
+      (part: { assertion?: { metric?: string } }) => part.assertion?.metric,
+    );
+    if (
+      exported.stats.successes !== 1 ||
+      judgeRequests.length !== 1 ||
+      judgeRequests[0].url !== "/v1/chat/completions" ||
+      judgeRequests[0].body.model !== "fake-grader" ||
+      judgeRequests[0].body.messages[0].role !== "system" ||
+      judgeRequests[0].body.messages[1].role !== "user" ||
+      grade?.score !== 0.925 ||
+      grade?.namedScores?.accuracy !== 1 ||
+      grade?.namedScores?.clarity !== 0.7 ||
+      componentGrades
+        ?.map((part: { assertion: { metric: string } }) => part.assertion.metric)
+        .join(",") !== "accuracy,clarity" ||
+      componentGrades.some((part: { pass: boolean }) => !part.pass)
+    )
+      throw Error("Stock Promptfoo did not preserve the packed single-request rubric grades");
+  } finally {
+    const closed = once(judge, "close");
+    judge.close();
+    await closed;
+  }
   const nativeError = await evaluateFixture(
     "native-error",
     {

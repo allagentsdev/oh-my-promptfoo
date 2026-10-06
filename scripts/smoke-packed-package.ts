@@ -34,6 +34,9 @@ try {
     "dist/index.js",
     "dist/index.cjs",
     "dist/index.d.ts",
+    "dist/assertions.js",
+    "dist/assertions.cjs",
+    "dist/assertions.d.ts",
     "dist/delegate-runner.js",
     "dist/cli.js",
     "LICENSE",
@@ -45,7 +48,7 @@ try {
   const manifest = JSON.parse(await readFile("packages/oh-my-promptfoo/package.json", "utf8"));
   if (
     manifest.dependencies?.["@allagents/workspace-core"] ||
-    Object.keys(manifest.exports).join() !== "." ||
+    Object.keys(manifest.exports).join() !== ".,./assertions" ||
     Object.keys(manifest.bin).length !== 1
   )
     throw new Error("Public manifest contract mismatch");
@@ -86,13 +89,18 @@ try {
       join(cwd, "smoke.mjs"),
       `import Default,{Provider,CopilotSdkProvider} from 'oh-my-promptfoo';import{createRequire}from'node:module';import{readFileSync}from'node:fs';const require=createRequire(import.meta.url);const c=require('oh-my-promptfoo');if(Default!==Provider||typeof Provider!=='function'||typeof CopilotSdkProvider!=='function'||typeof c.Provider!=='function'||typeof c.CopilotSdkProvider!=='function')throw Error('Exports');const manifest=JSON.parse(readFileSync(new URL('../package.json',import.meta.resolve('oh-my-promptfoo')),'utf8'));if(manifest.version!==${JSON.stringify(expectedVersion)})throw Error('Loaded package version mismatch');if(process.argv[2]==='without-copilot'){let absent=false;try{require.resolve('@github/copilot-sdk');}catch(error){if(error.code!=='MODULE_NOT_FOUND')throw error;absent=true;}if(!absent)throw Error('Copilot SDK unexpectedly installed');}else{const peer=JSON.parse(readFileSync('node_modules/@github/copilot-sdk/package.json','utf8'));if(peer.version!=='1.0.6')throw Error('Copilot SDK version mismatch');await import('@github/copilot-sdk');}console.log('exports and loaded version passed');`,
     );
+    await writeFile(
+      join(cwd, "assertions-smoke.mjs"),
+      `import assert from 'node:assert/strict';import {createRequire} from 'node:module';import {llmAssert} from 'oh-my-promptfoo/assertions';const require=createRequire(import.meta.url);const c=require('oh-my-promptfoo/assertions');assert.equal(typeof c.llmAssert,'function');await assert.rejects(llmAssert('answer',{config:{components:[]}}),/unique named components/);await assert.rejects(c.llmAssert('answer',{config:{components:[]}}),/unique named components/);`,
+    );
     run("node", ["smoke.mjs", "without-copilot"], cwd);
     run("node", ["node_modules/oh-my-promptfoo/dist/cli.js", "--help"], cwd);
+    run("node", ["assertions-smoke.mjs"], cwd);
     run(manager.command, [...manager.args, "@github/copilot-sdk@1.0.6"], cwd);
     run("node", ["smoke.mjs", "with-copilot"], cwd);
     run("node", ["node_modules/oh-my-promptfoo/dist/cli.js", "--help"], cwd);
     console.log(
-      `${manager.name}: ${registryVersion ? "registry" : "packed"} ${expectedVersion} ESM/CommonJS exports and CLI passed without Copilot and with actual Copilot SDK 1.0.6`,
+      `${manager.name}: ${registryVersion ? "registry" : "packed"} ${expectedVersion} provider and assertion exports, CLI, and actual Copilot SDK 1.0.6 passed`,
     );
   }
   console.log(`Pack surface passed: ${names.length} files, ${packed.size} compressed bytes`);
