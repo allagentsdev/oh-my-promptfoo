@@ -1,4 +1,4 @@
-import { lstatSync, statSync } from "node:fs";
+import { lstatSync, readFileSync, statSync } from "node:fs";
 import { stat } from "node:fs/promises";
 import { basename, dirname, isAbsolute, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -246,6 +246,9 @@ async function runNative(frame: CallFrame, signal: AbortSignal): Promise<JsonObj
 }
 
 interface SessionLike {
+  rpc?: {
+    skills?: { getInvoked?: () => Promise<{ skills: unknown }> };
+  };
   on(callback: (event: { type: string; data: JsonObject }) => void): (() => void) | undefined;
   sendAndWait(
     options: { prompt: string },
@@ -262,7 +265,23 @@ interface ClientLike {
 interface SkillCall {
   name: string;
   path: string;
-  source: "read-tool";
+  source: "read-tool" | "sdk-skill-loader";
+}
+const skillParentDirectories: readonly string[] = [".agents", ".claude", ".github"];
+
+function workspaceSkillDirectories(workingDir: string): string[] {
+  const directories: string[] = [];
+  for (const name of skillParentDirectories) {
+    const parent = resolve(workingDir, name);
+    const skills = resolve(parent, "skills");
+    try {
+      if (lstatSync(parent).isDirectory() && lstatSync(skills).isDirectory())
+        directories.push(skills);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+  }
+  return directories;
 }
 
 function observedSkillRead(
@@ -285,18 +304,22 @@ function observedSkillRead(
   const skillsDirectory = dirname(skillDirectory);
   if (
     basename(skillsDirectory) !== "skills" ||
-    ![".agents", ".claude", ".github"].includes(basename(dirname(skillsDirectory)))
+    !skillParentDirectories.includes(basename(dirname(skillsDirectory)))
   )
     return;
   try {
-    const root = statSync(workingDir, { bigint: true });
+    const rootPath = resolve(workingDir);
+    const root = statSync(rootPath, { bigint: true });
     if (root.ino === 0n) return;
     let cursor = candidate;
     let file = true;
     while (true) {
       const info = lstatSync(cursor, { bigint: true });
-      if (info.isSymbolicLink() || (file && !info.isFile())) return;
-      if (info.dev === root.dev && info.ino === root.ino)
+      // Workspace Provider may bind its verified working directory to a protected source link.
+      const allowedAlias = info.isSymbolicLink() && cursor === rootPath;
+      if ((info.isSymbolicLink() && !allowedAlias) || (file && !info.isFile())) return;
+      const physical = allowedAlias ? statSync(cursor, { bigint: true }) : info;
+      if (physical.dev === root.dev && physical.ino === root.ino)
         return { name: basename(skillDirectory), path: candidate, source: "read-tool" };
       const parent = dirname(cursor);
       if (parent === cursor) return;
@@ -307,10 +330,30 @@ function observedSkillRead(
     return;
   }
 }
+
+function verifiedSkillLoaderRecord(entry: unknown, workingDir: string): SkillCall | undefined {
+  if (!entry || typeof entry !== "object" || Array.isArray(entry)) return;
+  const { name, path, content } = entry as Record<string, unknown>;
+  if (typeof name !== "string" || typeof path !== "string" || typeof content !== "string") return;
+  const local = observedSkillRead("read_file", { path }, workingDir);
+  if (!local || local.name !== name) return;
+  try {
+    // The SDK returns the loaded SKILL.md body without YAML frontmatter.
+    const body = readFileSync(local.path, "utf8")
+      .replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, "")
+      .replace(/\r\n/g, "\n")
+      .trim();
+    if (!body || body !== content.replace(/\r\n/g, "\n").trim()) return;
+    return { ...local, source: "sdk-skill-loader" };
+  } catch {
+    return;
+  }
+}
 async function runCopilot(frame: CallFrame, signal: AbortSignal): Promise<JsonObject> {
   const sdk = await import(pathToFileURL(resolvePeer(frame.basePath, "@github/copilot-sdk")).href);
   if (typeof sdk.CopilotClient !== "function")
     throw new Error("Install the supported @github/copilot-sdk@1.0.6 peer");
+  const skillDirectories = workspaceSkillDirectories(frame.workingDir);
   const client: ClientLike = new sdk.CopilotClient({
     workingDirectory: frame.workingDir,
     env: process.env,
@@ -364,6 +407,8 @@ async function runCopilot(frame: CallFrame, signal: AbortSignal): Promise<JsonOb
       ...(frame.config.provider ? { provider: frame.config.provider } : {}),
       onPermissionRequest: approve,
       enableConfigDiscovery: false,
+      // Keep general config discovery off; expose only physical workspace skill directories.
+      ...(skillDirectories.length ? { enableSkills: true, skillDirectories } : {}),
       infiniteSessions: { enabled: false },
     });
     unsubscribe = session.on((event) => {
@@ -438,6 +483,19 @@ async function runCopilot(frame: CallFrame, signal: AbortSignal): Promise<JsonOb
       (frame.config.timeoutMs as number | undefined) ?? 900_000,
     );
     if (signal.aborted) throw new Error("Copilot call aborted");
+    if (!sessionError) {
+      try {
+        const invoked = await session.rpc?.skills?.getInvoked?.();
+        if (Array.isArray(invoked?.skills) && invoked.skills.length) {
+          for (const entry of invoked.skills) {
+            const loaded = verifiedSkillLoaderRecord(entry, frame.workingDir);
+            if (loaded) skillCalls.push(loaded);
+          }
+        }
+      } catch {
+        // Experimental SDK inventory is optional; explicit read-tool evidence remains valid.
+      }
+    }
     if (sessionError)
       result = { error: sessionError, ...(output ? { output } : {}), tokenUsage: usage, cost };
     else {

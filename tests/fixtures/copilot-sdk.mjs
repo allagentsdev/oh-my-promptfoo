@@ -9,7 +9,15 @@ export class CopilotClient {
     if (config.provider && typeof config.provider !== "object")
       throw Error("Endpoint must be object");
     let callback = () => {};
+    const invokedSkills = [];
     return {
+      rpc: {
+        skills: {
+          async getInvoked() {
+            return { skills: invokedSkills };
+          },
+        },
+      },
       on(fn) {
         callback = fn;
         return () => {};
@@ -17,6 +25,40 @@ export class CopilotClient {
       async sendAndWait({ prompt }) {
         if (prompt === "hang") {
           await new Promise(() => {});
+        }
+        if (prompt.startsWith("auto-skill-review")) {
+          const skill = ".agents/skills/cw-sql-schema-migration/SKILL.md";
+          if (
+            config.enableSkills === true &&
+            config.enableConfigDiscovery === false &&
+            config.skillDirectories?.includes(join(config.workingDirectory, ".agents/skills"))
+          ) {
+            const file = resolve(config.workingDirectory, skill);
+            const content = (await readFile(file, "utf8"))
+              .replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, "")
+              .trim();
+            invokedSkills.push({
+              name: "cw-sql-schema-migration",
+              path: file,
+              content: prompt.endsWith(":mismatch") ? "wrong skill content" : content,
+              invokedAtTurn: 1,
+            });
+            if (prompt.endsWith(":dual")) {
+              callback({
+                type: "tool.execution_start",
+                data: {
+                  toolCallId: "separate-read",
+                  toolName: "read_file",
+                  arguments: { path: skill },
+                },
+              });
+              callback({
+                type: "tool.execution_complete",
+                data: { toolCallId: "separate-read", success: true },
+              });
+            }
+          }
+          return { data: { content: "reviewed" } };
         }
         if (prompt.startsWith("read:")) {
           const request = JSON.parse(prompt.slice(5));
