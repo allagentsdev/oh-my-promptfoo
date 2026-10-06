@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.7.0](https://github.com/allagentsdev/oh-my-promptfoo/compare/v1.6.0...v1.7.0) (2026-10-06)
+
+
+### Features
+
+* **assertions:** publish batched rubric grader ([#54](https://github.com/allagentsdev/oh-my-promptfoo/issues/54)) ([f70a48a](https://github.com/allagentsdev/oh-my-promptfoo/commit/f70a48ad8d3ab4a4b09a4506aa8f36186dc5fa68))
+
 ## 1.6.0 (2026-10-03)
 
 - Publish the package as `oh-my-promptfoo`.
