@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { subscribe, unsubscribe } from "node:diagnostics_channel";
-import { realpathSync, statSync } from "node:fs";
+import { lstatSync, realpathSync, statSync } from "node:fs";
 import {
   access,
   chmod,
@@ -1121,7 +1121,7 @@ describe("direct Copilot provider", () => {
       await provider.cleanup();
     }
   });
-  test("workspace Provider exposes Copilot read-tool skill calls at top-level metadata", async () => {
+  test("workspace Provider records only SDK-loaded matching local skill content", async () => {
     const fixture = await readFile(new URL("./fixtures/copilot-sdk.mjs", import.meta.url), "utf8");
     const path = await project("@github/copilot-sdk", fixture);
     const repository = join(path, "source");
@@ -1149,6 +1149,7 @@ describe("direct Copilot provider", () => {
       config: {
         basePath: path,
         delegate: { id: "copilot-sdk" },
+        workingDir: "repo",
         workspace: {
           sources: [
             {
@@ -1166,7 +1167,7 @@ describe("direct Copilot provider", () => {
       },
     });
     try {
-      const response = await provider.callApi(`read:${JSON.stringify({ path: `repo/${skill}` })}`);
+      const response = await provider.callApi("auto-skill-review");
       expect(response.error).toBeUndefined();
       const metadata = response.metadata as {
         copilot: { skillSupport: boolean };
@@ -1178,11 +1179,63 @@ describe("direct Copilot provider", () => {
         {
           name: "cw-sql-schema-migration",
           path: join(metadata.workspace.path, "repo", skill),
-          source: "read-tool",
+          source: "sdk-skill-loader",
+        },
+      ]);
+      const dual = await provider.callApi("auto-skill-review:dual");
+      expect(dual.error).toBeUndefined();
+      const dualMetadata = dual.metadata as { skillCalls: unknown[]; workspace: { path: string } };
+      const dualPath = join(dualMetadata.workspace.path, "repo", skill);
+      expect(dualMetadata.skillCalls).toEqual([
+        { name: "cw-sql-schema-migration", path: dualPath, source: "read-tool" },
+        { name: "cw-sql-schema-migration", path: dualPath, source: "sdk-skill-loader" },
+      ]);
+      const mismatch = await provider.callApi("auto-skill-review:mismatch");
+      expect(mismatch.error).toBeUndefined();
+      expect((mismatch.metadata as { skillCalls: unknown[] }).skillCalls).toEqual([]);
+    } finally {
+      await provider.cleanup();
+    }
+    const protectedProvider = new Provider({
+      config: {
+        basePath: path,
+        delegate: { id: "copilot-sdk" },
+        workingDir: "repo",
+        workspace: {
+          viewMode: "copy-only",
+          sources: [
+            {
+              type: "git",
+              repository: pathToFileURL(repository).href,
+              ref: stdout.trim(),
+              destination: "repo",
+              permissions: "read-only",
+            },
+          ],
+        },
+      },
+      env: {
+        ALLAGENTS_CACHE_ROOT: join(path, "cache"),
+        ALLAGENTS_WORKSPACE_ROOT: join(path, "runtime"),
+      },
+    });
+    try {
+      const protectedResult = await protectedProvider.callApi("auto-skill-review");
+      expect(protectedResult.error).toBeUndefined();
+      const metadata = protectedResult.metadata as {
+        skillCalls: unknown[];
+        workspace: { path: string };
+      };
+      expect(lstatSync(join(metadata.workspace.path, "repo")).isSymbolicLink()).toBe(true);
+      expect(metadata.skillCalls).toEqual([
+        {
+          name: "cw-sql-schema-migration",
+          path: join(metadata.workspace.path, "repo", skill),
+          source: "sdk-skill-loader",
         },
       ]);
     } finally {
-      await provider.cleanup();
+      await protectedProvider.cleanup();
     }
   }, 15_000);
   test("missing SDK is actionable and pre-abort performs no execution", async () => {

@@ -137,7 +137,24 @@ Both commands report removed/retained entries and allocated bytes and return non
 
 Direct Copilot uses `package:oh-my-promptfoo:CopilotSdkProvider` with an existing `working_dir`; use an absolute path in evaluation configs. Optional fields are `model`, `reasoning_effort`, `timeoutMs`, `permissions`, and explicit `env`. Its optional BYOK `provider` is an endpoint object with required `baseUrl` and supported SDK fields (`type`, `wireApi`, `apiKey`, `wireModel`, `azure.apiVersion`); strings and embedded URL credentials are rejected. Defaults deny writes, shell, and network. Copilot tool events produce tool spans; skill inference from assistant text is disabled.
 
-Both direct and workspace-backed Copilot responses report `metadata.skillCalls` and `metadata.copilot.skillSupport: true`. Only successful local `read`, `read_file`, or `view` tool events targeting an existing `.agents/skills/<name>/SKILL.md`, `.claude/skills/<name>/SKILL.md`, or `.github/skills/<name>/SKILL.md` inside the working directory produce `{ name, path, source: "read-tool" }`. Failed or unfinished reads, assistant text, other tool names, MCP tools, symlinked skill paths, and paths escaping the workspace do not count; other skill invocation mechanisms are not observed.
+Both direct and workspace-backed Copilot responses report `metadata.skillCalls`
+and `metadata.copilot.skillSupport: true`. A successful local `read`,
+`read_file`, or `view` of a contained `SKILL.md` records
+`source: "read-tool"`. Copilot's built-in Skill loader also records
+`source: "sdk-skill-loader"`, but only when its invoked-skill RPC supplies a
+contained, non-symlinked `SKILL.md` path and the loaded body matches the file
+after YAML frontmatter removal. Only skill names, paths, and provenance leave
+the runner; loaded content does not. Failed or unfinished reads, bare Skill
+invocations, text mentions, mismatched content, MCP reads, and paths outside
+the workspace do not count.
+
+Copilot sessions enable skills only when a real `.agents/skills`,
+`.claude/skills`, or `.github/skills` directory exists immediately under the
+delegate's working directory. The package supplies those directories explicitly
+while leaving general SDK configuration discovery disabled; a symlinked skill
+root is not admitted. Merely discovering a skill does not count as using it:
+a file read or SDK-confirmed body load must complete successfully. Sessions
+without a local skills directory keep skill loading disabled.
 
 | Field | Required | Purpose |
 | --- | --- | --- |
