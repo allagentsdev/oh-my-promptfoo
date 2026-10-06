@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.7.1](https://github.com/allagentsdev/oh-my-promptfoo/compare/v1.7.0...v1.7.1) (2026-10-06)
+
+
+### Bug Fixes
+
+* **copilot:** load and attest scoped workspace skills ([#56](https://github.com/allagentsdev/oh-my-promptfoo/issues/56)) ([a3f7298](https://github.com/allagentsdev/oh-my-promptfoo/commit/a3f72984a632ed8646105a29e9ea6659e24ada63))
+
 ## [1.7.0](https://github.com/allagentsdev/oh-my-promptfoo/compare/v1.6.0...v1.7.0) (2026-10-06)
 
 
