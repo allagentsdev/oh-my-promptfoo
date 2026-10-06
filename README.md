@@ -1,6 +1,6 @@
 # oh-my-promptfoo
 
-Run coding-agent evaluations with stock Promptfoo. This package provides two entry points:
+Run coding-agent evaluations with stock Promptfoo. This package provides two providers and an optional reusable JavaScript assertion:
 
 Existing workspace caches remain compatible with earlier releases.
 
@@ -9,7 +9,7 @@ Existing workspace caches remain compatible with earlier releases.
 | Create a private writable workspace, optionally seeded from Git or OCI, then run Codex, Claude, or Copilot in it | `package:oh-my-promptfoo:Provider` |
 | Run Copilot in an existing directory that you manage | `package:oh-my-promptfoo:CopilotSdkProvider` |
 
-`Provider` owns the workspace for each evaluation row. `CopilotSdkProvider` uses your existing directory. Both return results to ordinary Promptfoo assertions; the package does not grade responses.
+`Provider` owns the workspace for each evaluation row. `CopilotSdkProvider` uses your existing directory. Neither scores agent output; the independent `llmAssert` export below can grade named rubric criteria.
 
 ## Install
 
@@ -22,6 +22,42 @@ npm install --save-dev @github/copilot-sdk@1.0.6
 ```
 
 Set the credential for the agent you select before running an evaluation. OCI sources also require an ORAS 1.x executable supplied through `ALLAGENTS_ORAS_PATH`.
+
+
+## Grade named criteria with one judge request
+
+Use the public `package:oh-my-promptfoo/assertions:llmAssert` reference in a stock Promptfoo JavaScript assertion. The assertion works with any provider; it does not require a workspace provider.
+
+```yaml
+tests:
+  - assert:
+      - type: javascript
+        value: package:oh-my-promptfoo/assertions:llmAssert
+        config:
+          threshold: 0.7
+          components:
+            - metric: accuracy
+              value: Grounds every factual claim in the provided material
+              weight: 2
+            - metric: clarity
+              value: Explains the result clearly
+```
+
+Set `OPENAI_MODEL` and `OPENAI_API_KEY` for the judge; `OPENAI_BASE_URL`
+optionally points to an OpenAI-compatible or Azure OpenAI v1 endpoint. One
+request grades all uniquely named components; names inherited from
+`Object.prototype` are rejected because Promptfoo 0.122 aggregates named
+scores into plain objects. Weights default to 1. The weighted mean must reach
+`threshold` (default 0.7), and every component must pass: an explicit judge
+`pass` flag takes precedence over its score; otherwise the component score
+must reach the threshold. Missing, duplicate, malformed, or unknown grades
+fail the assertion. Promptfoo receives `componentResults`, `namedScores`,
+and `namedScoreWeights`. Grading instructions and criteria use the system
+message; the candidate output is passed separately as untrusted user content.
+The judge request has a 120-second deadline.
+
+This is a package-supplied JavaScript assertion, not Promptfoo's proposed
+native [`llm-rubric.value.components` feature](https://github.com/promptfoo/promptfoo/issues/10069).
 
 ## Prepare a workspace and run an agent
 
