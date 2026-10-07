@@ -1,6 +1,6 @@
 {
   "name": "oh-my-promptfoo",
-  "version": "1.7.2",
+  "version": "1.8.0",
   "description": "Workspace-owning coding agent providers for Promptfoo",
   "type": "module",
   "main": "./dist/index.cjs",

@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.8.0](https://github.com/allagentsdev/oh-my-promptfoo/compare/v1.7.2...v1.8.0) (2026-10-07)
+
+
+### Features
+
+* **provider:** configure workspace preparation timeout independently ([#60](https://github.com/allagentsdev/oh-my-promptfoo/issues/60)) ([fa2642b](https://github.com/allagentsdev/oh-my-promptfoo/commit/fa2642bb17acf4c880c31fb9b71add7cd9d88cca))
+
 ## [1.7.2](https://github.com/allagentsdev/oh-my-promptfoo/compare/v1.7.1...v1.7.2) (2026-10-07)
 
 
