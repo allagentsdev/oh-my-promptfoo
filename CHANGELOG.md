@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.7.2](https://github.com/allagentsdev/oh-my-promptfoo/compare/v1.7.1...v1.7.2) (2026-10-07)
+
+
+### Bug Fixes
+
+* **promptfoo:** support 0.124 alongside 0.122 ([#58](https://github.com/allagentsdev/oh-my-promptfoo/issues/58)) ([cd1a4ee](https://github.com/allagentsdev/oh-my-promptfoo/commit/cd1a4ee6c1bb33a7ac1cb74ae094a4f1bf8085fa))
+
 ## [1.7.1](https://github.com/allagentsdev/oh-my-promptfoo/compare/v1.7.0...v1.7.1) (2026-10-06)
 
 
