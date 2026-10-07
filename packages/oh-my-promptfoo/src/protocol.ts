@@ -190,7 +190,7 @@ export function resolvePeer(basePath: string, name: string): string {
     );
   } catch {
     throw new Error(
-      `Install ${name}${name === "@github/copilot-sdk" ? "@1.0.6" : "@0.122.0"} in the evaluation project (${basePath})`,
+      `Install ${name}${name === "@github/copilot-sdk" ? "@1.0.6" : "@0.124.0"} in the evaluation project (${basePath})`,
     );
   }
 }
