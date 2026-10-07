@@ -109,6 +109,7 @@ export class Provider extends Calls {
     this.manager = new WorkspaceManager(
       this.config.workspace as unknown as WorkspaceSpec,
       channels,
+      this.config.workspaceTimeoutMs,
     );
   }
   id(): string {

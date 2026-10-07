@@ -1,7 +1,12 @@
 import { lstat, readdir, readlink } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { controlledAcquisitionPhysicalReservation } from "../acquisition-budget.ts";
-import { canonicalJson, DEFAULT_LIMITS, validateWorkspace } from "../config.ts";
+import {
+  canonicalJson,
+  DEFAULT_LIMITS,
+  resolveWorkspaceTimeoutMs,
+  validateWorkspace,
+} from "../config.ts";
 import { publishProgress } from "../progress.js";
 import type { ResolvedSource, RuntimeChannels, SourceLimits, WorkspaceSpec } from "../types.ts";
 import { materializeGit, resolveGit } from "./git.ts";
@@ -21,15 +26,20 @@ export async function resolveSources(
   spec: WorkspaceSpec,
   channels: RuntimeChannels,
   signal?: AbortSignal,
+  timeoutMs?: number,
 ): Promise<ResolvedSource[]> {
   signal?.throwIfAborted();
   const normalized = validateWorkspace(spec);
-  const limits = { ...DEFAULT_LIMITS, ...normalized.limits };
+  const limits = {
+    ...DEFAULT_LIMITS,
+    ...normalized.limits,
+    timeoutMs: resolveWorkspaceTimeoutMs(timeoutMs, channels.ALLAGENTS_WORKSPACE_TIMEOUT_MS),
+  };
   const sources = [...normalized.sources].sort((a, b) =>
     a.destination.localeCompare(b.destination, "en"),
   );
   const requests = sources.map(({ permissions: _permissions, ...request }) => request);
-  const key = canonicalJson(requests);
+  const key = canonicalJson([requests, limits.timeoutMs]);
   let flight = flights.get(key);
   if (!flight) {
     const controller = new AbortController();

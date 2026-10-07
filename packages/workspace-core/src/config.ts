@@ -1,11 +1,31 @@
 import { isAbsolute, posix } from "node:path";
-import type { SourceLimits, WorkspaceSpec } from "./types.js";
+import type { SourceLimits, WorkspaceLimits, WorkspaceSpec } from "./types.js";
 export const DEFAULT_LIMITS: SourceLimits = {
   maxSources: 8,
   maxDownloadBytes: 268435456,
   maxExtractedBytes: 536870912,
   timeoutMs: 120000,
 };
+const DEFAULT_WORKSPACE_LIMITS: WorkspaceLimits = {
+  maxSources: DEFAULT_LIMITS.maxSources,
+  maxDownloadBytes: DEFAULT_LIMITS.maxDownloadBytes,
+  maxExtractedBytes: DEFAULT_LIMITS.maxExtractedBytes,
+};
+export function resolveWorkspaceTimeoutMs(configured: unknown, environmental?: string): number {
+  const fromEnv = configured === undefined;
+  const value = fromEnv
+    ? environmental === undefined
+      ? DEFAULT_LIMITS.timeoutMs
+      : /^[1-9]\d*$/.test(environmental)
+        ? Number(environmental)
+        : NaN
+    : configured;
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value <= 0 || value > 3_600_000)
+    throw new Error(
+      `${fromEnv ? "ALLAGENTS_WORKSPACE_TIMEOUT_MS" : "config.workspaceTimeoutMs"} must be an integer between 1 and 3600000`,
+    );
+  return value;
+}
 export const RUNTIME_CHANNELS = [
   "ALLAGENTS_GIT_USERNAME",
   "ALLAGENTS_GIT_TOKEN",
@@ -15,6 +35,7 @@ export const RUNTIME_CHANNELS = [
   "ALLAGENTS_WORKSPACE_ROOT",
   "ALLAGENTS_CACHE_ROOT",
   "ALLAGENTS_PREBUILT_ROOT",
+  "ALLAGENTS_WORKSPACE_TIMEOUT_MS",
 ] as const;
 export function object(value: unknown, name: string): Record<string, unknown> {
   if (
@@ -59,11 +80,11 @@ export function validateWorkspace(value: unknown): WorkspaceSpec {
     config.viewMode !== "copy-only"
   )
     throw new Error("workspace.viewMode must be auto or copy-only");
-  const limits = { ...DEFAULT_LIMITS };
+  const limits = { ...DEFAULT_WORKSPACE_LIMITS };
   if (config.limits !== undefined) {
     const authored = object(config.limits, "workspace.limits");
     exactKeys(authored, Object.keys(limits), "workspace.limits");
-    for (const key of Object.keys(authored) as (keyof SourceLimits)[]) {
+    for (const key of Object.keys(authored) as (keyof WorkspaceLimits)[]) {
       const n = authored[key];
       if (
         !Number.isSafeInteger(n) ||
@@ -73,7 +94,6 @@ export function validateWorkspace(value: unknown): WorkspaceSpec {
             maxSources: 64,
             maxDownloadBytes: 50 * 1024 ** 3,
             maxExtractedBytes: 50 * 1024 ** 3,
-            timeoutMs: 3600000,
           }[key]
       )
         throw new Error(`Invalid source limit ${key}`);

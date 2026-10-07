@@ -5,6 +5,7 @@ export interface SourceLimits {
   maxExtractedBytes: number;
   timeoutMs: number;
 }
+export type WorkspaceLimits = Omit<SourceLimits, "timeoutMs">;
 export interface GitSource {
   type: "git";
   repository: string;
@@ -22,7 +23,7 @@ export type WorkspaceSource = GitSource | OciSource;
 export type ViewMode = "auto" | "copy-only";
 export interface WorkspaceSpec {
   sources: WorkspaceSource[];
-  limits?: Partial<SourceLimits>;
+  limits?: Partial<WorkspaceLimits>;
   viewMode?: ViewMode;
 }
 export type ResolvedSource =

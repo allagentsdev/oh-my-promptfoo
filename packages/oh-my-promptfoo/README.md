@@ -134,8 +134,10 @@ Run this configuration with `npx promptfoo eval --config promptfooconfig.yaml` a
 | `config.delegate.config` | `Provider` | Agent-specific settings, such as model and sandbox mode |
 | `config.delegate.env` | `Provider` | Explicit credentials passed to the delegated agent |
 | `config.workspace.sources` | `Provider` | Required array of Git or OCI sources; `[]` creates an empty workspace |
+| `config.workspaceTimeoutMs` | `Provider` | Optional workspace-preparation deadline; falls back to `ALLAGENTS_WORKSPACE_TIMEOUT_MS`, then 120,000 ms |
 | `config.workingDir` | `Provider` | Optional relative directory inside the prepared workspace; defaults to its root |
 | `config.fileChanges` | `Provider` | Optional bounded file-change evidence; defaults to `false` |
+| `config.timeoutMs` | `Provider` | Agent-call deadline; independent of preparation and defaults to 900,000 ms |
 | `config.working_dir` | `CopilotSdkProvider` | Required existing directory |
 | `config.env`, `config.permissions` | `CopilotSdkProvider` | Explicit Copilot credentials and permissions |
 

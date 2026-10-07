@@ -139,6 +139,20 @@ describe("closed configuration", () => {
         validateProviderConfig({ delegate: { id: "openai:codex-sdk" }, workspace, workingDir }),
       ).toThrow(/config\.workingDir/);
   });
+  test("keeps workspace preparation and agent call deadlines separate", () => {
+    const config = validateProviderConfig({
+      delegate: { id: "copilot-sdk" },
+      workspace: { sources: [] },
+      timeoutMs: 1_800_000,
+      workspaceTimeoutMs: 3_600_000,
+    });
+    expect(config.timeoutMs).toBe(1_800_000);
+    expect(config.workspaceTimeoutMs).toBe(3_600_000);
+    for (const timeout of [0, -1, 3_600_001, "3600000"])
+      expect(() => validateProviderConfig({ ...config, workspaceTimeoutMs: timeout })).toThrow(
+        /config\.workspaceTimeoutMs/,
+      );
+  });
   test("accepts endpoint objects and rejects credentials or unsupported fields", () => {
     expect(
       validateCopilotConfig({

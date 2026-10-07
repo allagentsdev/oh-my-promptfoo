@@ -20,6 +20,7 @@ import { basename, dirname, join, relative, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import { withLock } from "../packages/workspace-core/src/cache-lock.ts";
 import { CheckoutFactory } from "../packages/workspace-core/src/checkout.ts";
+import { resolveWorkspaceTimeoutMs } from "../packages/workspace-core/src/config.ts";
 import {
   alive,
   allocated,
@@ -314,7 +315,7 @@ describe("workspace configuration", () => {
       "immutable input\n",
     );
   }, 30_000);
-  test("cold-cache contention honors the authored source timeout through initialization", async () => {
+  test("cold-cache contention honors the environment workspace timeout through initialization", async () => {
     const f = await fixture();
     const { SeedCache } = await import("../packages/workspace-core/src/seed-cache.ts");
     await initializeCacheRoot(f.channels.ALLAGENTS_CACHE_ROOT!);
@@ -340,7 +341,10 @@ describe("workspace configuration", () => {
       [
         join(import.meta.dir, "fixtures/lock-contender.ts"),
         pathToFileURL(join(import.meta.dir, "../packages/workspace-core/src/index.ts")).href,
-        JSON.stringify({ ...f, spec: { ...f.spec, limits: { timeoutMs: 1800000 } } }),
+        JSON.stringify({
+          ...f,
+          channels: { ...f.channels, ALLAGENTS_WORKSPACE_TIMEOUT_MS: "1800000" },
+        }),
       ],
       { stdio: ["ignore", "pipe", "pipe"] },
     );
@@ -497,6 +501,29 @@ describe("workspace configuration", () => {
     expect(validateWorkspace({ sources: [], viewMode: "copy-only" }).viewMode).toBe("copy-only");
     expect(() => validateWorkspace({ sources: [], viewMode: "reflink-only" })).toThrow("viewMode");
     expect(() => validateWorkspace({ sources: [], viewMode: "copy" })).toThrow("viewMode");
+  });
+  test("rejects a preparation deadline inside workspace source limits", () => {
+    expect(() => validateWorkspace({ sources: [], limits: { timeoutMs: 60_000 } })).toThrow(
+      "Unknown workspace.limits key: timeoutMs",
+    );
+  });
+  test("uses a bounded workspace timeout default, environment, and provider override", async () => {
+    expect(resolveWorkspaceTimeoutMs(undefined)).toBe(120_000);
+    expect(resolveWorkspaceTimeoutMs(undefined, "3600000")).toBe(3_600_000);
+    expect(resolveWorkspaceTimeoutMs(45_000, "3600000")).toBe(45_000);
+    for (const value of ["", "0", "-1", "3600001", "1.5", "invalid"])
+      expect(() => resolveWorkspaceTimeoutMs(undefined, value)).toThrow(
+        "ALLAGENTS_WORKSPACE_TIMEOUT_MS",
+      );
+    const f = await fixture();
+    const channels = { ...f.channels, ALLAGENTS_WORKSPACE_TIMEOUT_MS: "invalid" };
+    expect(() => new WorkspaceManager(f.spec, channels)).toThrow("ALLAGENTS_WORKSPACE_TIMEOUT_MS");
+    const provider = new WorkspaceManager(f.spec, channels, 60_000);
+    managers.push(provider);
+    const handle = await provider.prepare();
+    expect(await readFile(join(handle.path, "project/source.txt"), "utf8")).toBe(
+      "immutable input\n",
+    );
   });
   test("seed identity excludes permissions and mutable requested refs", () => {
     const a: ResolvedSource = {

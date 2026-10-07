@@ -28,6 +28,7 @@ const testEnvironment = {
   PROMPTFOO_CONFIG_DIR: join(cwd, "pf-state"),
   ALLAGENTS_CACHE_ROOT: join(workspaceParent, "cache"),
   ALLAGENTS_WORKSPACE_ROOT: join(workspaceParent, "runtime"),
+  ALLAGENTS_WORKSPACE_TIMEOUT_MS: "3600000",
 };
 function run(command: string, args: string[], dir = cwd, accepted = [0]) {
   const r = spawnSync(command, args, { cwd: dir, encoding: "utf8", env: testEnvironment });
@@ -114,6 +115,7 @@ try {
           },
         ],
       },
+      ...(label === "writable" ? { workspaceTimeoutMs: 1_800_000 } : {}),
       fileChanges: true,
     },
   });
