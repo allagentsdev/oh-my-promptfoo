@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { execFileSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { realpathSync } from "node:fs";
+import { subscribe, unsubscribe } from "node:diagnostics_channel";
+import { realpathSync, writeFileSync } from "node:fs";
 import {
   chmod,
   cp,
@@ -52,6 +53,7 @@ import type {
 } from "../packages/workspace-core/src/types.ts";
 
 const temporary: string[] = [];
+const onLinux = process.platform === "linux" ? test : test.skip;
 const managers: WorkspaceManager[] = [];
 afterEach(async () => {
   await Promise.allSettled(managers.splice(0).map((m) => m.cleanup()));
@@ -502,6 +504,36 @@ describe("workspace configuration", () => {
     expect(() => validateWorkspace({ sources: [], viewMode: "reflink-only" })).toThrow("viewMode");
     expect(() => validateWorkspace({ sources: [], viewMode: "copy" })).toThrow("viewMode");
   });
+  test("local source validation requires an absolute path and excludes package-managed roots", async () => {
+    expect(() =>
+      validateWorkspace({
+        sources: [{ type: "local", path: "../skills", destination: ".agents/skills" }],
+      }),
+    ).toThrow(/absolute/i);
+    expect(() =>
+      validateWorkspace({
+        sources: [
+          {
+            type: "local",
+            path: "/tmp/skills",
+            destination: ".agents/skills",
+            repository: "file:///ignored",
+          },
+        ],
+      }),
+    ).toThrow(/Unknown source key/i);
+    const root = await mkdtemp(join(realpathSync(tmpdir()), "allagents-local-overlap-"));
+    temporary.push(root);
+    const spec: WorkspaceSpec = { sources: [{ type: "local", path: root, destination: "skills" }] };
+    expect(
+      () =>
+        new WorkspaceManager(spec, {
+          ALLAGENTS_LOCAL_SOURCE_ROOT: root,
+          ALLAGENTS_CACHE_ROOT: join(root, "cache"),
+          ALLAGENTS_WORKSPACE_ROOT: join(root, "runtime"),
+        }),
+    ).toThrow(/overlap package cache/i);
+  });
   test("rejects a preparation deadline inside workspace source limits", () => {
     expect(() => validateWorkspace({ sources: [], limits: { timeoutMs: 60_000 } })).toThrow(
       "Unknown workspace.limits key: timeoutMs",
@@ -588,6 +620,225 @@ describe("workspace lifecycle", () => {
     await next.cleanup();
     expect((await pruneCache(f.channels, true)).removed).toContain(c.manifestDigest);
   }, 15_000);
+  onLinux(
+    "local source pins an immutable skill baseline across concurrent rows and later host edits",
+    async () => {
+      const root = await mkdtemp(join(realpathSync(tmpdir()), "allagents-local-workspace-"));
+      temporary.push(root);
+      const source = join(root, "host", "skills");
+      const skill = join(source, "example");
+      await mkdir(join(skill, "scripts"), { recursive: true });
+      await writeFile(join(skill, "SKILL.md"), "# Example\n");
+      await writeFile(join(skill, "scripts", "task.sh"), "echo initial\n", { mode: 0o755 });
+      await chmod(join(skill, "scripts", "task.sh"), 0o755);
+      const channels: RuntimeChannels = {
+        ALLAGENTS_LOCAL_SOURCE_ROOT: join(root, "host"),
+        ALLAGENTS_CACHE_ROOT: join(root, "cache"),
+        ALLAGENTS_WORKSPACE_ROOT: join(root, "runtime"),
+      };
+      const spec: WorkspaceSpec = {
+        sources: [
+          { type: "local", path: source, destination: ".agents/skills", permissions: "all" },
+        ],
+      };
+      const owner = manager(spec, channels);
+      const [a, b] = await Promise.all([owner.prepare(), owner.prepare()]);
+      const initial = a.sources[0];
+      expect(initial?.type).toBe("local");
+      if (!initial || initial.type !== "local") throw new Error("Expected local source");
+      expect(initial.digest).toMatch(/^sha256:[a-f0-9]{64}$/);
+      expect(b.sources[0]).toEqual(initial);
+      expect(a.manifestDigest).toBe(b.manifestDigest);
+      await writeFile(
+        join(a.path, ".agents", "skills", "example", "scripts", "task.sh"),
+        "agent edit\n",
+      );
+      expect(
+        await readFile(join(b.path, ".agents", "skills", "example", "scripts", "task.sh"), "utf8"),
+      ).toBe("echo initial\n");
+      expect(await readFile(join(skill, "scripts", "task.sh"), "utf8")).toBe("echo initial\n");
+      await writeFile(join(skill, "scripts", "task.sh"), "echo later\n");
+      const c = await owner.prepare();
+      expect(c.manifestDigest).toBe(a.manifestDigest);
+      expect(
+        await readFile(join(c.path, ".agents", "skills", "example", "scripts", "task.sh"), "utf8"),
+      ).toBe("echo initial\n");
+      const fresh = manager(spec, channels);
+      const d = await fresh.prepare();
+      expect(d.manifestDigest).not.toBe(a.manifestDigest);
+      const updated = d.sources[0];
+      if (!updated || updated.type !== "local") throw new Error("Expected local source");
+      expect(updated.digest).not.toBe(initial.digest);
+      expect(
+        await readFile(join(d.path, ".agents", "skills", "example", "scripts", "task.sh"), "utf8"),
+      ).toBe("echo later\n");
+    },
+    30_000,
+  );
+  onLinux(
+    "read-only local source uses a protected checkout rather than the host directory",
+    async () => {
+      const root = await mkdtemp(join(realpathSync(tmpdir()), "allagents-local-protected-"));
+      temporary.push(root);
+      const source = join(root, "host", "skills");
+      await mkdir(source, { recursive: true });
+      await writeFile(join(source, "SKILL.md"), "# Original\n");
+      const channels = {
+        ALLAGENTS_LOCAL_SOURCE_ROOT: join(root, "host"),
+        ALLAGENTS_CACHE_ROOT: join(root, "cache"),
+        ALLAGENTS_WORKSPACE_ROOT: join(root, "runtime"),
+      };
+      const owner = manager(
+        {
+          sources: [
+            {
+              type: "local",
+              path: source,
+              destination: ".agents/skills",
+              permissions: "read-only",
+            },
+          ],
+        },
+        channels,
+      );
+      const [a, b] = await Promise.all([owner.prepare(), owner.prepare()]);
+      const protectedPath = await readlink(join(a.path, ".agents", "skills"));
+      expect(protectedPath).toBe(await readlink(join(b.path, ".agents", "skills")));
+      expect(protectedPath).not.toBe(source);
+      expect(protectedPath).not.toContain(`${sep}published${sep}`);
+      expect(await readFile(join(protectedPath, "SKILL.md"), "utf8")).toBe("# Original\n");
+      expect(await readFile(join(source, "SKILL.md"), "utf8")).toBe("# Original\n");
+    },
+    30_000,
+  );
+  onLinux(
+    "a cancelled first local seed lets the next case acquire fresh host bytes",
+    async () => {
+      const root = await mkdtemp(join(realpathSync(tmpdir()), "allagents-local-abort-"));
+      temporary.push(root);
+      const source = join(root, "host", "skills");
+      await mkdir(source, { recursive: true });
+      await writeFile(join(source, "SKILL.md"), "# Initial\n");
+      const owner = manager(
+        { sources: [{ type: "local", path: source, destination: ".agents/skills" }] },
+        {
+          ALLAGENTS_LOCAL_SOURCE_ROOT: join(root, "host"),
+          ALLAGENTS_CACHE_ROOT: join(root, "cache"),
+          ALLAGENTS_WORKSPACE_ROOT: join(root, "runtime"),
+        },
+      );
+      const controller = new AbortController();
+      const listener = (value: unknown) => {
+        if (
+          value &&
+          typeof value === "object" &&
+          "phase" in value &&
+          value.phase === "source-start" &&
+          "caseIndex" in value &&
+          value.caseIndex === 424242
+        )
+          controller.abort(new Error("first local seed cancelled"));
+      };
+      subscribe("allagents.workspace.progress", listener);
+      try {
+        await expect(owner.prepare(controller.signal, 424242)).rejects.toThrow(
+          "first local seed cancelled",
+        );
+      } finally {
+        unsubscribe("allagents.workspace.progress", listener);
+      }
+      await writeFile(join(source, "SKILL.md"), "# Updated\n");
+      const retried = await owner.prepare();
+      expect(await readFile(join(retried.path, ".agents", "skills", "SKILL.md"), "utf8")).toBe(
+        "# Updated\n",
+      );
+    },
+    15_000,
+  );
+  onLinux(
+    "a cancelled first case after workspace readiness reacquires the local source",
+    async () => {
+      const root = await mkdtemp(join(realpathSync(tmpdir()), "allagents-local-ready-abort-"));
+      temporary.push(root);
+      const source = join(root, "host", "skills");
+      await mkdir(source, { recursive: true });
+      await writeFile(join(source, "SKILL.md"), "# Initial\n");
+      const owner = manager(
+        { sources: [{ type: "local", path: source, destination: ".agents/skills" }] },
+        {
+          ALLAGENTS_LOCAL_SOURCE_ROOT: join(root, "host"),
+          ALLAGENTS_CACHE_ROOT: join(root, "cache"),
+          ALLAGENTS_WORKSPACE_ROOT: join(root, "runtime"),
+        },
+      );
+      const controller = new AbortController();
+      const listener = (value: unknown) => {
+        if (
+          value &&
+          typeof value === "object" &&
+          "phase" in value &&
+          value.phase === "workspace-ready" &&
+          "caseIndex" in value &&
+          value.caseIndex === 424244
+        )
+          controller.abort(new Error("cancel after workspace ready"));
+      };
+      subscribe("allagents.workspace.progress", listener);
+      try {
+        await expect(owner.prepare(controller.signal, 424244)).rejects.toThrow(
+          "cancel after workspace ready",
+        );
+      } finally {
+        unsubscribe("allagents.workspace.progress", listener);
+      }
+      await writeFile(join(source, "SKILL.md"), "# Updated\n");
+      const retried = await owner.prepare();
+      expect(await readFile(join(retried.path, ".agents", "skills", "SKILL.md"), "utf8")).toBe(
+        "# Updated\n",
+      );
+    },
+    15_000,
+  );
+  onLinux(
+    "a changed source before first seed publication can be acquired on the next call",
+    async () => {
+      const root = await mkdtemp(join(realpathSync(tmpdir()), "allagents-local-change-"));
+      temporary.push(root);
+      const source = join(root, "host", "skills");
+      await mkdir(source, { recursive: true });
+      await writeFile(join(source, "SKILL.md"), "# Initial\n");
+      const owner = manager(
+        { sources: [{ type: "local", path: source, destination: ".agents/skills" }] },
+        {
+          ALLAGENTS_LOCAL_SOURCE_ROOT: join(root, "host"),
+          ALLAGENTS_CACHE_ROOT: join(root, "cache"),
+          ALLAGENTS_WORKSPACE_ROOT: join(root, "runtime"),
+        },
+      );
+      const listener = (value: unknown) => {
+        if (
+          value &&
+          typeof value === "object" &&
+          "phase" in value &&
+          value.phase === "source-start" &&
+          "caseIndex" in value &&
+          value.caseIndex === 424243
+        )
+          writeFileSync(join(source, "SKILL.md"), "# Changed before seed\n");
+      };
+      subscribe("allagents.workspace.progress", listener);
+      try {
+        await expect(owner.prepare(undefined, 424243)).rejects.toThrow(/Local source changed/);
+      } finally {
+        unsubscribe("allagents.workspace.progress", listener);
+      }
+      const retried = await owner.prepare();
+      expect(await readFile(join(retried.path, ".agents", "skills", "SKILL.md"), "utf8")).toBe(
+        "# Changed before seed\n",
+      );
+    },
+    15_000,
+  );
   test("a writable Git view can commit new objects without changing cached objects", async () => {
     const f = await fixture();
     const owner = manager(f.spec, f.channels);

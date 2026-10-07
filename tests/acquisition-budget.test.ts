@@ -20,7 +20,7 @@ const oci = { type: "oci", repository: "example.test/artifact" } as const;
 
 test.each<{
   name: string;
-  sources: Pick<WorkspaceSource, "type" | "repository">[];
+  sources: Pick<WorkspaceSource, "type">[];
   temporary: number;
 }>([
   { name: "empty workspace", sources: [], temporary: 0 },

@@ -29,6 +29,7 @@ import { jsonSafe, redact, runDelegate, secrets, wireContext } from "./protocol.
 export type { CapturedFile, FileChanges } from "../../workspace-core/src/file-changes.js";
 export type {
   GitSource,
+  LocalSource,
   OciSource,
   ResolvedSource,
   WorkspaceHandle,

@@ -45,21 +45,29 @@ import type {
 export const CACHE_CEILING = 50 * 1024 ** 3;
 export const CACHE_MAX_AGE = 30 * 24 * 60 * 60 * 1000;
 export function acquisitionIdentity(source: ResolvedSource): Record<string, unknown> {
-  return source.type === "git"
-    ? {
-        type: source.type,
-        repository: source.repository,
-        commit: source.commit,
-        destination: source.destination,
-        materializerVersion: source.materializerVersion ?? 1,
-      }
-    : {
-        type: source.type,
-        repository: source.repository,
-        digest: source.digest,
-        destination: source.destination,
-        materializerVersion: source.materializerVersion ?? 1,
-      };
+  if (source.type === "git")
+    return {
+      type: source.type,
+      repository: source.repository,
+      commit: source.commit,
+      destination: source.destination,
+      materializerVersion: source.materializerVersion ?? 1,
+    };
+  if (source.type === "local")
+    return {
+      type: source.type,
+      path: source.path,
+      digest: source.digest,
+      destination: source.destination,
+      materializerVersion: source.materializerVersion ?? 1,
+    };
+  return {
+    type: source.type,
+    repository: source.repository,
+    digest: source.digest,
+    destination: source.destination,
+    materializerVersion: source.materializerVersion ?? 1,
+  };
 }
 export function protectedCheckoutKey(source: ResolvedSource, viewMode: ViewMode = "auto"): string {
   const identity = canonicalJson(acquisitionIdentity(source));

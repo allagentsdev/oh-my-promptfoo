@@ -67,7 +67,7 @@ try {
     throw new Error("Installed Promptfoo version mismatch");
   for (const [name, fixture, version] of [
     ["@openai/codex-sdk", "codex-sdk.mjs", "0.1.0"],
-    ["@github/copilot-sdk", "copilot-sdk.mjs", "1.0.6"],
+    ["@github/copilot-sdk", "copilot-sdk.mjs", "1.0.17"],
     ["@anthropic-ai/claude-agent-sdk", "claude-sdk.mjs", "0.1.0"],
   ]) {
     const dir = join(cwd, "node_modules", name);

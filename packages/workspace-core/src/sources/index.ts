@@ -10,6 +10,7 @@ import {
 import { publishProgress } from "../progress.js";
 import type { ResolvedSource, RuntimeChannels, SourceLimits, WorkspaceSpec } from "../types.ts";
 import { materializeGit, resolveGit } from "./git.ts";
+import { materializeLocal, resolveLocal } from "./local.ts";
 import { materializeOci, resolveOci } from "./oci.ts";
 import { PhysicalWriter } from "./process.ts";
 
@@ -38,6 +39,24 @@ export async function resolveSources(
   const sources = [...normalized.sources].sort((a, b) =>
     a.destination.localeCompare(b.destination, "en"),
   );
+  if (sources.some((source) => source.type === "local")) {
+    const acquisitionSignal = AbortSignal.any([
+      AbortSignal.timeout(limits.timeoutMs),
+      ...(signal ? [signal] : []),
+    ]);
+    const resolved: ResolvedSource[] = [];
+    for (const source of sources) {
+      acquisitionSignal.throwIfAborted();
+      resolved.push(
+        source.type === "local"
+          ? await resolveLocal(source, channels, limits, acquisitionSignal)
+          : source.type === "git"
+            ? await resolveGit(source, channels, acquisitionSignal)
+            : await resolveOci(source, channels, acquisitionSignal),
+      );
+    }
+    return resolved;
+  }
   const requests = sources.map(({ permissions: _permissions, ...request }) => request);
   const key = canonicalJson([requests, limits.timeoutMs]);
   let flight = flights.get(key);
@@ -53,12 +72,12 @@ export async function resolveSources(
     const acquisitionSignal = AbortSignal.any([controller.signal, timeout]);
     acquired.promise = (async () => {
       const resolved: ResolvedSource[] = [];
-      for (const request of sources)
-        resolved.push(
-          request.type === "git"
-            ? await resolveGit(request, channels, acquisitionSignal)
-            : await resolveOci(request, channels, acquisitionSignal),
-        );
+      for (const request of sources) {
+        if (request.type === "git")
+          resolved.push(await resolveGit(request, channels, acquisitionSignal));
+        else if (request.type === "oci")
+          resolved.push(await resolveOci(request, channels, acquisitionSignal));
+      }
       return resolved;
     })().then(
       (value) => {
@@ -172,7 +191,9 @@ export async function materializeSources(
             sourceOffset + 1,
             resolved.length,
           )
-        : await materializeOci(source, staging, remaining, channels, writer, acquisitionSignal);
+        : source.type === "local"
+          ? await materializeLocal(source, staging, remaining, channels, writer, acquisitionSignal)
+          : await materializeOci(source, staging, remaining, channels, writer, acquisitionSignal);
     extracted = await logicalBytes(staging);
     if (downloaded > limits.maxDownloadBytes || extracted > limits.maxExtractedBytes)
       throw new Error("Aggregate source acquisition exceeds configured limits");

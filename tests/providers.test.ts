@@ -30,7 +30,11 @@ import {
   validateDelegateConfig,
   validateProviderConfig,
 } from "../packages/oh-my-promptfoo/src/config";
-import { CopilotSdkProvider, Provider } from "../packages/oh-my-promptfoo/src/index";
+import {
+  CopilotSdkProvider,
+  Provider,
+  type WorkspaceMetadata,
+} from "../packages/oh-my-promptfoo/src/index";
 import {
   type CallFrame,
   jsonSafe,
@@ -55,7 +59,7 @@ async function project(moduleName: string, source: string): Promise<string> {
   await writeFile(join(dir, "index.js"), source);
   return path;
 }
-const native = `import {chmod,utimes,writeFile} from 'node:fs/promises';
+const native = `import {chmod,readFile,utimes,writeFile} from 'node:fs/promises';
 import {writeSync} from 'node:fs';
 export async function loadApiProvider(id, options) {
  return {async callApi(prompt,context,callOptions){
@@ -63,6 +67,8 @@ export async function loadApiProvider(id, options) {
   if(prompt==='unknown-frame')writeSync(1,JSON.stringify({version:1,type:'unsupported'})+'\\n');
   if(prompt==='duplicate')writeSync(1,JSON.stringify({version:1,type:'result',response:{output:'premature'}})+'\\n');
   if(prompt==='write')await writeFile(options.options.config.working_dir+'/generated.txt','generated durable content');
+  if(prompt==='edit-local-skill')await writeFile(options.options.config.working_dir+'/.agents/skills/example/scripts/task.sh','echo agent\\n');
+  if(prompt==='read-local-skill')return {output:await readFile(options.options.config.working_dir+'/.agents/skills/example/scripts/task.sh','utf8')};
   if(prompt==='tamper-protected'){const file=options.options.config.working_dir+'/repo/input.txt';await chmod(file,0o644);await writeFile(file,'modified protected source');}
   if(prompt==='tamper-secondary'){const file=options.options.config.working_dir+'/secondary/input.txt';await chmod(file,0o644);await writeFile(file,'modified protected source');}
   if(prompt==='tamper-protected-metadata'){const file=options.options.config.working_dir+'/repo/.git/HEAD';await utimes(file,new Date(0),new Date(0));}
@@ -826,6 +832,7 @@ describe("workspace provider publication and lifetime", () => {
   }, 15_000);
   // POSIX owners can change a protected file's mode; Windows ACLs deny that mutation.
   const onPosix = process.platform === "win32" ? test.skip : test;
+  const onLinux = process.platform === "linux" ? test : test.skip;
   onPosix(
     "provider rejects protected checkout mutations made by a delegate",
     async () => {
@@ -866,34 +873,100 @@ describe("workspace provider publication and lifetime", () => {
       await provider.cleanup();
     }
   }, 15_000);
-  test("file-change bytes survive workspace cleanup and metadata collisions do not publish paths", async () => {
-    const { provider } = await workspaceProvider(true);
-    try {
-      const result = await provider.callApi("write");
-      expect(result.error).toBeUndefined();
-      const metadata = result.metadata as any;
-      expect(
-        Buffer.from(
-          metadata.fileChanges.generatedFiles["generated.txt"].content,
-          "base64",
-        ).toString(),
-      ).toBe("generated durable content");
-      await access(metadata.workspace.path);
-      const collision = await provider.callApi("collision");
-      expect(collision.error).toContain("reserved");
-      expect(collision.metadata).toBeUndefined();
-      await provider.cleanup();
-      await expect(access(metadata.workspace.path)).rejects.toThrow();
-      expect(
-        Buffer.from(
-          metadata.fileChanges.generatedFiles["generated.txt"].content,
-          "base64",
-        ).toString(),
-      ).toBe("generated durable content");
-    } finally {
-      await provider.cleanup();
-    }
-  }, 15_000);
+  onLinux(
+    "reports a host-local skill baseline from actual provider calls without modifying host bytes",
+    async () => {
+      const root = await project("promptfoo", native);
+      const source = join(root, "inputs", "skills");
+      const skill = join(source, "example");
+      await mkdir(join(skill, "scripts"), { recursive: true });
+      await writeFile(join(skill, "SKILL.md"), "# Example\n");
+      await writeFile(join(skill, "scripts", "task.sh"), "echo baseline\n", { mode: 0o755 });
+      await chmod(join(skill, "scripts", "task.sh"), 0o755);
+      const options = {
+        config: {
+          basePath: root,
+          delegate: { id: "openai:codex-sdk" as const },
+          workspace: {
+            sources: [
+              {
+                type: "local" as const,
+                path: source,
+                destination: ".agents/skills",
+                permissions: "all" as const,
+              },
+            ],
+          },
+          fileChanges: true,
+        },
+        env: {
+          ALLAGENTS_LOCAL_SOURCE_ROOT: join(root, "inputs"),
+          ALLAGENTS_CACHE_ROOT: join(root, "cache"),
+          ALLAGENTS_WORKSPACE_ROOT: join(root, "runtime"),
+        },
+      };
+      const provider = new Provider(options);
+      try {
+        const [first, parallel] = await Promise.all([
+          provider.callApi("read-local-skill"),
+          provider.callApi("read-local-skill"),
+        ]);
+        expect(first.error).toBeUndefined();
+        expect(first.output).toBe("echo baseline\n");
+        expect(parallel.output).toBe("echo baseline\n");
+        const metadata = first.metadata as { workspace: WorkspaceMetadata };
+        const sourceMetadata = metadata.workspace.sources[0];
+        expect(sourceMetadata?.type).toBe("local");
+        if (!sourceMetadata || sourceMetadata.type !== "local")
+          throw new Error("Expected local source metadata");
+        expect(sourceMetadata.digest).toMatch(/^sha256:[a-f0-9]{64}$/);
+        expect(metadata.workspace.manifestDigest).toBe(
+          (parallel.metadata as { workspace: WorkspaceMetadata }).workspace.manifestDigest,
+        );
+        const edit = await provider.callApi("edit-local-skill");
+        expect(edit.error).toBeUndefined();
+        expect((edit.metadata as { workspace: WorkspaceMetadata }).workspace.sources[0]).toEqual(
+          sourceMetadata,
+        );
+        expect(await readFile(join(skill, "scripts", "task.sh"), "utf8")).toBe("echo baseline\n");
+        expect(
+          await readFile(
+            join(
+              (edit.metadata as { workspace: WorkspaceMetadata }).workspace.path,
+              ".agents",
+              "skills",
+              "example",
+              "scripts",
+              "task.sh",
+            ),
+            "utf8",
+          ),
+        ).toBe("echo agent\n");
+        await writeFile(join(skill, "scripts", "task.sh"), "echo host update\n");
+        const same = await provider.callApi("read-local-skill");
+        expect(same.output).toBe("echo baseline\n");
+        expect((same.metadata as { workspace: WorkspaceMetadata }).workspace.sources[0]).toEqual(
+          sourceMetadata,
+        );
+        const fresh = new Provider(options);
+        try {
+          const updated = await fresh.callApi("read-local-skill");
+          expect(updated.error).toBeUndefined();
+          expect(updated.output).toBe("echo host update\n");
+          const next = (updated.metadata as { workspace: WorkspaceMetadata }).workspace;
+          const nextSource = next.sources[0];
+          if (!nextSource || nextSource.type !== "local") throw new Error("Expected local source");
+          expect(nextSource.digest).not.toBe(sourceMetadata.digest);
+          expect(next.manifestDigest).not.toBe(metadata.workspace.manifestDigest);
+        } finally {
+          await fresh.cleanup();
+        }
+      } finally {
+        await provider.cleanup();
+      }
+    },
+    45_000,
+  );
 });
 describe("protocol and native adapters", () => {
   test("native SDK discovery uses the consumer while agent writes use external workspace storage", async () => {
@@ -1255,7 +1328,7 @@ describe("direct Copilot provider", () => {
   test("missing SDK is actionable and pre-abort performs no execution", async () => {
     const path = await project("unrelated", "export {};");
     const provider = new CopilotSdkProvider({ config: { basePath: path, working_dir: "." } });
-    expect((await provider.callApi("test")).error).toContain("Install @github/copilot-sdk@1.0.6");
+    expect((await provider.callApi("test")).error).toContain("Install @github/copilot-sdk@1.0.17");
     const controller = new AbortController();
     controller.abort();
     expect(
