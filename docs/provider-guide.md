@@ -1,12 +1,21 @@
 # Provider guide
 
-The [README](../README.md) has quick starts for the workspace-owning `Provider` and the direct `CopilotSdkProvider`. This guide records their configuration, response, and resource behavior. The [examples](../examples) include Codex, Claude, Copilot, Git/OCI, source permissions, and cache use.
+The [README](../README.md) covers installation and provider selection. The
+[agent-facing usage skill](../skills/oh-my-promptfoo/SKILL.md) gives concrete
+eval configs. This guide records configuration, response, and resource
+behavior. The [examples](../examples) include Codex, Claude, Copilot, Git/OCI,
+source permissions, and cache use.
 
 Both providers use stock Promptfoo. Their YAML IDs are `package:oh-my-promptfoo:Provider` and `package:oh-my-promptfoo:CopilotSdkProvider`.
 
 ## Provider response and assertions
 
 Each workspace-provider call returns a distinct absolute `metadata.workspace.path`, an immutable manifest digest, resolved source commits/digests, and `cleanup: best-effort-evaluation`. Native output, raw response, usage, cost, and metadata (including `skillCalls`) keep their original locations. Codex's root Git check is bypassed internally because workspace roots may contain nested repositories. A native top-level `error` remains an execution error; Promptfoo skips assertions for that row.
+
+For `type: local`, `metadata.workspace.sources[].digest` identifies the complete
+staged directory, including scripts and untracked files. It hashes sorted
+relative paths, modes, and file bytes. This is input provenance, not a record
+of agent edits.
 
 ## Workspace provider configuration
 
@@ -17,7 +26,7 @@ Provider config is closed: only `delegate`, `workspace`, `workspaceTimeoutMs`, `
 | `delegate.id` | Yes | Selects one of the three supported agents |
 | `delegate.config` | No | Sets options allowed by that agent's Promptfoo provider |
 | `delegate.env` | No | Passes only the named environment values to the agent |
-| `workspace.sources` | Yes | Lists Git or OCI inputs; `[]` starts with an empty workspace |
+| `workspace.sources` | Yes | Lists Git, OCI, or host-local inputs; `[]` starts with an empty workspace |
 | `workspace.limits` | No | Narrows source count and download/extraction byte budgets |
 | `workspaceTimeoutMs` | No | Bounds workspace preparation; provider value overrides `ALLAGENTS_WORKSPACE_TIMEOUT_MS`, then the 120,000 ms package default |
 | `workspace.viewMode` | No | `auto` (default) tries reflinks then disk-admitted physical copies; `copy-only` skips reflinks and uses disk-admitted physical copies for writable views and protected read-only checkouts |
@@ -34,6 +43,7 @@ Provider config is closed: only `delegate`, `workspace`, `workspaceTimeoutMs`, `
 | --- | --- | --- |
 | Git | `type: git`, `repository`, `ref`, `destination` | Resolved commit |
 | OCI | `type: oci`, `repository`, `destination`, and one of `tag` or `digest` | Resolved manifest digest |
+| Local | `type: local`, absolute `path`, `destination` | SHA-256 of sorted relative paths, modes, and file bytes |
 
 Use `permissions: read-only` for a protected source checkout. The default, `permissions: all`, creates a private writable source view. See the [source-permissions example](../examples/source-permissions/promptfooconfig.yaml) for labeled providers that run tests against both policies.
 
@@ -41,9 +51,25 @@ Git sources accept credential-free HTTPS or `file://` repositories and a ref; re
 
 OCI sources have `type: oci`, `repository`, exactly one of `tag` or `digest`, and a `destination`. Supported manifests contain uncompressed regular files with unique `org.opencontainers.image.title` paths and SHA-256 descriptors. Descriptor limits are checked before blobs; actual streamed bytes and digests are checked before publication. Archives, compressed layers, special files, and escaping paths fail explicitly.
 
+Local sources read a host directory directly; they are not Git repositories. The trusted runner must pass the absolute `ALLAGENTS_LOCAL_SOURCE_ROOT` via provider loader `options.env` or the provider process environment. This channel is not authored workspace configuration or delegate environment. The authored `path` must be absolute after Promptfoo expands environment templates, and its normalized path must be inside that root. For a YAML file beside `skills/`, use `path: '{{env.EVAL_SUITE_DIR}}/skills'` and have the runner set `EVAL_SUITE_DIR` to the authored YAML's directory; Promptfoo's package loader does not automatically supply that directory to the provider. Paths containing `..` are normalized before containment checking, but symlink ancestors, symlinked entries, special files, and escapes from the trusted root are rejected. Every regular file is included, even untracked or Git-ignored files; `.git` metadata at any level is excluded. Source hashing and the copy are bounded by workspace byte and preparation-time limits, and a changed file or directory during copying prevents seed publication. One provider instance pins a single immutable baseline across concurrent and subsequent cases; a fresh provider instance hashes the directory again and observes later host edits. Agents edit private writable views, never the host source; the local source's resolved digest in `metadata.workspace.sources` identifies the original directory contents, independent of agent edits and Git.
+Direct local sources require Linux `/proc/self/fd` descriptor-anchored traversal; Git and OCI sources retain their existing platform support.
+
 Destinations must be relative, normalized, nonempty, nonoverlapping paths. A read-only source links a separate protected checkout into each private writable workspace. Matching rows can share protected source contents; scratch and generated files outside the source remain private. A row can unlink or replace its destination link without changing other rows. Modes are a cooperative guardrail; same-user processes can deliberately bypass modes. Unexpected protected-content mutation invalidates reuse. The immutable seed is never the delegate workspace.
 
 Select source policy with labeled providers and `defaultTest.providers` / `tests[].providers`; without a filter, a test runs against every configured provider. There is no workspace-wide permissions setting. Native sandbox settings apply to the whole workspace.
+
+### Optional sibling agent workspace
+
+By default, the agent starts at the private workspace root; keep native
+`AGENTS.md`, `.agents/skills/`, and `.github/` inputs there when they are needed.
+An optional `agent-workspace` local directory source can instead carry those
+native paths with `workingDir: agent-workspace`. Repositories remain siblings,
+addressed as `../CargoWise` and similar paths. Use a private writable view
+(`permissions: all`) for that working directory; a `read-only` source is linked
+to a protected cache checkout and does not have the outer workspace as its
+physical parent. Sibling access still depends on the delegate's directory
+permissions. [Case-scoped asset registration and access](https://github.com/allagentsdev/oh-my-promptfoo/issues/62)
+is tracked separately; the default root cwd remains unchanged.
 
 ### Unprivileged workspace runners
 
@@ -135,7 +161,7 @@ allagents-promptfoo cache prune
 allagents-promptfoo cache prune --all
 ```
 
-Both commands report removed/retained entries and allocated bytes and return nonzero on failure. They do not run evaluations or delete runtime roots or the external prebuilt root. Unmarked and symlinked configured roots are refused. `ALLAGENTS_CACHE_ROOT`, `ALLAGENTS_WORKSPACE_ROOT`, and `ALLAGENTS_PREBUILT_ROOT` must be distinct and non-overlapping. Acquisition channels are `ALLAGENTS_GIT_USERNAME`, `ALLAGENTS_GIT_TOKEN`, `ALLAGENTS_ORAS_PATH`, and `ALLAGENTS_ORAS_AUTH_FILE`; prepared sources use `ALLAGENTS_PREBUILT_ROOT`. `ALLAGENTS_WORKSPACE_TIMEOUT_MS` supplies a bounded preparation deadline. Provider loader `options.env` takes precedence over process environment. None of these eight channels reaches delegates.
+Both commands report removed/retained entries and allocated bytes and return nonzero on failure. They do not run evaluations or delete runtime roots or the external prebuilt root. Unmarked and symlinked configured roots are refused. `ALLAGENTS_CACHE_ROOT`, `ALLAGENTS_WORKSPACE_ROOT`, and `ALLAGENTS_PREBUILT_ROOT` must be distinct and non-overlapping. Acquisition channels are `ALLAGENTS_GIT_USERNAME`, `ALLAGENTS_GIT_TOKEN`, `ALLAGENTS_ORAS_PATH`, and `ALLAGENTS_ORAS_AUTH_FILE`; prepared sources use `ALLAGENTS_PREBUILT_ROOT`, and local directory sources use `ALLAGENTS_LOCAL_SOURCE_ROOT`. `ALLAGENTS_WORKSPACE_TIMEOUT_MS` supplies a bounded preparation deadline. Provider loader `options.env` takes precedence over process environment. These channels never reach delegates.
 
 ## Direct Copilot configuration
 

@@ -19,13 +19,23 @@ export type OciSource = {
   destination: string;
   permissions?: "all" | "read-only";
 } & ({ digest: `sha256:${string}`; tag?: never } | { tag: string; digest?: never });
-export type WorkspaceSource = GitSource | OciSource;
+export interface LocalSource {
+  type: "local";
+  path: string;
+  destination: string;
+  permissions?: "all" | "read-only";
+}
+export type WorkspaceSource = GitSource | OciSource | LocalSource;
 export type ViewMode = "auto" | "copy-only";
 export interface WorkspaceSpec {
   sources: WorkspaceSource[];
   limits?: Partial<WorkspaceLimits>;
   viewMode?: ViewMode;
 }
+export type ResolvedLocalSource = LocalSource & {
+  digest: `sha256:${string}`;
+  materializerVersion?: number;
+};
 export type ResolvedSource =
   | (GitSource & { commit: string; materializerVersion?: number })
   | {
@@ -36,7 +46,8 @@ export type ResolvedSource =
       digest: `sha256:${string}`;
       tag?: string;
       materializerVersion?: number;
-    };
+    }
+  | ResolvedLocalSource;
 export type Digest = `sha256:${string}`;
 export interface ProcessIdentity {
   pid: number;

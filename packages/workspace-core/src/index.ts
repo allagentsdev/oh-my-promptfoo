@@ -50,6 +50,11 @@ export { canonicalJson, DEFAULT_LIMITS, RUNTIME_CHANNELS, validateWorkspace } fr
 export { helperInvoke } from "./helper.js";
 export { CACHE_CEILING, CACHE_MAX_AGE, manifestDigest, SeedCache } from "./seed-cache.js";
 export * from "./types.js";
+
+function overlaps(a: string, b: string): boolean {
+  const rel = relative(a, b);
+  return !rel || (!rel.startsWith(`..${sep}`) && rel !== ".." && !rel.startsWith(sep));
+}
 export function roots(channels: RuntimeChannels): { cache: string; runtime: string } {
   const cache = resolve(
     channels.ALLAGENTS_CACHE_ROOT ??
@@ -65,10 +70,6 @@ export function roots(channels: RuntimeChannels): { cache: string; runtime: stri
     channels.ALLAGENTS_WORKSPACE_ROOT ??
       join(realpathSync(tmpdir()), `allagents-promptfoo-${process.getuid?.() ?? "user"}`),
   );
-  const overlaps = (a: string, b: string) => {
-    const rel = relative(a, b);
-    return !rel || (!rel.startsWith(`..${sep}`) && rel !== ".." && !rel.startsWith(sep));
-  };
   if (overlaps(cache, runtime) || overlaps(runtime, cache))
     throw new Error("Cache and workspace roots must be distinct and non-overlapping");
   return { cache, runtime };
@@ -82,6 +83,9 @@ export class WorkspaceManager {
   private readonly handles = new Map<string, RecoveryRecord>();
   private readonly prebuiltStamps = new Map<string, string>();
   private readonly invalidPrebuilt = new Set<string>();
+  private localResolution?: Promise<ResolvedSource[]>;
+  private localController?: AbortController;
+  private localPinned = false;
   private readonly active = new Set<Promise<WorkspaceHandle>>();
   private closed = false;
   private readonly shutdown = new AbortController();
@@ -104,6 +108,23 @@ export class WorkspaceManager {
     };
     this.acquisitionLockTimeoutMs = Math.max(DEFAULT_LOCK_TIMEOUT_MS, this.limits.timeoutMs);
     const locations = roots(channels);
+    const outputs = [
+      locations.cache,
+      locations.runtime,
+      ...(channels.ALLAGENTS_GIT_STAGING_ROOT
+        ? [resolve(channels.ALLAGENTS_GIT_STAGING_ROOT)]
+        : []),
+    ];
+    for (const source of this.spec.sources) {
+      if (source.type !== "local") continue;
+      const input = resolve(source.path);
+      for (const output of outputs) {
+        if (overlaps(input, output) || overlaps(output, input))
+          throw new Error(
+            "Local source must not overlap package cache, workspace, or Git staging roots",
+          );
+      }
+    }
     this.initialization = this.initialize(locations);
     this.initialization.catch(() => {});
   }
@@ -156,7 +177,16 @@ export class WorkspaceManager {
     signal?.throwIfAborted();
     const call = this.prepareInner(signal, caseIndex);
     this.active.add(call);
-    call.finally(() => this.active.delete(call)).catch(() => {});
+    call
+      .finally(() => {
+        this.active.delete(call);
+        if (!this.localPinned && !this.active.size) {
+          this.localController?.abort();
+          this.localController = undefined;
+          this.localResolution = undefined;
+        }
+      })
+      .catch(() => {});
     return call;
   }
   private async prepareInner(signal?: AbortSignal, caseIndex?: number): Promise<WorkspaceHandle> {
@@ -184,7 +214,9 @@ export class WorkspaceManager {
       const prepared = prebuilt?.resolves(source);
       if (prepared) preparedSources.set(source.destination, prepared);
     }
-    const ordinary = this.spec.sources.filter((source) => !preparedSources.has(source.destination));
+    const ordinary = this.spec.sources.filter(
+      (source) => source.type !== "local" && !preparedSources.has(source.destination),
+    );
     const normal = ordinary.length
       ? await resolveSources(
           { ...this.spec, sources: ordinary },
@@ -193,11 +225,56 @@ export class WorkspaceManager {
           this.limits.timeoutMs,
         )
       : [];
-    const resolved = [...normal, ...preparedSources.values()].sort((a, b) =>
+    const local = this.spec.sources.filter((source) => source.type === "local");
+    if (local.length && !this.localResolution) {
+      const controller = new AbortController();
+      const pending = resolveSources(
+        { ...this.spec, sources: local },
+        this.channels,
+        AbortSignal.any([this.shutdown.signal, controller.signal]),
+        this.limits.timeoutMs,
+      );
+      this.localController = controller;
+      this.localResolution = pending;
+      pending.catch(() => {
+        if (this.localResolution === pending) {
+          this.localResolution = undefined;
+          this.localController = undefined;
+        }
+      });
+    }
+    let localSources: ResolvedSource[] = [];
+    if (this.localResolution) {
+      const pending = this.localResolution;
+      let abort: (() => void) | undefined;
+      try {
+        localSources = await Promise.race([
+          pending,
+          new Promise<ResolvedSource[]>((_, reject) => {
+            abort = () => reject(combined.reason ?? new Error("Local source resolution cancelled"));
+            combined.addEventListener("abort", abort, { once: true });
+            if (combined.aborted) abort();
+          }),
+        ]);
+      } finally {
+        if (abort) combined.removeEventListener("abort", abort);
+      }
+    }
+    const resolved = [...normal, ...localSources, ...preparedSources.values()].sort((a, b) =>
       a.destination < b.destination ? -1 : a.destination > b.destination ? 1 : 0,
     );
-    const metadata = normal.length
-      ? await this.cache.prepare(normal, this.limits, this.channels, combined, undefined, caseIndex)
+    const seedSources = [...normal, ...localSources].sort((a, b) =>
+      a.destination < b.destination ? -1 : a.destination > b.destination ? 1 : 0,
+    );
+    const metadata = seedSources.length
+      ? await this.cache.prepare(
+          seedSources,
+          this.limits,
+          this.channels,
+          combined,
+          undefined,
+          caseIndex,
+        )
       : undefined;
     const id = randomUUID();
     const path = join(this.root, "workspaces", id);
@@ -220,7 +297,14 @@ export class WorkspaceManager {
         record.seedLease = true;
         await this.save(record);
         // Pruning may run between resolution and pending-record publication.
-        await this.cache.prepare(normal, this.limits, this.channels, combined, record, caseIndex);
+        await this.cache.prepare(
+          seedSources,
+          this.limits,
+          this.channels,
+          combined,
+          record,
+          caseIndex,
+        );
       }
       await mkdir(path, { mode: 0o700 });
       for (let sourceOffset = 0; sourceOffset < resolved.length; sourceOffset++) {
@@ -252,7 +336,9 @@ export class WorkspaceManager {
             )
               throw new Error("Prepared source checkout mutated");
             this.prebuiltStamps.set(key, view.prebuiltStamp);
+            combined.throwIfAborted();
           } catch {
+            if (combined.aborted) combined.throwIfAborted();
             this.invalidPrebuilt.add(key);
             throw new Error("Prepared source checkout failed integrity verification");
           }
@@ -303,7 +389,10 @@ export class WorkspaceManager {
       }
       record.status = "active";
       await this.save(record);
+      combined.throwIfAborted();
       publishProgress("workspace-ready", caseIndex);
+      combined.throwIfAborted();
+      if (local.length && metadata) this.localPinned = true;
       return {
         path,
         manifestDigest: manifestDigest(resolved),

@@ -32,6 +32,7 @@ export const RUNTIME_CHANNELS = [
   "ALLAGENTS_GIT_STAGING_ROOT",
   "ALLAGENTS_ORAS_PATH",
   "ALLAGENTS_ORAS_AUTH_FILE",
+  "ALLAGENTS_LOCAL_SOURCE_ROOT",
   "ALLAGENTS_WORKSPACE_ROOT",
   "ALLAGENTS_CACHE_ROOT",
   "ALLAGENTS_PREBUILT_ROOT",
@@ -105,12 +106,15 @@ export function validateWorkspace(value: unknown): WorkspaceSpec {
   const sources = config.sources.map((raw, index) => {
     const source = object(raw, `source ${index}`);
     const type = source.type;
-    if (type !== "git" && type !== "oci") throw new Error("Unsupported workspace source type");
+    if (type !== "git" && type !== "oci" && type !== "local")
+      throw new Error("Unsupported workspace source type");
     exactKeys(
       source,
       type === "git"
         ? ["type", "repository", "ref", "destination", "permissions"]
-        : ["type", "repository", "digest", "tag", "destination", "permissions"],
+        : type === "oci"
+          ? ["type", "repository", "digest", "tag", "destination", "permissions"]
+          : ["type", "path", "destination", "permissions"],
       "source",
     );
     const dest = destination(source.destination);
@@ -123,52 +127,57 @@ export function validateWorkspace(value: unknown): WorkspaceSpec {
       source.permissions !== "read-only"
     )
       throw new Error("Invalid source permissions");
-    if (typeof source.repository !== "string" || !source.repository)
-      throw new Error("Source repository required");
-    if (type === "git") {
-      let url: URL;
-      try {
-        url = new URL(source.repository);
-      } catch {
-        throw new Error("Invalid Git repository URL");
-      }
-      if (
-        !["https:", "file:"].includes(url.protocol) ||
-        url.username ||
-        url.password ||
-        url.search ||
-        url.hash ||
-        (url.protocol === "file:" && url.hostname && url.hostname !== "localhost")
-      )
-        throw new Error("Git repository must be credential-free https:// or file:// URL");
-      if (
-        typeof source.ref !== "string" ||
-        !source.ref ||
-        Array.from(source.ref).some((char) => char.charCodeAt(0) <= 32) ||
-        source.ref.startsWith("-")
-      )
-        throw new Error("Invalid Git ref");
+    if (type === "local") {
+      if (typeof source.path !== "string" || !source.path || !isAbsolute(source.path))
+        throw new Error("Local source path must be absolute");
     } else {
-      if (
-        /[@\s]/u.test(source.repository) ||
-        source.repository.includes("://") ||
-        source.repository.startsWith("/") ||
-        source.repository.includes("..") ||
-        !source.repository.includes("/")
-      )
-        throw new Error("Invalid OCI repository");
-      if ((source.tag === undefined) === (source.digest === undefined))
-        throw new Error("OCI source requires exactly one tag or digest");
-      if (
-        source.digest !== undefined &&
-        (typeof source.digest !== "string" || !/^sha256:[a-f0-9]{64}$/.test(source.digest))
-      )
-        throw new Error("Invalid OCI digest");
-      if (
-        source.tag !== undefined &&
-        (typeof source.tag !== "string" || !/^[\w][\w.-]{0,127}$/.test(source.tag))
-      )
-        throw new Error("Invalid OCI tag");
+      if (typeof source.repository !== "string" || !source.repository)
+        throw new Error("Source repository required");
+      if (type === "git") {
+        let url: URL;
+        try {
+          url = new URL(source.repository);
+        } catch {
+          throw new Error("Invalid Git repository URL");
+        }
+        if (
+          !["https:", "file:"].includes(url.protocol) ||
+          url.username ||
+          url.password ||
+          url.search ||
+          url.hash ||
+          (url.protocol === "file:" && url.hostname && url.hostname !== "localhost")
+        )
+          throw new Error("Git repository must be credential-free https:// or file:// URL");
+        if (
+          typeof source.ref !== "string" ||
+          !source.ref ||
+          Array.from(source.ref).some((char) => char.charCodeAt(0) <= 32) ||
+          source.ref.startsWith("-")
+        )
+          throw new Error("Invalid Git ref");
+      } else {
+        if (
+          /[@\s]/u.test(source.repository) ||
+          source.repository.includes("://") ||
+          source.repository.startsWith("/") ||
+          source.repository.includes("..") ||
+          !source.repository.includes("/")
+        )
+          throw new Error("Invalid OCI repository");
+        if ((source.tag === undefined) === (source.digest === undefined))
+          throw new Error("OCI source requires exactly one tag or digest");
+        if (
+          source.digest !== undefined &&
+          (typeof source.digest !== "string" || !/^sha256:[a-f0-9]{64}$/.test(source.digest))
+        )
+          throw new Error("Invalid OCI digest");
+        if (
+          source.tag !== undefined &&
+          (typeof source.tag !== "string" || !/^[\w][\w.-]{0,127}$/.test(source.tag))
+        )
+          throw new Error("Invalid OCI tag");
+      }
     }
     return { ...source, destination: dest, permissions: source.permissions ?? "all" };
   });

@@ -352,7 +352,7 @@ function verifiedSkillLoaderRecord(entry: unknown, workingDir: string): SkillCal
 async function runCopilot(frame: CallFrame, signal: AbortSignal): Promise<JsonObject> {
   const sdk = await import(pathToFileURL(resolvePeer(frame.basePath, "@github/copilot-sdk")).href);
   if (typeof sdk.CopilotClient !== "function")
-    throw new Error("Install the supported @github/copilot-sdk@1.0.6 peer");
+    throw new Error("Install the supported @github/copilot-sdk@1.0.17 peer");
   const skillDirectories = workspaceSkillDirectories(frame.workingDir);
   const client: ClientLike = new sdk.CopilotClient({
     workingDirectory: frame.workingDir,
@@ -505,7 +505,7 @@ async function runCopilot(frame: CallFrame, signal: AbortSignal): Promise<JsonOb
         tokenUsage: usage,
         cost,
         metadata: {
-          copilot: { sdkVersion: "1.0.6", skillSupport: true },
+          copilot: { sdkVersion: "1.0.17", skillSupport: true },
           skillCalls,
         },
       };

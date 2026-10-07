@@ -33,7 +33,7 @@ export function controlledAcquisitionPhysicalReservation(limits: AcquisitionLimi
  * Local Git uses the tmpfs path when the reviewed helper is available; the
  * controlled fallback conservatively keeps the same reservation. */
 export function acquisitionPhysicalReservation(
-  sources: readonly Pick<WorkspaceSource, "type" | "repository">[],
+  sources: readonly Pick<WorkspaceSource, "type">[],
   limits: AcquisitionLimits,
 ): number {
   const temporary = sources.some((source) => source.type === "git");

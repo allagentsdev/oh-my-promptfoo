@@ -4,6 +4,7 @@ import { subscribe, unsubscribe } from "node:diagnostics_channel";
 import { realpathSync } from "node:fs";
 import {
   chmod,
+  link,
   lstat,
   mkdir,
   mkdtemp,
@@ -103,10 +104,112 @@ async function fixture(): Promise<{
   };
 }
 
+const localDescribe = process.platform === "linux" ? describe : describe.skip;
+localDescribe("bounded host-local acquisition", () => {
+  test("includes ignored and untracked regular bytes, excludes Git metadata and preserves modes", async () => {
+    const root = await temporary();
+    const source = join(root, "skills");
+    const staging = join(root, "staging");
+    await mkdir(join(source, "example", "scripts"), { recursive: true });
+    await mkdir(join(source, ".git"));
+    await mkdir(staging);
+    await writeFile(join(source, ".gitignore"), "*.sh\n");
+    await writeFile(join(source, ".git", "private"), "metadata");
+    await writeFile(join(source, "example", "SKILL.md"), "# Example\n");
+    await writeFile(join(source, "example", "scripts", "task.sh"), "untracked script\n", {
+      mode: 0o755,
+    });
+    await chmod(join(source, "example", "scripts", "task.sh"), 0o755);
+    const spec: WorkspaceSpec = {
+      sources: [{ type: "local", path: `${root}/sub/../skills`, destination: ".agents/skills" }],
+    };
+    const channels = { ALLAGENTS_LOCAL_SOURCE_ROOT: root };
+    const [resolved] = await resolveSources(spec, channels);
+    expect(resolved.type).toBe("local");
+    await materializeSources([resolved], staging, DEFAULT_LIMITS, channels);
+    expect(
+      await readFile(join(staging, ".agents", "skills", "example", "scripts", "task.sh"), "utf8"),
+    ).toBe("untracked script\n");
+    expect((await readdir(join(staging, ".agents", "skills"))).sort()).toEqual(
+      [".gitignore", "example"].sort(),
+    );
+    expect(
+      (await lstat(join(staging, ".agents", "skills", "example", "scripts", "task.sh"))).mode &
+        0o111,
+    ).toBe(0o111);
+  });
+  test("rejects a symlink ancestor, symlink entry, path escape and special file", async () => {
+    const root = await temporary();
+    const source = join(root, "source");
+    const outside = await temporary();
+    await mkdir(source);
+    await symlink(outside, join(root, "alias"));
+    const channels = { ALLAGENTS_LOCAL_SOURCE_ROOT: root };
+    const spec = (path: string): WorkspaceSpec => ({
+      sources: [{ type: "local", path, destination: "skills" }],
+    });
+    await expect(resolveSources(spec(join(root, "alias")), channels)).rejects.toThrow(/symlink/i);
+    await expect(resolveSources(spec(outside), channels)).rejects.toThrow(/trusted source root/i);
+    await symlink(join(outside, "secret"), join(source, "escape"));
+    await expect(resolveSources(spec(source), channels)).rejects.toThrow(/symlink/i);
+    await rm(join(source, "escape"));
+    if (process.platform !== "win32") {
+      await exec("mkfifo", [join(source, "pipe")]);
+      await expect(resolveSources(spec(source), channels)).rejects.toThrow(/special file/i);
+      await rm(join(source, "pipe"));
+      await writeFile(join(outside, "secret"), "outside trusted root");
+      await link(join(outside, "secret"), join(source, "linked"));
+      await expect(resolveSources(spec(source), channels)).rejects.toThrow(/hard.?link/i);
+    }
+  });
+  test("enforces exact byte budgets and rejects a changed source before seed publication", async () => {
+    const root = await temporary();
+    const source = join(root, "source");
+    const staging = join(root, "staging");
+    await mkdir(source);
+    await mkdir(staging);
+    await writeFile(join(source, "input"), "1234567");
+    const spec: WorkspaceSpec = {
+      sources: [{ type: "local", path: source, destination: "skills" }],
+    };
+    const channels = { ALLAGENTS_LOCAL_SOURCE_ROOT: root };
+    const seven = { ...DEFAULT_LIMITS, maxDownloadBytes: 7, maxExtractedBytes: 7 };
+    const [resolved] = await resolveSources(spec, channels, undefined, undefined);
+    await expect(
+      resolveSources({ ...spec, limits: { maxExtractedBytes: 6 } }, channels),
+    ).rejects.toThrow(/byte limit/i);
+    await materializeSources([resolved], staging, seven, channels);
+    expect(await readFile(join(staging, "skills", "input"), "utf8")).toBe("1234567");
+    await writeFile(join(source, "input"), "7654321");
+    const second = join(root, "second");
+    await mkdir(second);
+    await expect(materializeSources([resolved], second, seven, channels)).rejects.toThrow(
+      /changed during copy/i,
+    );
+  });
+  test("requires a trusted root and honors cancellation before reading host files", async () => {
+    const root = await temporary();
+    const source = join(root, "source");
+    await mkdir(source);
+    await writeFile(join(source, "input"), "contents");
+    const spec: WorkspaceSpec = {
+      sources: [{ type: "local", path: source, destination: "skills" }],
+    };
+    await expect(resolveSources(spec, {})).rejects.toThrow(/ALLAGENTS_LOCAL_SOURCE_ROOT/);
+    const controller = new AbortController();
+    controller.abort(new Error("host acquisition cancelled"));
+    await expect(
+      resolveSources(spec, { ALLAGENTS_LOCAL_SOURCE_ROOT: root }, controller.signal),
+    ).rejects.toThrow("host acquisition cancelled");
+  });
+});
+
 describe("bounded Git acquisition", () => {
   test("uppercase local URL schemes use read-only Git acquisition", async () => {
     const { staging, spec } = await fixture();
-    spec.sources[0].repository = spec.sources[0].repository.replace(/^file:/, "FILE:");
+    const source = spec.sources[0];
+    if (source.type !== "git") throw new Error("Expected Git fixture source");
+    source.repository = source.repository.replace(/^file:/, "FILE:");
     const sources = await resolveSources(spec, {});
     await materializeSources(sources, staging, DEFAULT_LIMITS, {});
     expect(await readFile(join(staging, "project", "hello.txt"), "utf8")).toBe("hello\n");
