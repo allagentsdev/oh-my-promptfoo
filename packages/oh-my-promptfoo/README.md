@@ -25,6 +25,12 @@ Set the agent credential through `delegate.env` in authored evals. Set
 require ORAS 1.x through `ALLAGENTS_ORAS_PATH`. A trusted runner must provide
 `ALLAGENTS_LOCAL_SOURCE_ROOT` before acquiring `type: local` sources.
 
+`llmAssert` batches named criteria into one judge request. A component passes
+only when its judge verdict is not false and its numeric score meets
+`config.threshold` (default `0.7`). When batching equally weighted rubrics
+alongside other assertions, set the outer Promptfoo `weight` to the number of
+components to preserve the test's weighted score.
+
 ## Author and run an eval
 
 Start with the [agent-facing usage skill](https://github.com/allagentsdev/oh-my-promptfoo/blob/main/skills/oh-my-promptfoo/SKILL.md)

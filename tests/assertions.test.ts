@@ -87,6 +87,17 @@ test("one OpenAI-compatible request scores every named criterion and gates each 
     assert.equal(flagged.pass, false);
     assert.equal(flagged.componentResults[1].pass, false);
 
+    responses.push({
+      components: [
+        { metric: "accuracy", score: 1, reason: "Grounded" },
+        { metric: "clarity", score: 0.5, pass: true, reason: "Judge approved despite low score" },
+      ],
+    });
+    const belowThreshold = await llmAssert("candidate answer", context);
+    assert.equal(belowThreshold.score, 0.875);
+    assert.equal(belowThreshold.pass, false);
+    assert.equal(belowThreshold.componentResults[1].pass, false);
+
     const generic = [
       { metric: "explanation", value: "Be understandable" },
       { metric: "fidelity", value: "Preserve facts", weight: 3 },
@@ -151,7 +162,7 @@ test("one OpenAI-compatible request scores every named criterion and gates each 
       llmAssert("candidate answer", context),
       /duplicate or invalid component grade/,
     );
-    assert.equal(requests.length, 9);
+    assert.equal(requests.length, 10);
     await assert.rejects(
       llmAssert("candidate answer", {
         config: { components: [{ metric: "clarity", value: "Be clear", weight: 0 }] },
@@ -164,7 +175,7 @@ test("one OpenAI-compatible request scores every named criterion and gates each 
         /reserved component metric/,
       );
     }
-    assert.equal(requests.length, 9);
+    assert.equal(requests.length, 10);
   } finally {
     restoreEnvironment(previous);
     const closed = once(server, "close");
