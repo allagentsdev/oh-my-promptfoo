@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.9.0](https://github.com/allagentsdev/oh-my-promptfoo/compare/v1.8.0...v1.9.0) (2026-10-07)
+
+
+### Features
+
+* **workspace:** stage trusted local sources and upgrade Copilot SDK ([#63](https://github.com/allagentsdev/oh-my-promptfoo/issues/63)) ([caf4fb9](https://github.com/allagentsdev/oh-my-promptfoo/commit/caf4fb9cbdafe8d7b64e9c3da8ae2ae718b9e158))
+
 ## [1.8.0](https://github.com/allagentsdev/oh-my-promptfoo/compare/v1.7.2...v1.8.0) (2026-10-07)
 
 
