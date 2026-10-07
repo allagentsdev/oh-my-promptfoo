@@ -13,10 +13,10 @@ Existing workspace caches remain compatible with earlier releases.
 
 ## Install
 
-Requires Node 22.22+, Linux, macOS, or Windows, and Promptfoo 0.122.x. On Windows, workspace cache locks and process identity require the system Windows PowerShell executable.
+Requires Node 22.22+, Linux, macOS, or Windows, and Promptfoo 0.122.x or 0.124.x. On Windows, workspace cache locks and process identity require the system Windows PowerShell executable.
 
 ```sh
-npm install --save-dev promptfoo@0.122.0 oh-my-promptfoo
+npm install --save-dev promptfoo@0.124.0 oh-my-promptfoo
 # Add this only if you use Copilot, directly or as a workspace delegate:
 npm install --save-dev @github/copilot-sdk@1.0.6
 ```
@@ -46,8 +46,8 @@ tests:
 Set `OPENAI_MODEL` and `OPENAI_API_KEY` for the judge; `OPENAI_BASE_URL`
 optionally points to an OpenAI-compatible or Azure OpenAI v1 endpoint. One
 request grades all uniquely named components; names inherited from
-`Object.prototype` are rejected because Promptfoo 0.122 aggregates named
-scores into plain objects. Weights default to 1. The weighted mean must reach
+`Object.prototype` are rejected because Promptfoo aggregates named scores into
+plain objects. Weights default to 1. The weighted mean must reach
 `threshold` (default 0.7), and every component must pass: an explicit judge
 `pass` flag takes precedence over its score; otherwise the component score
 must reach the threshold. Missing, duplicate, malformed, or unknown grades

@@ -18,6 +18,7 @@ if (
 )
   throw new Error("Usage: e2e.ts [--registry VERSION]");
 const repo = resolve(".");
+const promptfooVersion = "0.124.0";
 const cwd = await mkdtemp(join(realpathSync(tmpdir()), "allagents-e2e-"));
 const workspaceParent = await mkdtemp(join(realpathSync(tmpdir()), "allagents-e2e-workspaces-"));
 const testEnvironment = {
@@ -48,17 +49,21 @@ try {
   );
   run("npm", [
     "install",
-    "--legacy-peer-deps",
     "--no-audit",
     "--no-fund",
     registryVersion ? `oh-my-promptfoo@${registryVersion}` : join(cwd, packed.filename),
-    "promptfoo@0.122.0",
+    `promptfoo@${promptfooVersion}`,
   ]);
   const installedManifest = JSON.parse(
     await readFile(join(cwd, "node_modules/oh-my-promptfoo/package.json"), "utf8"),
   );
   if (registryVersion && installedManifest.version !== registryVersion)
     throw new Error("Registry package version mismatch");
+  const installedPromptfoo = JSON.parse(
+    await readFile(join(cwd, "node_modules/promptfoo/package.json"), "utf8"),
+  );
+  if (installedPromptfoo.version !== promptfooVersion)
+    throw new Error("Installed Promptfoo version mismatch");
   for (const [name, fixture, version] of [
     ["@openai/codex-sdk", "codex-sdk.mjs", "0.1.0"],
     ["@github/copilot-sdk", "copilot-sdk.mjs", "1.0.6"],
@@ -438,7 +443,7 @@ try {
         schemaVersion: 1,
         date: new Date().toISOString(),
         node: run("node", ["--version"]).trim(),
-        promptfoo: "0.122.0",
+        promptfoo: promptfooVersion,
         package: installedManifest.version,
         surface: registryVersion
           ? "registry-installed package loaded by stock promptfoo eval"
