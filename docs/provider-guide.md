@@ -10,7 +10,7 @@ Each workspace-provider call returns a distinct absolute `metadata.workspace.pat
 
 ## Workspace provider configuration
 
-Provider config is closed: only `delegate`, `workspace`, `workingDir`, `fileChanges`, and `timeoutMs` are accepted. The delegates are exactly `openai:codex-sdk`, `anthropic:claude-agent-sdk`, and `copilot-sdk`. Prompt-level config can change allowed `delegate.config` fields only. Delegate-level working directories, sessions, executable overrides, discovery, arbitrary native passthroughs, environment inheritance, acquisition variables, and cache controls are rejected. The wrapper forces execution and rejects cached responses. Use explicit `delegate.env` for model credentials.
+Provider config is closed: only `delegate`, `workspace`, `workspaceTimeoutMs`, `workingDir`, `fileChanges`, and `timeoutMs` are accepted. The delegates are exactly `openai:codex-sdk`, `anthropic:claude-agent-sdk`, and `copilot-sdk`. Prompt-level config can change allowed `delegate.config` fields only. Delegate-level working directories, sessions, executable overrides, discovery, arbitrary native passthroughs, environment inheritance, acquisition variables, and cache controls are rejected. The wrapper forces execution and rejects cached responses. Use explicit `delegate.env` for model credentials.
 
 | Field | Required | Purpose |
 | --- | --- | --- |
@@ -18,11 +18,15 @@ Provider config is closed: only `delegate`, `workspace`, `workingDir`, `fileChan
 | `delegate.config` | No | Sets options allowed by that agent's Promptfoo provider |
 | `delegate.env` | No | Passes only the named environment values to the agent |
 | `workspace.sources` | Yes | Lists Git or OCI inputs; `[]` starts with an empty workspace |
-| `workspace.limits` | No | Narrows source count, download/extraction bytes, or acquisition timeout |
+| `workspace.limits` | No | Narrows source count and download/extraction byte budgets |
+| `workspaceTimeoutMs` | No | Bounds workspace preparation; provider value overrides `ALLAGENTS_WORKSPACE_TIMEOUT_MS`, then the 120,000 ms package default |
 | `workspace.viewMode` | No | `auto` (default) tries reflinks then disk-admitted physical copies; `copy-only` skips reflinks and uses disk-admitted physical copies for writable views and protected read-only checkouts |
 | `workingDir` | No | Starts the agent in an existing directory relative to the prepared workspace root, such as `project`; defaults to the root. The path must be normalized and contained. A protected read-only source can be selected. |
 | `fileChanges` | No | Captures bounded after-bytes and a diff; defaults to `false` |
 | `timeoutMs` | No | Limits the agent call |
+
+`workspaceTimeoutMs` accepts an integer from 1 to 3,600,000 ms. The separate
+`timeoutMs` limits the agent call and defaults to 900,000 ms.
 
 ## Workspace sources and permissions
 
@@ -124,14 +128,14 @@ For hosted cache reuse, save only the published `published` subtree and verifica
 
 ## Lock waits and maintenance
 
-Initialization and acquisition lock waits allow at least three minutes and extend to the configured `workspace.limits.timeoutMs` for slower sources. Acquisition waits also honor cancellation. CLI pruning and lease release use independent three-minute waits, so a canceled row can still detach its views and release its leases.
+Initialization and acquisition lock waits allow at least three minutes and extend to the effective `workspaceTimeoutMs` (provider config, then `ALLAGENTS_WORKSPACE_TIMEOUT_MS`) for slower sources. Acquisition waits also honor cancellation. CLI pruning and lease release use independent three-minute waits, so a canceled row can still detach its views and release its leases.
 
 ```sh
 allagents-promptfoo cache prune
 allagents-promptfoo cache prune --all
 ```
 
-Both commands report removed/retained entries and allocated bytes and return nonzero on failure. They do not run evaluations or delete runtime roots or the external prebuilt root. Unmarked and symlinked configured roots are refused. `ALLAGENTS_CACHE_ROOT`, `ALLAGENTS_WORKSPACE_ROOT`, and `ALLAGENTS_PREBUILT_ROOT` must be distinct and non-overlapping. Acquisition channels are `ALLAGENTS_GIT_USERNAME`, `ALLAGENTS_GIT_TOKEN`, `ALLAGENTS_ORAS_PATH`, and `ALLAGENTS_ORAS_AUTH_FILE`; prepared sources use `ALLAGENTS_PREBUILT_ROOT`. Provider loader `options.env` takes precedence over process environment. None of these seven channels reaches delegates.
+Both commands report removed/retained entries and allocated bytes and return nonzero on failure. They do not run evaluations or delete runtime roots or the external prebuilt root. Unmarked and symlinked configured roots are refused. `ALLAGENTS_CACHE_ROOT`, `ALLAGENTS_WORKSPACE_ROOT`, and `ALLAGENTS_PREBUILT_ROOT` must be distinct and non-overlapping. Acquisition channels are `ALLAGENTS_GIT_USERNAME`, `ALLAGENTS_GIT_TOKEN`, `ALLAGENTS_ORAS_PATH`, and `ALLAGENTS_ORAS_AUTH_FILE`; prepared sources use `ALLAGENTS_PREBUILT_ROOT`. `ALLAGENTS_WORKSPACE_TIMEOUT_MS` supplies a bounded preparation deadline. Provider loader `options.env` takes precedence over process environment. None of these eight channels reaches delegates.
 
 ## Direct Copilot configuration
 

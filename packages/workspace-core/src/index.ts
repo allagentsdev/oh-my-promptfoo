@@ -5,7 +5,12 @@ import { homedir, tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { DEFAULT_LOCK_TIMEOUT_MS, withLock } from "./cache-lock.js";
 import { CheckoutFactory, releaseView } from "./checkout.js";
-import { canonicalJson, DEFAULT_LIMITS, validateWorkspace } from "./config.js";
+import {
+  canonicalJson,
+  DEFAULT_LIMITS,
+  resolveWorkspaceTimeoutMs,
+  validateWorkspace,
+} from "./config.js";
 import {
   alive,
   assertNoSymlinkAncestors,
@@ -35,6 +40,7 @@ import type {
   RecoveryRecord,
   ResolvedSource,
   RuntimeChannels,
+  SourceLimits,
   SourceView,
   WorkspaceHandle,
   WorkspaceSpec,
@@ -81,15 +87,22 @@ export class WorkspaceManager {
   private readonly shutdown = new AbortController();
   private initialization: Promise<void>;
   private readonly acquisitionLockTimeoutMs: number;
+  private readonly limits: SourceLimits;
   constructor(
     spec: WorkspaceSpec,
     private channels: RuntimeChannels,
+    workspaceTimeoutMs?: number,
   ) {
     this.spec = validateWorkspace(spec);
-    this.acquisitionLockTimeoutMs = Math.max(
-      DEFAULT_LOCK_TIMEOUT_MS,
-      this.spec.limits?.timeoutMs ?? DEFAULT_LIMITS.timeoutMs,
-    );
+    this.limits = {
+      ...DEFAULT_LIMITS,
+      ...this.spec.limits,
+      timeoutMs: resolveWorkspaceTimeoutMs(
+        workspaceTimeoutMs,
+        channels.ALLAGENTS_WORKSPACE_TIMEOUT_MS,
+      ),
+    };
+    this.acquisitionLockTimeoutMs = Math.max(DEFAULT_LOCK_TIMEOUT_MS, this.limits.timeoutMs);
     const locations = roots(channels);
     this.initialization = this.initialize(locations);
     this.initialization.catch(() => {});
@@ -153,7 +166,7 @@ export class WorkspaceManager {
     const combined = AbortSignal.any([
       this.shutdown.signal,
       ...(signal ? [signal] : []),
-      AbortSignal.timeout(this.spec.limits?.timeoutMs ?? DEFAULT_LIMITS.timeoutMs),
+      AbortSignal.timeout(this.limits.timeoutMs),
     ]);
     const prebuilt =
       this.channels.ALLAGENTS_PREBUILT_ROOT !== undefined
@@ -173,20 +186,18 @@ export class WorkspaceManager {
     }
     const ordinary = this.spec.sources.filter((source) => !preparedSources.has(source.destination));
     const normal = ordinary.length
-      ? await resolveSources({ ...this.spec, sources: ordinary }, this.channels, combined)
+      ? await resolveSources(
+          { ...this.spec, sources: ordinary },
+          this.channels,
+          combined,
+          this.limits.timeoutMs,
+        )
       : [];
     const resolved = [...normal, ...preparedSources.values()].sort((a, b) =>
       a.destination < b.destination ? -1 : a.destination > b.destination ? 1 : 0,
     );
     const metadata = normal.length
-      ? await this.cache.prepare(
-          normal,
-          { ...DEFAULT_LIMITS, ...this.spec.limits },
-          this.channels,
-          combined,
-          undefined,
-          caseIndex,
-        )
+      ? await this.cache.prepare(normal, this.limits, this.channels, combined, undefined, caseIndex)
       : undefined;
     const id = randomUUID();
     const path = join(this.root, "workspaces", id);
@@ -209,14 +220,7 @@ export class WorkspaceManager {
         record.seedLease = true;
         await this.save(record);
         // Pruning may run between resolution and pending-record publication.
-        await this.cache.prepare(
-          normal,
-          { ...DEFAULT_LIMITS, ...this.spec.limits },
-          this.channels,
-          combined,
-          record,
-          caseIndex,
-        );
+        await this.cache.prepare(normal, this.limits, this.channels, combined, record, caseIndex);
       }
       await mkdir(path, { mode: 0o700 });
       for (let sourceOffset = 0; sourceOffset < resolved.length; sourceOffset++) {
