@@ -7,6 +7,10 @@
 
 * **provider:** configure workspace preparation timeout independently ([#60](https://github.com/allagentsdev/oh-my-promptfoo/issues/60)) ([fa2642b](https://github.com/allagentsdev/oh-my-promptfoo/commit/fa2642bb17acf4c880c31fb9b71add7cd9d88cca))
 
+**Breaking configuration change:** `workspace.limits.timeoutMs` is rejected.
+Move it to `config.workspaceTimeoutMs` or set
+`ALLAGENTS_WORKSPACE_TIMEOUT_MS`. `config.timeoutMs` still limits the agent call.
+
 ## [1.7.2](https://github.com/allagentsdev/oh-my-promptfoo/compare/v1.7.1...v1.7.2) (2026-10-07)
 
 
