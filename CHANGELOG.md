@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.9.1](https://github.com/allagentsdev/oh-my-promptfoo/compare/v1.9.0...v1.9.1) (2026-10-07)
+
+
+### Bug Fixes
+
+* **assertions:** require judge pass and score floor for each rubric ([#65](https://github.com/allagentsdev/oh-my-promptfoo/issues/65)) ([e6f5428](https://github.com/allagentsdev/oh-my-promptfoo/commit/e6f5428a70c1b94307177e33d5fdb47480e89340))
+
 ## [1.9.0](https://github.com/allagentsdev/oh-my-promptfoo/compare/v1.8.0...v1.9.0) (2026-10-07)
 
 
