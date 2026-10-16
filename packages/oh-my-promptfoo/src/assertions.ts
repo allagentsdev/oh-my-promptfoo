@@ -85,6 +85,7 @@ export async function llmAssert(output: unknown, context?: { config?: BatchedRub
   if (!response.ok) throw new Error(`LLM grading failed with HTTP ${response.status}`);
   const responseBody = (await response.json()) as {
     choices?: { message?: { content?: string | { text?: string }[] } }[];
+    usage?: { prompt_tokens?: unknown; completion_tokens?: unknown; total_tokens?: unknown };
   };
   const content = responseBody.choices?.[0]?.message?.content;
   const text =
@@ -141,6 +142,21 @@ export async function llmAssert(output: unknown, context?: { config?: BatchedRub
     };
   });
   const score = weightedScore / totalWeight;
+  // Promptfoo bills grading separately from the agent under test, but only for calls it
+  // makes itself. This assertion calls the grader directly, so without reporting usage the
+  // judge's spend lands in no bucket: a suite batching ten criteria into one request shows
+  // the same zero as one that never graded at all. Promptfoo reads `tokensUsed` off the
+  // assertion result and accumulates it into tokenUsage.assertions.
+  const usage = responseBody.usage;
+  const tokenCount = (value: unknown) =>
+    typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
+  const promptTokens = tokenCount(usage?.prompt_tokens);
+  const completionTokens = tokenCount(usage?.completion_tokens);
+  const totalTokens =
+    tokenCount(usage?.total_tokens) ??
+    (promptTokens === undefined || completionTokens === undefined
+      ? undefined
+      : promptTokens + completionTokens);
   return {
     pass: allPassed,
     score,
@@ -148,5 +164,17 @@ export async function llmAssert(output: unknown, context?: { config?: BatchedRub
     namedScores,
     namedScoreWeights,
     componentResults,
+    // Omitted entirely when the grader reported nothing: a zero would read as a free call.
+    ...(totalTokens === undefined
+      ? {}
+      : {
+          tokensUsed: {
+            total: totalTokens,
+            prompt: promptTokens ?? 0,
+            completion: completionTokens ?? 0,
+            cached: 0,
+            numRequests: 1,
+          },
+        }),
   };
 }
