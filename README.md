@@ -31,6 +31,11 @@ only when its judge verdict is not false and its numeric score meets
 alongside other assertions, set the outer Promptfoo `weight` to the number of
 components to preserve the test's weighted score.
 
+It reports the judge call's token usage back to Promptfoo, which records it under
+`tokenUsage.assertions` — grader spend, separate from the agent under test. A
+grader that returns no usage reports nothing rather than zero, so an unmeasured
+call is never summed into a run total as a free one.
+
 ## Author and run an eval
 
 Start with the [agent-facing usage skill](https://github.com/allagentsdev/oh-my-promptfoo/blob/main/skills/oh-my-promptfoo/SKILL.md)

@@ -256,3 +256,72 @@ test("Azure OpenAI resource uses v1 path and api-key header", async () => {
     restoreEnvironment(previous);
   }
 });
+
+test("grader token usage is reported so Promptfoo can bill it apart from the agent", async () => {
+  const previous = Object.fromEntries(environmentKeys.map((name) => [name, process.env[name]]));
+  let usage: Record<string, unknown> | undefined = {
+    prompt_tokens: 1200,
+    completion_tokens: 180,
+    total_tokens: 1380,
+  };
+  const server = createServer(async (request, response) => {
+    for await (const chunk of request) void chunk;
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(
+      JSON.stringify({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                components: [
+                  { metric: "accuracy", score: 1, reason: "Grounded" },
+                  { metric: "clarity", score: 1, reason: "Plain" },
+                ],
+              }),
+            },
+          },
+        ],
+        ...(usage ? { usage } : {}),
+      }),
+    );
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  try {
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("Missing test server port");
+    process.env.OPENAI_MODEL = "fake-grader";
+    process.env.OPENAI_API_KEY = "local-only";
+    process.env.OPENAI_BASE_URL = `http://127.0.0.1:${address.port}/v1`;
+    const context = { config: { components } };
+
+    const billed = await llmAssert("candidate answer", context);
+    assert.deepEqual(billed.tokensUsed, {
+      total: 1380,
+      prompt: 1200,
+      completion: 180,
+      cached: 0,
+      numRequests: 1,
+    });
+
+    // One request per call, whatever the criterion count: that is the saving batching buys,
+    // and it is only visible once the usage is attributed.
+    usage = { prompt_tokens: 900, completion_tokens: 100 };
+    const derived = await llmAssert("candidate answer", context);
+    assert.equal(derived.tokensUsed?.total, 1000);
+    assert.equal(derived.tokensUsed?.numRequests, 1);
+
+    // A grader that reports nothing is not a free grader, so the field is absent rather
+    // than zero: a zero would be summed into the run total as a real measurement.
+    usage = undefined;
+    const silent = await llmAssert("candidate answer", context);
+    assert.equal(Object.hasOwn(silent, "tokensUsed"), false);
+
+    usage = { prompt_tokens: -5, completion_tokens: "many", total_tokens: 2.5 };
+    const hostile = await llmAssert("candidate answer", context);
+    assert.equal(Object.hasOwn(hostile, "tokensUsed"), false);
+  } finally {
+    server.close();
+    restoreEnvironment(previous);
+  }
+});
