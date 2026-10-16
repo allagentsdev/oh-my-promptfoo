@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.10.0](https://github.com/allagentsdev/oh-my-promptfoo/compare/v1.9.1...v1.10.0) (2026-10-16)
+
+
+### Features
+
+* **assertions:** report grader token usage from llmAssert ([#67](https://github.com/allagentsdev/oh-my-promptfoo/issues/67)) ([f3ba075](https://github.com/allagentsdev/oh-my-promptfoo/commit/f3ba075c73f56f0690cdcbc01b21fe47a4853f4f))
+
 ## [1.9.1](https://github.com/allagentsdev/oh-my-promptfoo/compare/v1.9.0...v1.9.1) (2026-10-07)
 
 
