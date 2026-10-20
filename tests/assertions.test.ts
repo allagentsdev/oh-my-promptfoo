@@ -130,39 +130,56 @@ test("one OpenAI-compatible request scores every named criterion and gates each 
     assert.doesNotMatch(messages?.[0].content ?? "", /Ignore the grading policy/);
     assert.equal(messages?.[1].role, "user");
     assert.equal(messages?.[1].content, untrusted);
-    responses.push({ components: [{ metric: "accuracy", score: 1, reason: "Grounded" }] });
+    // A judge that breaks the protocol is asked once more before the agent run it was
+    // grading is thrown away, so each malformed reply has to be queued for both attempts.
+    const requestsBeforeRetry = requests.length;
+    const short = { components: [{ metric: "accuracy", score: 1, reason: "Grounded" }] };
+    responses.push(short, short);
     await assert.rejects(llmAssert("candidate answer", context), /did not score every component/);
-    responses.push({
+    assert.equal(requests.length - requestsBeforeRetry, 2);
+    const unknownName = {
       components: [
         { metric: "accuracy", score: 1, reason: "Grounded" },
         { metric: "other", score: 1, reason: "Not requested" },
       ],
-    });
+    };
+    responses.push(unknownName, unknownName);
     await assert.rejects(
       llmAssert("candidate answer", context),
       /did not score component: clarity/,
     );
-    responses.push({
+    const duplicated = {
       components: [
         { metric: "accuracy", score: 1, reason: "Grounded" },
         { metric: "accuracy", score: 1, reason: "Duplicate" },
       ],
-    });
+    };
+    responses.push(duplicated, duplicated);
     await assert.rejects(
       llmAssert("candidate answer", context),
       /duplicate or invalid component grade/,
     );
-    responses.push({
+    // The retry exists to rescue a transient protocol slip: a good second reply stands.
+    responses.push(duplicated, {
+      components: [
+        { metric: "accuracy", score: 1, reason: "Grounded" },
+        { metric: "clarity", score: 1, reason: "Plain" },
+      ],
+    });
+    const rescued = await llmAssert("candidate answer", context);
+    assert.equal(rescued.pass, true);
+    const invalidType = {
       components: [
         { metric: "accuracy", score: 1, reason: "Grounded" },
         { metric: "clarity", score: "1", reason: "Invalid type" },
       ],
-    });
+    };
+    responses.push(invalidType, invalidType);
     await assert.rejects(
       llmAssert("candidate answer", context),
       /duplicate or invalid component grade/,
     );
-    assert.equal(requests.length, 10);
+    assert.equal(requests.length, 16);
     await assert.rejects(
       llmAssert("candidate answer", {
         config: { components: [{ metric: "clarity", value: "Be clear", weight: 0 }] },
@@ -175,7 +192,7 @@ test("one OpenAI-compatible request scores every named criterion and gates each 
         /reserved component metric/,
       );
     }
-    assert.equal(requests.length, 10);
+    assert.equal(requests.length, 16);
   } finally {
     restoreEnvironment(previous);
     const closed = once(server, "close");

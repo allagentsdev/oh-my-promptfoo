@@ -77,59 +77,78 @@ export async function llmAssert(output: unknown, context?: { config?: BatchedRub
   const parsedBaseUrl = new URL(baseUrl);
   const azureOpenAI = parsedBaseUrl.hostname.endsWith(".openai.azure.com");
   const prefix = azureOpenAI && parsedBaseUrl.pathname === "/" ? "/openai/v1" : "";
-  const response = await fetch(`${baseUrl}${prefix}/chat/completions`, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      [azureOpenAI ? "api-key" : "authorization"]: azureOpenAI ? apiKey : `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model,
-      messages: [
-        { role: "system", content: prompt },
-        { role: "user", content: candidate },
-      ],
-      response_format: { type: "json_object" },
-    }),
-    signal: AbortSignal.timeout(120_000),
-  });
-  if (!response.ok) throw new Error(`LLM grading failed with HTTP ${response.status}`);
-  const responseBody = (await response.json()) as {
-    choices?: { message?: { content?: string | { text?: string }[] } }[];
-    usage?: { prompt_tokens?: unknown; completion_tokens?: unknown; total_tokens?: unknown };
-  };
-  const content = responseBody.choices?.[0]?.message?.content;
-  const text =
-    typeof content === "string"
-      ? content
-      : Array.isArray(content)
-        ? content.map((part) => part.text || "").join("")
-        : null;
-  if (!text) throw new Error("LLM grader returned no response text");
-  const result = JSON.parse(text) as GraderResponse;
-  if (!Array.isArray(result?.components) || result.components.length !== components.length) {
-    throw new Error("LLM grader did not score every component exactly once");
-  }
-
-  const grades = new Map<string, Grade>();
-  for (const entry of result.components) {
-    const grade = entry as Partial<Grade> | null;
-    if (
-      !grade ||
-      typeof grade.metric !== "string" ||
-      grades.has(grade.metric) ||
-      typeof grade.score !== "number" ||
-      !Number.isFinite(grade.score) ||
-      grade.score < 0 ||
-      grade.score > 1 ||
-      (grade.pass !== undefined && typeof grade.pass !== "boolean") ||
-      typeof grade.reason !== "string" ||
-      !grade.reason.trim()
-    ) {
-      throw new Error("LLM grader returned a duplicate or invalid component grade");
+  // A judge that returns a duplicate, unnamed or out-of-range grade has broken the
+  // protocol, not failed the candidate. Throwing on the first reply discards an agent run
+  // that already happened — minutes of work and real spend — so the request is made again
+  // before giving up. Usage from the discarded attempt is still counted: it was billed.
+  let grades = new Map<string, Grade>();
+  let protocolError = "";
+  const usages: { prompt_tokens?: unknown; completion_tokens?: unknown; total_tokens?: unknown }[] =
+    [];
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const response = await fetch(`${baseUrl}${prefix}/chat/completions`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        [azureOpenAI ? "api-key" : "authorization"]: azureOpenAI ? apiKey : `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model,
+        messages: [
+          { role: "system", content: prompt },
+          { role: "user", content: candidate },
+        ],
+        response_format: { type: "json_object" },
+      }),
+      signal: AbortSignal.timeout(120_000),
+    });
+    if (!response.ok) throw new Error(`LLM grading failed with HTTP ${response.status}`);
+    const responseBody = (await response.json()) as {
+      choices?: { message?: { content?: string | { text?: string }[] } }[];
+      usage?: { prompt_tokens?: unknown; completion_tokens?: unknown; total_tokens?: unknown };
+    };
+    if (responseBody.usage) usages.push(responseBody.usage);
+    const content = responseBody.choices?.[0]?.message?.content;
+    const text =
+      typeof content === "string"
+        ? content
+        : Array.isArray(content)
+          ? content.map((part) => part.text || "").join("")
+          : null;
+    if (!text) throw new Error("LLM grader returned no response text");
+    const result = JSON.parse(text) as GraderResponse;
+    grades = new Map<string, Grade>();
+    protocolError = "";
+    if (!Array.isArray(result?.components) || result.components.length !== components.length) {
+      protocolError = "LLM grader did not score every component exactly once";
+    } else {
+      for (const entry of result.components) {
+        const grade = entry as Partial<Grade> | null;
+        if (
+          !grade ||
+          typeof grade.metric !== "string" ||
+          grades.has(grade.metric) ||
+          typeof grade.score !== "number" ||
+          !Number.isFinite(grade.score) ||
+          grade.score < 0 ||
+          grade.score > 1 ||
+          (grade.pass !== undefined && typeof grade.pass !== "boolean") ||
+          typeof grade.reason !== "string" ||
+          !grade.reason.trim()
+        ) {
+          protocolError = "LLM grader returned a duplicate or invalid component grade";
+          break;
+        }
+        grades.set(grade.metric, grade as Grade);
+      }
+      const unscored = components.find(({ metric }) => !grades.has(metric));
+      if (!protocolError && unscored) {
+        protocolError = `LLM grader did not score component: ${unscored.metric}`;
+      }
     }
-    grades.set(grade.metric, grade as Grade);
+    if (!protocolError) break;
   }
+  if (protocolError) throw new Error(protocolError);
   const namedScores: Record<string, number> = {};
   const namedScoreWeights: Record<string, number> = {};
   let weightedScore = 0;
@@ -158,16 +177,28 @@ export async function llmAssert(output: unknown, context?: { config?: BatchedRub
   // judge's spend lands in no bucket: a suite batching ten criteria into one request shows
   // the same zero as one that never graded at all. Promptfoo reads `tokensUsed` off the
   // assertion result and accumulates it into tokenUsage.assertions.
-  const usage = responseBody.usage;
   const tokenCount = (value: unknown) =>
     typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
-  const promptTokens = tokenCount(usage?.prompt_tokens);
-  const completionTokens = tokenCount(usage?.completion_tokens);
-  const totalTokens =
-    tokenCount(usage?.total_tokens) ??
-    (promptTokens === undefined || completionTokens === undefined
-      ? undefined
-      : promptTokens + completionTokens);
+  // A retried grade was billed twice, so both attempts are summed and counted. Reporting
+  // one request would understate a judge that had to be asked again.
+  let promptTokens = 0;
+  let completionTokens = 0;
+  let totalTokens = 0;
+  let measuredRequests = 0;
+  for (const usage of usages) {
+    const attemptPrompt = tokenCount(usage.prompt_tokens);
+    const attemptCompletion = tokenCount(usage.completion_tokens);
+    const attemptTotal =
+      tokenCount(usage.total_tokens) ??
+      (attemptPrompt === undefined || attemptCompletion === undefined
+        ? undefined
+        : attemptPrompt + attemptCompletion);
+    if (attemptTotal === undefined) continue;
+    promptTokens += attemptPrompt ?? 0;
+    completionTokens += attemptCompletion ?? 0;
+    totalTokens += attemptTotal;
+    measuredRequests++;
+  }
   return {
     pass: allPassed,
     score,
@@ -176,15 +207,15 @@ export async function llmAssert(output: unknown, context?: { config?: BatchedRub
     namedScoreWeights,
     componentResults,
     // Omitted entirely when the grader reported nothing: a zero would read as a free call.
-    ...(totalTokens === undefined
+    ...(measuredRequests === 0
       ? {}
       : {
           tokensUsed: {
             total: totalTokens,
-            prompt: promptTokens ?? 0,
-            completion: completionTokens ?? 0,
+            prompt: promptTokens,
+            completion: completionTokens,
             cached: 0,
-            numRequests: 1,
+            numRequests: measuredRequests,
           },
         }),
   };
