@@ -31,6 +31,13 @@ only when its judge verdict is not false and its numeric score meets
 alongside other assertions, set the outer Promptfoo `weight` to the number of
 components to preserve the test's weighted score.
 
+Set `config.scoring: binary` for a checklist, where a criterion is either met or
+not: the judge is told to score exactly 1 or 0 and never award partial credit,
+and the pass mark becomes a full score. Stating the mode replaces hand-writing
+that rule into every rubric and pairing it with `threshold: 1`; a `threshold`
+beside it that is not 1 contradicts the mode and is rejected. The default,
+`graded`, keeps the 0.7 bar and says nothing about how to score.
+
 It reports the judge call's token usage back to Promptfoo, which records it under
 `tokenUsage.assertions` — grader spend, separate from the agent under test. A
 grader that returns no usage reports nothing rather than zero, so an unmeasured

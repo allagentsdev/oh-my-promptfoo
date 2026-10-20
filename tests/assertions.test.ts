@@ -325,3 +325,77 @@ test("grader token usage is reported so Promptfoo can bill it apart from the age
     restoreEnvironment(previous);
   }
 });
+
+test("binary scoring states the checklist rule to the judge and fixes the bar at a full score", async () => {
+  const previous = Object.fromEntries(environmentKeys.map((name) => [name, process.env[name]]));
+  const responses: unknown[] = [];
+  const prompts: string[] = [];
+  const server = createServer(async (request, response) => {
+    let body = "";
+    for await (const chunk of request) body += chunk;
+    prompts.push(JSON.parse(body).messages[0].content);
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(
+      JSON.stringify({ choices: [{ message: { content: JSON.stringify(responses.shift()) } }] }),
+    );
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  try {
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("Missing test server port");
+    process.env.OPENAI_MODEL = "fake-grader";
+    process.env.OPENAI_API_KEY = "local-only";
+    process.env.OPENAI_BASE_URL = `http://127.0.0.1:${address.port}/v1`;
+
+    // Callers previously wrote this rule into every rubric by hand and paired it with
+    // threshold 1. Declaring the mode has to carry both halves, or the duplication returns.
+    const binary = { config: { scoring: "binary" as const, components } };
+    responses.push({
+      components: [
+        { metric: "accuracy", score: 1, reason: "Grounded" },
+        { metric: "clarity", score: 0.9, reason: "Nearly plain" },
+      ],
+    });
+    const nearMiss = await llmAssert("candidate answer", binary);
+    assert.equal(nearMiss.pass, false);
+    assert.match(prompts[0], /binary checklist item/);
+    assert.match(prompts[0], /never award partial credit/);
+
+    responses.push({
+      components: [
+        { metric: "accuracy", score: 1, reason: "Grounded" },
+        { metric: "clarity", score: 1, reason: "Plain" },
+      ],
+    });
+    assert.equal((await llmAssert("candidate answer", binary)).pass, true);
+
+    // Graded stays the default, keeps the 0.7 bar, and must not be told the binary rule.
+    responses.push({
+      components: [
+        { metric: "accuracy", score: 1, reason: "Grounded" },
+        { metric: "clarity", score: 0.9, reason: "Nearly plain" },
+      ],
+    });
+    const graded = await llmAssert("candidate answer", { config: { components } });
+    assert.equal(graded.pass, true);
+    assert.equal(prompts[2].includes("binary checklist item"), false);
+
+    // A bar beside the mode is a contradiction, not a preference to reconcile silently.
+    await assert.rejects(
+      llmAssert("candidate answer", {
+        config: { scoring: "binary" as const, threshold: 0.8, components },
+      }),
+      /scoring/,
+    );
+    await assert.rejects(
+      llmAssert("candidate answer", {
+        config: { scoring: "strict" as unknown as "binary", components },
+      }),
+      /scoring/,
+    );
+  } finally {
+    server.close();
+    restoreEnvironment(previous);
+  }
+});

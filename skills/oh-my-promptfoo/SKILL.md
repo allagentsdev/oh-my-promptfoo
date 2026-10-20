@@ -122,6 +122,14 @@ assert:
           value: Checks the change for unintended row updates.
 ```
 
+`threshold` is the bar for one component's score, not an aggregate: the
+assertion passes only when every component passes. For a checklist, where a
+criterion is either met or not, set `scoring: binary` instead of a threshold.
+The judge is then told to score exactly 1 or 0 and never award partial credit,
+and the bar becomes a full score, so the rule does not have to be repeated in
+each suite's `rubric`. Keep `rubric` for guidance only this suite needs, such
+as which claims count as unverified.
+
 ## Prove the run
 
 1. Install the package and the chosen delegate peer; Copilot uses
