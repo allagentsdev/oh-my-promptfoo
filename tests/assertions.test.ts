@@ -398,6 +398,24 @@ test("binary scoring states the checklist rule to the judge and fixes the bar at
     assert.equal(graded.pass, true);
     assert.equal(prompts[2].includes("binary checklist item"), false);
 
+    // Judging discipline belongs to every caller, so it is stated without being asked for.
+    assert.match(prompts[2], /Preserve each criterion's subject, condition, polarity and scope/);
+    assert.match(prompts[2], /scoped to a condition the output never enters/);
+    // An agent narrates work the judge cannot see; a text candidate has no such claims.
+    assert.equal(prompts[2].includes("never credit an unverified claim"), false);
+
+    responses.push({
+      components: [
+        { metric: "accuracy", score: 1, reason: "Grounded" },
+        { metric: "clarity", score: 1, reason: "Plain" },
+      ],
+    });
+    await llmAssert("candidate answer", {
+      config: { scoring: "binary" as const, candidate: "agent" as const, components },
+    });
+    assert.match(prompts[3], /never credit an unverified claim/);
+    assert.match(prompts[3], /gated elsewhere and is not your subject/);
+
     // A bar beside the mode is a contradiction, not a preference to reconcile silently.
     await assert.rejects(
       llmAssert("candidate answer", {
@@ -410,6 +428,12 @@ test("binary scoring states the checklist rule to the judge and fixes the bar at
         config: { scoring: "strict" as unknown as "binary", components },
       }),
       /scoring/,
+    );
+    await assert.rejects(
+      llmAssert("candidate answer", {
+        config: { candidate: "human" as unknown as "agent", components },
+      }),
+      /candidate of 'text' or 'agent'/,
     );
   } finally {
     server.close();

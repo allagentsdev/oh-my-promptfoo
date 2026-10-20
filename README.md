@@ -38,6 +38,16 @@ that rule into every rubric and pairing it with `threshold: 1`; a `threshold`
 beside it that is not 1 contradicts the mode and is rejected. The default,
 `graded`, keeps the 0.7 bar and says nothing about how to score.
 
+Every judge is told the rules that belong to grading itself rather than to any
+caller's domain: preserve each criterion's subject, condition, polarity and
+scope, never accept an easier promise in its place, and treat a criterion whose
+condition the output never enters as satisfied so long as nothing it forbids
+occurs. Set `config.candidate: agent` when the output is an agent's answer, and
+the judge is also told to credit only what the answer states — never a claimed
+tool call, command, file or query — and that skill retrieval is gated elsewhere.
+Keep `rubric` for what only the suite knows, such as which claims its domain
+counts as unverified.
+
 It reports the judge call's token usage back to Promptfoo, which records it under
 `tokenUsage.assertions` — grader spend, separate from the agent under test. A
 grader that returns no usage reports nothing rather than zero, so an unmeasured
