@@ -130,39 +130,56 @@ test("one OpenAI-compatible request scores every named criterion and gates each 
     assert.doesNotMatch(messages?.[0].content ?? "", /Ignore the grading policy/);
     assert.equal(messages?.[1].role, "user");
     assert.equal(messages?.[1].content, untrusted);
-    responses.push({ components: [{ metric: "accuracy", score: 1, reason: "Grounded" }] });
+    // A judge that breaks the protocol is asked once more before the agent run it was
+    // grading is thrown away, so each malformed reply has to be queued for both attempts.
+    const requestsBeforeRetry = requests.length;
+    const short = { components: [{ metric: "accuracy", score: 1, reason: "Grounded" }] };
+    responses.push(short, short);
     await assert.rejects(llmAssert("candidate answer", context), /did not score every component/);
-    responses.push({
+    assert.equal(requests.length - requestsBeforeRetry, 2);
+    const unknownName = {
       components: [
         { metric: "accuracy", score: 1, reason: "Grounded" },
         { metric: "other", score: 1, reason: "Not requested" },
       ],
-    });
+    };
+    responses.push(unknownName, unknownName);
     await assert.rejects(
       llmAssert("candidate answer", context),
       /did not score component: clarity/,
     );
-    responses.push({
+    const duplicated = {
       components: [
         { metric: "accuracy", score: 1, reason: "Grounded" },
         { metric: "accuracy", score: 1, reason: "Duplicate" },
       ],
-    });
+    };
+    responses.push(duplicated, duplicated);
     await assert.rejects(
       llmAssert("candidate answer", context),
       /duplicate or invalid component grade/,
     );
-    responses.push({
+    // The retry exists to rescue a transient protocol slip: a good second reply stands.
+    responses.push(duplicated, {
+      components: [
+        { metric: "accuracy", score: 1, reason: "Grounded" },
+        { metric: "clarity", score: 1, reason: "Plain" },
+      ],
+    });
+    const rescued = await llmAssert("candidate answer", context);
+    assert.equal(rescued.pass, true);
+    const invalidType = {
       components: [
         { metric: "accuracy", score: 1, reason: "Grounded" },
         { metric: "clarity", score: "1", reason: "Invalid type" },
       ],
-    });
+    };
+    responses.push(invalidType, invalidType);
     await assert.rejects(
       llmAssert("candidate answer", context),
       /duplicate or invalid component grade/,
     );
-    assert.equal(requests.length, 10);
+    assert.equal(requests.length, 16);
     await assert.rejects(
       llmAssert("candidate answer", {
         config: { components: [{ metric: "clarity", value: "Be clear", weight: 0 }] },
@@ -175,7 +192,7 @@ test("one OpenAI-compatible request scores every named criterion and gates each 
         /reserved component metric/,
       );
     }
-    assert.equal(requests.length, 10);
+    assert.equal(requests.length, 16);
   } finally {
     restoreEnvironment(previous);
     const closed = once(server, "close");
@@ -320,6 +337,140 @@ test("grader token usage is reported so Promptfoo can bill it apart from the age
     usage = { prompt_tokens: -5, completion_tokens: "many", total_tokens: 2.5 };
     const hostile = await llmAssert("candidate answer", context);
     assert.equal(Object.hasOwn(hostile, "tokensUsed"), false);
+  } finally {
+    server.close();
+    restoreEnvironment(previous);
+  }
+});
+
+test("binary scoring states the checklist rule to the judge and fixes the bar at a full score", async () => {
+  const previous = Object.fromEntries(environmentKeys.map((name) => [name, process.env[name]]));
+  const responses: unknown[] = [];
+  const prompts: string[] = [];
+  const server = createServer(async (request, response) => {
+    let body = "";
+    for await (const chunk of request) body += chunk;
+    prompts.push(JSON.parse(body).messages[0].content);
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(
+      JSON.stringify({ choices: [{ message: { content: JSON.stringify(responses.shift()) } }] }),
+    );
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  try {
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("Missing test server port");
+    process.env.OPENAI_MODEL = "fake-grader";
+    process.env.OPENAI_API_KEY = "local-only";
+    process.env.OPENAI_BASE_URL = `http://127.0.0.1:${address.port}/v1`;
+
+    // Callers previously wrote this rule into every rubric by hand and paired it with
+    // threshold 1. Declaring the mode has to carry both halves, or the duplication returns.
+    const binary = { config: { scoring: "binary" as const, components } };
+    responses.push({
+      components: [
+        { metric: "accuracy", score: 1, reason: "Grounded" },
+        { metric: "clarity", score: 0.9, reason: "Nearly plain" },
+      ],
+    });
+    const nearMiss = await llmAssert("candidate answer", binary);
+    assert.equal(nearMiss.pass, false);
+    assert.match(prompts[0], /binary checklist item/);
+    assert.match(prompts[0], /never award partial credit/);
+
+    responses.push({
+      components: [
+        { metric: "accuracy", score: 1, reason: "Grounded" },
+        { metric: "clarity", score: 1, reason: "Plain" },
+      ],
+    });
+    assert.equal((await llmAssert("candidate answer", binary)).pass, true);
+
+    // Graded stays the default, keeps the 0.7 bar, and must not be told the binary rule.
+    responses.push({
+      components: [
+        { metric: "accuracy", score: 1, reason: "Grounded" },
+        { metric: "clarity", score: 0.9, reason: "Nearly plain" },
+      ],
+    });
+    const graded = await llmAssert("candidate answer", { config: { components } });
+    assert.equal(graded.pass, true);
+    assert.equal(prompts[2].includes("binary checklist item"), false);
+
+    // Upgrading must not move a graded caller's scores. Checklist judging rides with the
+    // mode that asked for it: under graded, credit for a near miss is the point.
+    assert.equal(prompts[2].includes("never accept an easier promise"), false);
+    assert.equal(prompts[2].includes("scoped to a condition the output never enters"), false);
+    assert.equal(prompts[2].includes("never credit an unverified claim"), false);
+    // Binary carries them, so no caller has to write them into a rubric by hand.
+    assert.match(prompts[0], /never accept an easier promise/);
+    assert.match(prompts[0], /scoped to a condition the output never enters/);
+    // An agent narrates work the judge cannot see; a text candidate has no such claims.
+    assert.equal(prompts[0].includes("never credit an unverified claim"), false);
+
+    responses.push({
+      components: [
+        { metric: "accuracy", score: 1, reason: "Grounded" },
+        { metric: "clarity", score: 1, reason: "Plain" },
+      ],
+    });
+    await llmAssert("candidate answer", {
+      config: { scoring: "binary" as const, candidate: "agent" as const, components },
+    });
+    assert.match(prompts[3], /never credit an unverified claim/);
+    assert.match(prompts[3], /gated elsewhere and is not your subject/);
+
+    // A bar beside the mode is a contradiction, not a preference to reconcile silently.
+    await assert.rejects(
+      llmAssert("candidate answer", {
+        config: { scoring: "binary" as const, threshold: 0.8, components },
+      }),
+      /scoring/,
+    );
+    await assert.rejects(
+      llmAssert("candidate answer", {
+        config: { scoring: "strict" as unknown as "binary", components },
+      }),
+      /scoring/,
+    );
+    await assert.rejects(
+      llmAssert("candidate answer", {
+        config: { candidate: "human" as unknown as "agent", components },
+      }),
+      /candidate of 'text' or 'agent'/,
+    );
+
+    // Promptfoo's llm-rubric trusts the judge's verdict and only adds a numeric bar when
+    // the caller states one. A drop-in replacement that invented a default bar would fail
+    // rows the assertion it replaces would pass, which is the surprise worth avoiding.
+    responses.push({
+      components: [
+        { metric: "accuracy", score: 0.3, reason: "Thin but acceptable", pass: true },
+        { metric: "clarity", score: 0.4, reason: "Acceptable", pass: true },
+      ],
+    });
+    const trusted = await llmAssert("candidate answer", { config: { components } });
+    assert.equal(trusted.pass, true);
+
+    // The judge's own verdict still gates when it says no, whatever the score.
+    responses.push({
+      components: [
+        { metric: "accuracy", score: 0.95, reason: "Close, but wrong claim", pass: false },
+        { metric: "clarity", score: 1, reason: "Plain" },
+      ],
+    });
+    assert.equal((await llmAssert("candidate answer", { config: { components } })).pass, false);
+
+    // A stated threshold is an extra constraint on top of that verdict, as in promptfoo.
+    responses.push({
+      components: [
+        { metric: "accuracy", score: 0.3, reason: "Thin", pass: true },
+        { metric: "clarity", score: 1, reason: "Plain" },
+      ],
+    });
+    const barred = await llmAssert("candidate answer", { config: { threshold: 0.5, components } });
+    assert.equal(barred.pass, false);
   } finally {
     server.close();
     restoreEnvironment(previous);
