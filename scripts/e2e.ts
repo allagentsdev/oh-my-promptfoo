@@ -318,17 +318,27 @@ try {
         providers: ["echo"],
         tests: [
           {
-            vars: { subject: "the packaged build" },
+            vars: {
+              subject: "the packaged build",
+              details: { subject: "packed object" },
+              encoded: JSON.stringify({ subject: "loaded JSON" }),
+            },
             assert: [
               {
                 type: "javascript",
                 value: "package:oh-my-promptfoo/assertions:llmAssert",
                 config: {
                   threshold: 0.7,
-                  rubricPrompt: "Judge only {{ subject }}.",
+                  rubricPrompt:
+                    "Judge only {{ subject }}. Environment {% set e = env.PACKED_ASSERTION_SUBJECT %}{{ e }}; object {{ details }}; {% set parsed = encoded | load %}loaded {{ parsed.subject }}.",
                   components: [
-                    { metric: "accuracy", value: "Ground claims about {{ subject }}", weight: 3 },
-                    { metric: "clarity", value: "Explain clearly" },
+                    {
+                      metric: "accuracy",
+                      value:
+                        "Ground claims about {{ subject }}; environment {% set e = env.PACKED_ASSERTION_SUBJECT %}{{ e }}; {% set parsed = encoded | load %}loaded {{ parsed.subject }}; nested {{ details.subject }}",
+                      weight: 3,
+                    },
+                    { metric: "clarity", value: "Explain {{ details.subject }} clearly" },
                   ],
                 },
               },
@@ -353,6 +363,9 @@ try {
         cwd,
         env: {
           ...testEnvironment,
+          PACKED_ASSERTION_SUBJECT: "packed environment",
+          PROMPTFOO_DISABLE_TEMPLATING: "false",
+          PROMPTFOO_DISABLE_OBJECT_STRINGIFY: "false",
           OPENAI_MODEL: "fake-grader",
           OPENAI_API_KEY: "local-only",
           OPENAI_BASE_URL: `http://127.0.0.1:${address.port}/v1`,
@@ -385,8 +398,15 @@ try {
       // Test variables render through the Nunjucks Promptfoo installs, from the packed build.
       !judgeRequests[0].body.messages[0].content.includes("Judge only the packaged build.") ||
       !judgeRequests[0].body.messages[0].content.includes(
-        "- accuracy: Ground claims about the packaged build",
+        'Environment packed environment; object {"subject":"packed object"}; loaded loaded JSON.',
       ) ||
+      !judgeRequests[0].body.messages[0].content.includes(
+        "- accuracy: Ground claims about the packaged build; environment packed environment; loaded loaded JSON; nested packed object",
+      ) ||
+      !judgeRequests[0].body.messages[0].content.includes(
+        "- clarity: Explain packed object clearly",
+      ) ||
+      judgeRequests[0].body.messages[1].content !== "review" ||
       grade?.score !== 0.925 ||
       grade?.namedScores?.accuracy !== 1 ||
       grade?.namedScores?.clarity !== 0.7 ||

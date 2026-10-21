@@ -63,10 +63,37 @@ unverified, in `config.rubricPrompt`. Unlike `llm-rubric`, it cannot replace the
 system prompt: one request scores every criterion only because the reply format
 is fixed, so the suite's text is added beneath the built-in rules. The answer is
 always sent to the judge on its own, and the criteria come from `components`, so
-a template that uses `{{ output }}` or `{{ rubric }}` is rejected. Test
-variables render in `rubricPrompt` and in each component's `value` as they do in
-an `llm-rubric` value, and an unset variable fails the assertion instead of
-rendering empty. `PROMPTFOO_DISABLE_TEMPLATING` leaves both literal.
+a template that uses `{{ output }}` or `{{ rubric }}` is rejected.
+
+Both `rubricPrompt` and component `value` templates receive test variables,
+`{{ env.NAME }}` from the permitted process environment, and the `load` filter
+(`JSON.parse`, not a file loader). Component values keep structured variables.
+In `rubricPrompt` only, objects become JSON strings; arrays remain arrays with
+object elements JSON-stringified and primitives unchanged, matching Promptfoo's
+grader-prompt conversion. Set `PROMPTFOO_DISABLE_OBJECT_STRINGIFY=true` or `1` to
+keep structured variables there too, or use `load` to parse a JSON string before
+property access. Unset variables fail rather than render empty.
+`PROMPTFOO_DISABLE_TEMPLATING=true` or `1` leaves both text fields literal.
+
+`llmAssert`'s own `env` global honors process-level
+`PROMPTFOO_DISABLE_TEMPLATE_ENV_VARS`, defaulting to disabled with
+`PROMPTFOO_SELF_HOSTED` (an empty disable flag also uses that default).
+It does not read private config-level or async environment overrides or custom
+`nunjucksFilters`. Separately, Promptfoo's config-load pass can already render
+`{{ env.NAME }}` using merged config `env:` before this assertion receives it;
+these pre-rendered values are not controlled by `llmAssert`'s rendering flags.
+Only assertion `config.rubricPrompt` is read, never `options.rubricPrompt`.
+Share inline guidance with YAML anchors (`rubricPrompt: &guidance |` at its
+first definition, `rubricPrompt: *guidance` on later assertions). A `file://`
+reference that reaches `llmAssert` fails with a missing-config-directory error:
+script contexts expose no config directory, and it never guesses from `cwd`.
+For tests loaded through `tests: file://*.yaml` (also JSON/JSONL), Promptfoo can
+inline nested `config.rubricPrompt` and component `value` file references from
+its base path before the assertion runs. Loaded strings follow normal template
+checks; parsed JSON/YAML objects or arrays are not string templates and fail
+type validation. The assertion cannot identify their original file path.
+See [ADR 0006](docs/adr/0006-llm-assert-rubric-prompt.md) for upstream sources
+and deliberate differences from Promptfoo's grader defaults.
 
 It reports the judge call's token usage back to Promptfoo, which records it under
 `tokenUsage.assertions` — grader spend, separate from the agent under test. A

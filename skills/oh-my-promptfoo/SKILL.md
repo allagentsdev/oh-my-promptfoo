@@ -123,6 +123,8 @@ assert:
     value: package:oh-my-promptfoo/assertions:llmAssert
     config:
       scoring: binary
+      rubricPrompt: &suiteGuidance |
+        Treat claims unsupported by {{ source }} as unverified.
       components:
         - metric: schema-evidence
           value: Cites the concrete schema fact supporting the recommendation.
@@ -141,8 +143,38 @@ in each suite's `rubricPrompt`. Keep `rubricPrompt` for instructions only this
 suite needs, such as which claims its domain counts as unverified. It is added
 beneath the built-in rules and cannot replace them or the reply format, so do
 not paste an `llm-rubric` template that uses `{{ output }}` or `{{ rubric }}`.
-Test variables such as `{{ source }}` render in `rubricPrompt` and in component
-values, which is how a faithfulness criterion receives its source text.
+Only assertion `config.rubricPrompt` is read; `options.rubricPrompt` is ignored.
+To share these instructions, define a YAML anchor as above and use
+`rubricPrompt: *suiteGuidance` in another assertion's `config` in the same YAML
+document. A `file://` reference still present when `llmAssert` runs fails clearly:
+script contexts provide no config directory, and it never guesses from `cwd`.
+For tests loaded via `tests: file://*.yaml` (also JSON/JSONL), Promptfoo can
+inline nested rubricPrompt/component file references from its base path first.
+Loaded strings receive the normal checks; parsed JSON/YAML objects or arrays
+fail string-template validation. Their original file paths are not available.
+
+Test variables such as `{{ source }}` render in `rubricPrompt` and component
+values, which is how a faithfulness criterion receives its source text. Define
+`source` in the test's `vars` when using the example above: unset variables fail
+before the judge call. Both template fields also support `{{ env.NAME }}` from
+the permitted process environment and `load`, which calls `JSON.parse` and is
+not a file loader. Component values retain structured variables. In
+`rubricPrompt`, non-null objects become JSON strings; arrays retain their shape,
+with object elements JSON-stringified and primitive elements unchanged. For
+property access there, use `{% set parsed = source | load %}{{ parsed.text }}`
+on a stringified object, or set `PROMPTFOO_DISABLE_OBJECT_STRINGIFY=true` or `1`
+to retain structured variables.
+
+`PROMPTFOO_DISABLE_TEMPLATING=true` or `1` leaves both text fields literal.
+The assertion's own `env` global honors process-level
+`PROMPTFOO_DISABLE_TEMPLATE_ENV_VARS`, defaulting to disabled with
+`PROMPTFOO_SELF_HOSTED`; an empty disable flag also uses this default.
+It does not read private config/async environment overrides or custom filters.
+However, Promptfoo's config-load pass can render `{{ env.NAME }}` using merged
+config `env:` before `llmAssert` sees the text. Assertion rendering flags cannot
+undo that preprocessing. Use test variables for assertion-time inputs.
+See [ADR 0006](../../docs/adr/0006-llm-assert-rubric-prompt.md)
+for versioned upstream sources and the strict-unset/literal-disable safeguards.
 
 ## Prove the run
 
