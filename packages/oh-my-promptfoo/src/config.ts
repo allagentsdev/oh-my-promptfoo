@@ -4,7 +4,11 @@ import { destination, resolveWorkspaceTimeoutMs } from "../../workspace-core/src
 import type { WorkspaceSpec } from "../../workspace-core/src/types.js";
 
 export type JsonObject = Record<string, unknown>;
-export type DelegateId = "openai:codex-sdk" | "anthropic:claude-agent-sdk" | "copilot-sdk";
+export type DelegateId =
+  | "openai:codex-sdk"
+  | "anthropic:claude-agent-sdk"
+  | "copilot-sdk"
+  | "pi-sdk";
 export interface CodexDelegate {
   id: "openai:codex-sdk";
   env?: Record<string, string>;
@@ -57,7 +61,19 @@ export interface CopilotDelegate {
   env?: Record<string, string>;
   config?: Omit<CopilotSdkProviderConfig, "working_dir" | "env">;
 }
-export type Delegate = CodexDelegate | ClaudeDelegate | CopilotDelegate;
+export interface PiDelegate {
+  id: "pi-sdk";
+  env?: Record<string, string>;
+  config: {
+    provider: string;
+    model: string;
+    apiKey?: string;
+    baseUrl?: string;
+    thinkingLevel?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
+    permissions?: { filesystem?: "read" | "write"; shell?: "deny" | "allow" };
+  };
+}
+export type Delegate = CodexDelegate | ClaudeDelegate | CopilotDelegate | PiDelegate;
 export interface ProviderConfig {
   delegate: Delegate;
   workspace: WorkspaceSpec;
@@ -142,6 +158,14 @@ const copilot: Record<string, Rule> = {
   model: "string",
   reasoning_effort: ["low", "medium", "high"],
   timeoutMs: "number",
+};
+const pi: Record<string, Rule> = {
+  provider: "string",
+  model: "string",
+  apiKey: "string",
+  baseUrl: "string",
+  thinkingLevel: ["off", "minimal", "low", "medium", "high", "xhigh"],
+  permissions: "object",
 };
 
 export function object(value: unknown, path: string): JsonObject {
@@ -231,7 +255,9 @@ export function validateDelegateConfig(id: DelegateId, value: unknown): JsonObje
       ? codex
       : id === "anthropic:claude-agent-sdk"
         ? { ...claude, tools: "object" as Rule }
-        : { ...copilot, provider: "object" as Rule, permissions: "object" as Rule };
+        : id === "pi-sdk"
+          ? pi
+          : { ...copilot, provider: "object" as Rule, permissions: "object" as Rule };
   let config: JsonObject;
   if (
     id === "anthropic:claude-agent-sdk" &&
@@ -262,10 +288,21 @@ export function validateDelegateConfig(id: DelegateId, value: unknown): JsonObje
         "permissions",
       );
   }
+  if (id === "pi-sdk") {
+    for (const key of ["provider", "model"])
+      if (config[key] !== undefined && !(config[key] as string).trim())
+        throw new Error(`delegate.config.${key} must be nonempty`);
+    if (config.permissions !== undefined)
+      fields(
+        config.permissions,
+        { filesystem: ["read", "write"], shell: ["deny", "allow"] },
+        "permissions",
+      );
+  }
   for (const key of ["timeoutMs", "maxRetries", "max_turns", "max_thinking_tokens"])
     if (config[key] !== undefined && !Number.isSafeInteger(config[key]))
       throw new Error(`delegate.config.${key} must be an integer`);
-  for (const key of ["base_url"])
+  for (const key of ["base_url", "baseUrl"])
     if (config[key] !== undefined) {
       let url: URL;
       try {
@@ -280,14 +317,23 @@ export function validateDelegateConfig(id: DelegateId, value: unknown): JsonObje
 }
 export function validateDelegate(value: unknown): Delegate {
   const d = closed(value, ["id", "config", "env"], "delegate");
-  if (!["openai:codex-sdk", "anthropic:claude-agent-sdk", "copilot-sdk"].includes(d.id as string))
+  if (
+    !["openai:codex-sdk", "anthropic:claude-agent-sdk", "copilot-sdk", "pi-sdk"].includes(
+      d.id as string,
+    )
+  )
     throw new Error(
-      "delegate.id must select openai:codex-sdk, anthropic:claude-agent-sdk, or copilot-sdk",
+      "delegate.id must select openai:codex-sdk, anthropic:claude-agent-sdk, copilot-sdk, or pi-sdk",
     );
   const id = d.id as DelegateId;
+  const config = validateDelegateConfig(id, d.config ?? {});
+  if (id === "pi-sdk")
+    for (const key of ["provider", "model"])
+      if (typeof config[key] !== "string" || !(config[key] as string).trim())
+        throw new Error(`delegate.config.${key} is required for pi-sdk`);
   return {
     id,
-    config: validateDelegateConfig(id, d.config ?? {}),
+    config,
     ...(d.env !== undefined ? { env: validateEnv(d.env, "delegate.env") } : {}),
   } as Delegate;
 }

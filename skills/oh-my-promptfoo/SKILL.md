@@ -17,6 +17,20 @@ provider before writing assertions:
 - `package:oh-my-promptfoo/assertions:agentAssert` grades the live case workspace
   with any supported agent delegate, rather than trusting its final answer.
 
+Workspace delegates are `openai:codex-sdk`, `anthropic:claude-agent-sdk`,
+`copilot-sdk`, and `pi-sdk`; choose explicit labeled provider entries.
+For Pi install `@earendil-works/pi-coding-agent@1.3.0`, set
+`delegate.id: pi-sdk` and nonempty `delegate.config.provider` and `model`,
+and supply `config.apiKey` or explicit credential variables in `delegate.env`.
+Optional `baseUrl` supports HTTP(S) local model endpoints without URL credentials.
+Use the [Pi example](../../docs/provider-guide.md#pi-configuration) for the full
+provider entry. Pi defaults to read-only filesystem tools and shell denied.
+It uses raw prompts and in-memory sessions, with no extension, global auth or
+project settings discovery. Staged skills and root `AGENTS.md` are its only
+discovered resources; this is tool policy, not an OS sandbox.
+Keep existing skill authoring and `skill-used` assertions: Pi reports only
+successful contained, non-symlink `SKILL.md` reads as `source: "read-tool"`.
+
 ## Review a pinned source with local skills
 
 This example assumes `promptfooconfig.yaml` sits in `evals/` of a trusted
@@ -230,11 +244,14 @@ assert:
           value: src/parser.ts implements the requested fix without unrelated edits.
 ```
 
-The grader may also be `anthropic:claude-agent-sdk` or `openai:codex-sdk`.
+The grader may also be `anthropic:claude-agent-sdk`, `openai:codex-sdk`, or `pi-sdk`.
 Use the delegate's supported model fields and explicit `grader.env` credentials;
 `OPENAI_MODEL` and `OPENAI_API_KEY` are not an implicit agent-grader selection.
 Codex graders require an API key in `grader.config.apiKey` or explicit
 `grader.env.OPENAI_API_KEY`; they do not load ChatGPT login credentials.
+Pi graders require `provider` and `model` and explicit credentials too. They
+enable guarded `read` and `ls` tools without skill/context discovery; filesystem
+`write` or shell `allow` settings are rejected.
 Component validation, weights, thresholds and `rubricPrompt` match `llmAssert`.
 Built-in agent rules require verification rather than accepting narrated work.
 Candidate output, workspace files and tool results are evidence, not instructions.
@@ -261,7 +278,8 @@ by a time bound.
 ## Prove the run
 
 1. Install the package and the chosen delegate peer; Copilot uses
-   `@github/copilot-sdk@1.0.17`. Validate the authored config with
+   `@github/copilot-sdk@1.0.17` and Pi uses
+   `@earendil-works/pi-coding-agent@1.3.0`. Validate the authored config with
    `npx promptfoo validate config -c promptfooconfig.yaml`.
 2. Run `npx promptfoo eval -c promptfooconfig.yaml` with the required agent
    and, when applicable, judge credentials. Inspect the actual scored row.

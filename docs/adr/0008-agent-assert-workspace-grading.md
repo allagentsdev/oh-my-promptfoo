@@ -23,6 +23,8 @@ Enforce filesystem read-only, shell denial and network-tool denial in each deleg
 
 Codex normally reads files through shell commands. Disabling execution therefore requires a replacement read surface: a bundled stdio MCP server offering only bounded `read_file` and `list_directory`. It rejects workspace escapes and undeclared external symlinks; declared protected source links remain readable. Claude exposes only workspace/source-scoped Read/Glob/Grep with a path-checking permission callback and mandatory pre-tool hook, including reads that would otherwise be auto-approved. Copilot checks real paths before approving reads and disables workspace skill loading for graders. Candidate-written skills must never become judge instructions.
 
+Pi graders expose guarded `read` and `ls` tools so they can discover evidence without shell access. Each filesystem operation checks the same workspace/protected-source real-path scope; image MIME detection keeps screenshots as image attachments. Pi grader resources omit workspace instructions and skills entirely.
+
 Disable candidate-writable instruction discovery as well as skills: Copilot grader sessions set `skipCustomInstructions: true` so `.github/copilot-instructions.md`, `AGENTS.md` and `CLAUDE.md` cannot become judge instructions. Codex sets `project_doc_max_bytes: 0` because untrusted project status alone does not suppress `read_agents_md`. These files remain untrusted evidence that the grader may explicitly inspect, not automatically loaded instructions.
 
 An agent may unlink a declared read-only source destination. Read-scope construction and the Codex reader source map skip destinations missing with `ENOENT`, while retaining errors for other failures and requiring the workspace itself to exist. Missing files remain evidence to grade, not an assertion infrastructure error.
@@ -45,6 +47,6 @@ Serialize agent graders within each evaluation process. The assertion entry is i
 
 ## Consequences
 
-Workspace grading supports Copilot, Claude and Codex with the same rubric contract. It costs an agent session rather than a single chat request and cannot execute tests because shell access is denied. Suites requiring exact bytes should keep deterministic file assertions; suites requiring actual test execution must obtain that evidence in the candidate run rather than granting a judge write or shell privileges.
+Workspace grading supports Copilot, Claude, Codex and Pi with the same rubric contract. It costs an agent session rather than a single chat request and cannot execute tests because shell access is denied. Suites requiring exact bytes should keep deterministic file assertions; suites requiring actual test execution must obtain that evidence in the candidate run rather than granting a judge write or shell privileges.
 
-Serialization favors bounded resource use over row throughput. Native policy changes must retain behavioral coverage for all three delegates. Workspace cleanup remains provider-owned and best-effort; durable file-change evidence survives cleanup, but cannot make `agentAssert` operate after cleanup.
+Serialization favors bounded resource use over row throughput. Native policy changes must retain behavioral coverage for all four delegates. Workspace cleanup remains provider-owned and best-effort; durable file-change evidence survives cleanup, but cannot make `agentAssert` operate after cleanup.

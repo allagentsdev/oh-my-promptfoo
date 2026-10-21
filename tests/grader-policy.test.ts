@@ -142,6 +142,23 @@ export class CopilotClient {
   }
 }
 
+test("Pi graders enforce read-only permissions without falling through Claude configuration", () => {
+  const config = { provider: "openai", model: "grader" };
+  assert.deepEqual(graderConfig("pi-sdk", config), {
+    ...config,
+    permissions: { filesystem: "read", shell: "deny" },
+  });
+  for (const permissions of [{ filesystem: "write" }, { shell: "allow" }])
+    assert.throws(
+      () => graderConfig("pi-sdk", { ...config, permissions }),
+      /read-only grader policy/,
+    );
+  assert.throws(
+    () => graderConfig("pi-sdk", { ...config, permissions: { network: "allow" } }),
+    /not supported/,
+  );
+});
+
 const pathAllowed = [true, false, false, false, true, true, false, false];
 
 test("Claude read-only permissions and native hooks deny reads outside physical grader roots", async () => {

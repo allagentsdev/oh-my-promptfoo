@@ -191,7 +191,7 @@ export function resolvePeer(basePath: string, name: string): string {
     );
   } catch {
     throw new Error(
-      `Install ${name}${name === "@github/copilot-sdk" ? "@1.0.17" : "@0.124.0"} in the evaluation project (${basePath})`,
+      `Install ${name}${name === "@github/copilot-sdk" ? "@1.0.17" : name === "@earendil-works/pi-coding-agent" ? "@1.3.0" : "@0.124.0"} in the evaluation project (${basePath})`,
     );
   }
 }
@@ -214,7 +214,7 @@ export async function runDelegate(
   const child = spawn(process.execPath, [runnerPath()], {
     // Native SDK discovery uses the consumer cwd; the adapter separately forces
     // working_dir to the isolated workspace for all agent operations.
-    cwd: frame.delegate === "copilot-sdk" ? frame.workingDir : frame.basePath,
+    cwd: ["copilot-sdk", "pi-sdk"].includes(frame.delegate) ? frame.workingDir : frame.basePath,
     env: childEnvironment,
     detached: process.platform !== "win32",
     stdio: ["pipe", "pipe", "pipe"],

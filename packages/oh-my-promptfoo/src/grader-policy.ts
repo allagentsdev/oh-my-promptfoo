@@ -30,6 +30,12 @@ export function graderConfig(id: DelegateId, input: JsonObject): JsonObject {
       `Agent assertion grader.config.${field} cannot weaken the read-only grader policy`,
     );
   };
+  if (id === "pi-sdk") {
+    const permissions = (config.permissions ?? {}) as JsonObject;
+    for (const [key, safe] of Object.entries({ filesystem: "read", shell: "deny" }))
+      if (permissions[key] !== undefined && permissions[key] !== safe) reject(`permissions.${key}`);
+    return { ...config, permissions: { filesystem: "read", shell: "deny" } };
+  }
   if (id === "copilot-sdk") {
     const permissions = (config.permissions ?? {}) as JsonObject;
     for (const [key, safe] of Object.entries({

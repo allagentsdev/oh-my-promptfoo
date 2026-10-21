@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { join, relative, resolve } from "node:path";
 import { removeTree } from "../packages/workspace-core/src/fs";
 import { WorkspaceManager } from "../packages/workspace-core/src/index";
+import { startPiModelServer, toolResults } from "../tests/fixtures/pi-model-server";
 
 const arguments_ = process.argv.slice(2);
 const registryVersion = arguments_[0] === "--registry" ? arguments_[1] : undefined;
@@ -31,6 +32,7 @@ const testEnvironment = {
   ALLAGENTS_CACHE_ROOT: join(workspaceParent, "cache"),
   ALLAGENTS_WORKSPACE_ROOT: join(workspaceParent, "runtime"),
   ALLAGENTS_WORKSPACE_TIMEOUT_MS: "3600000",
+  ALLAGENTS_LOCAL_SOURCE_ROOT: cwd,
 };
 function run(command: string, args: string[], dir = cwd, accepted = [0]) {
   const r = spawnSync(command, args, { cwd: dir, encoding: "utf8", env: testEnvironment });
@@ -56,6 +58,7 @@ try {
     "--no-fund",
     registryVersion ? `oh-my-promptfoo@${registryVersion}` : join(cwd, packed.filename),
     `promptfoo@${promptfooVersion}`,
+    "@earendil-works/pi-coding-agent@1.3.0",
   ]);
   const installedManifest = JSON.parse(
     await readFile(join(cwd, "node_modules/oh-my-promptfoo/package.json"), "utf8"),
@@ -275,7 +278,7 @@ try {
   const cli = join(cwd, "node_modules/promptfoo/dist/src/entrypoint.js");
   async function evaluateFixture(name: string, suite: unknown, accepted = [0]) {
     await writeFile(join(cwd, `${name}.json`), JSON.stringify(suite));
-    run(
+    const child = spawn(
       "node",
       [
         cli,
@@ -287,11 +290,262 @@ try {
         "--output",
         `${name}-results.json`,
       ],
-      cwd,
-      accepted,
+      { cwd, env: testEnvironment, stdio: ["ignore", "pipe", "pipe"] },
     );
+    let stdout = "";
+    let stderr = "";
+    child.stdout.setEncoding("utf8").on("data", (chunk: string) => {
+      stdout += chunk;
+    });
+    child.stderr.setEncoding("utf8").on("data", (chunk: string) => {
+      stderr += chunk;
+    });
+    const [status] = await once(child, "close");
+    if (typeof status !== "number" || !accepted.includes(status))
+      throw Error(`Promptfoo fixture ${name} failed (${status})\n${stdout}\n${stderr}`);
     const exported = JSON.parse(await readFile(join(cwd, `${name}-results.json`), "utf8"));
     return exported.results;
+  }
+  const skillSource = join(cwd, "skills");
+  await mkdir(join(skillSource, "demo"), { recursive: true });
+  await writeFile(
+    join(skillSource, "demo/SKILL.md"),
+    "---\nname: demo\ndescription: Demo verification skill\n---\nDemo skill.\n",
+  );
+  const skillProviders = [
+    ["openai:codex-sdk", "codex-skills"],
+    ["anthropic:claude-agent-sdk", "claude-skills"],
+    ["copilot-sdk", "copilot-skills"],
+  ].map(([id, label]) => {
+    const provider = wrapper(id, label, "all");
+    return {
+      ...provider,
+      config: {
+        ...provider.config,
+        fileChanges: false,
+        workspace: {
+          sources: [".agents", ".claude", ".github"].map((directory) => ({
+            type: "local",
+            path: skillSource,
+            destination: `${directory}/skills`,
+          })),
+        },
+      },
+    };
+  });
+  const skillGates: Record<string, { successes: number; failures: number; errors: number }> = {};
+  type SkillResult = {
+    gradingResult?: { pass: boolean };
+    response: {
+      metadata: {
+        skillCalls?: { name: string; is_error?: boolean }[];
+        attemptedSkillCalls?: { name: string }[];
+      };
+    };
+  };
+  for (const mode of ["success", "failed", "text-only"]) {
+    const expectedPass = mode === "success";
+    const evaluated = await evaluateFixture(
+      `skills-${mode}`,
+      {
+        tracing: { enabled: false },
+        prompts: ["{{task}}"],
+        providers: skillProviders,
+        tests: [
+          {
+            vars: {
+              task: `read:${JSON.stringify({ path: ".agents/skills/demo/SKILL.md", mode })}`,
+            },
+            assert: [{ type: "skill-used", value: "demo" }],
+          },
+        ],
+      },
+      expectedPass ? [0] : [100],
+    );
+    const { successes, failures, errors } = evaluated.stats;
+    if (
+      successes !== (expectedPass ? 3 : 0) ||
+      failures !== (expectedPass ? 0 : 3) ||
+      errors !== 0 ||
+      evaluated.results.length !== 3 ||
+      evaluated.results.some((row: SkillResult) => row.gradingResult?.pass !== expectedPass)
+    )
+      throw Error(
+        `skill-used without tracing misgraded ${mode}: ${JSON.stringify(evaluated.stats)}`,
+      );
+    if (mode === "failed") {
+      if (
+        !evaluated.results.some((row: SkillResult) =>
+          row.response.metadata.attemptedSkillCalls?.some((skill) => skill.name === "demo"),
+        )
+      )
+        throw Error("Codex lost attempted skill evidence for a failed command");
+      if (
+        !evaluated.results.some((row: SkillResult) =>
+          row.response.metadata.skillCalls?.some(
+            (skill) => skill.name === "demo" && skill.is_error,
+          ),
+        )
+      )
+        throw Error("Claude lost failed Skill tool evidence");
+    }
+    skillGates[mode] = { successes, failures, errors };
+  }
+  const piModel = await startPiModelServer((request) => {
+    const results = toolResults(request);
+    const task = JSON.stringify(request.messages[0]?.content);
+    if (task.includes("AGENT_ASSERT_PI_E2E")) {
+      const listed = results.find((result) => result.tool_use_id === "pi-grader-list");
+      if (!listed)
+        return { tools: [{ id: "pi-grader-list", name: "ls", args: { path: ".agents/skills" } }] };
+      if (listed.is_error || !JSON.stringify(listed).includes("demo"))
+        throw Error("Pi grader could not discover the staged skill directory");
+      const read = results.find((result) => result.tool_use_id === "pi-grader-read");
+      if (!read)
+        return {
+          tools: [
+            { id: "pi-grader-read", name: "read", args: { path: ".agents/skills/demo/SKILL.md" } },
+          ],
+        };
+      if (read.is_error || !JSON.stringify(read).includes("Demo skill."))
+        throw Error("Pi grader could not inspect the discovered skill body");
+      return {
+        text: JSON.stringify({
+          components: [
+            {
+              metric: "workspace-inspected",
+              score: 1,
+              reason: "Pi grader listed the live skill directory and read the skill body",
+            },
+          ],
+        }),
+      };
+    }
+    if (results.length) {
+      if (
+        !results.some((result) => result.is_error) &&
+        !JSON.stringify(results).includes("Demo skill.")
+      )
+        throw Error("Pi read tool did not return the real staged skill body");
+      return {
+        text: results.some((result) => result.is_error) ? "skill read failed" : "loaded demo skill",
+      };
+    }
+    if (task.includes("Pi text-only")) return { text: "I used demo" };
+    return {
+      tools: [
+        {
+          id: "pi-read",
+          name: "read",
+          args: {
+            path: task.includes("Pi failed")
+              ? ".agents/skills/missing/SKILL.md"
+              : ".agents/skills/demo/SKILL.md",
+          },
+        },
+      ],
+    };
+  });
+  const piProvider = {
+    id: "package:oh-my-promptfoo:Provider",
+    label: "pi",
+    config: {
+      delegate: {
+        id: "pi-sdk",
+        config: {
+          provider: "anthropic",
+          model: "claude-sonnet-4-5",
+          apiKey: "pi-local-test",
+          baseUrl: piModel.url,
+        },
+      },
+      workspace: skillProviders[0].config.workspace,
+    },
+  };
+  let piGates: {
+    successes: number;
+    failures: number;
+    errors: number;
+    toolTrajectory: boolean;
+    graderVerified: boolean;
+  };
+  try {
+    const piSkills = await evaluateFixture(
+      "pi-skills",
+      {
+        tracing: { enabled: false },
+        prompts: ["{{task}}"],
+        providers: [piProvider],
+        tests: ["success", "failed", "text-only"].map((mode) => ({
+          vars: { task: `Pi ${mode}` },
+          assert: [{ type: "skill-used", value: "demo" }],
+        })),
+      },
+      [100],
+    );
+    const { successes, failures, errors } = piSkills.stats;
+    if (successes !== 1 || failures !== 2 || errors !== 0)
+      throw Error(`Real Pi SDK skill gates misgraded: ${JSON.stringify(piSkills.stats)}`);
+    const piTrace = await evaluateFixture("pi-trajectory", {
+      tracing: { enabled: true },
+      prompts: ["Pi success"],
+      providers: [piProvider],
+      tests: [
+        {
+          assert: [
+            { type: "skill-used", value: "demo" },
+            { type: "trajectory:tool-used", value: "read" },
+            {
+              type: "trajectory:tool-args-match",
+              value: { name: "read", args: { path: ".agents/skills/demo/SKILL.md" } },
+            },
+          ],
+        },
+      ],
+    });
+    if (piTrace.stats.successes !== 1 || piTrace.stats.errors !== 0)
+      throw Error("Real Pi SDK tool trajectory did not survive the packed provider");
+    const piGrader = await evaluateFixture("pi-grader", {
+      tracing: { enabled: false },
+      prompts: ["Pi success"],
+      providers: [piProvider],
+      tests: [
+        {
+          assert: [
+            {
+              type: "javascript",
+              value: "package:oh-my-promptfoo/assertions:agentAssert",
+              config: {
+                grader: piProvider.config.delegate,
+                components: [
+                  {
+                    metric: "workspace-inspected",
+                    value:
+                      "AGENT_ASSERT_PI_E2E: Discover and inspect the live workspace skill. Its body must contain Demo skill.",
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      ],
+    });
+    const piWorkspaceGrade = piGrader.results[0]?.gradingResult?.componentResults?.find(
+      (part: { namedScores?: Record<string, number> }) =>
+        part.namedScores?.["workspace-inspected"] === 1,
+    );
+    if (
+      piGrader.stats.successes !== 1 ||
+      piGrader.stats.errors !== 0 ||
+      !piWorkspaceGrade?.pass ||
+      !(piWorkspaceGrade.tokensUsed?.total > 0)
+    )
+      throw Error("Packed Pi agentAssert did not discover and grade the live workspace");
+    if (piModel.failures.length)
+      throw new AggregateError(piModel.failures, "Pi model fixture failed");
+    piGates = { successes, failures, errors, toolTrajectory: true, graderVerified: true };
+  } finally {
+    await piModel.close();
   }
   const unfiltered = await evaluateFixture("unfiltered", {
     ...config,
@@ -592,13 +846,15 @@ try {
           ? "registry-installed package loaded by stock promptfoo eval"
           : "npm-packed package loaded by stock promptfoo eval",
         sdkMode:
-          "deterministic SDK fixtures; independently npm-installed Promptfoo, native Codex/Claude adapters and real integration runtime",
+          "deterministic Codex/Claude/Copilot SDK fixtures; real Pi SDK against a local model-service endpoint; independently npm-installed Promptfoo and real integration runtime",
         stats,
         verifiedAssertions,
         additionalGates: {
           unfilteredRows: unfiltered.stats.successes,
           directCopilot: direct.stats.successes,
           nativeErrors: nativeError.stats.errors,
+          skillUsedWithoutTracing: skillGates,
+          piSdk: piGates,
           normalCleanup: true,
           skippedCleanupRecovery: true,
           storageOutsideConsumer: true,
