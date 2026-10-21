@@ -247,12 +247,17 @@ async function runNative(frame: CallFrame, signal: AbortSignal): Promise<JsonObj
       const sourceRoots: Record<string, string> = {};
       for (const source of frame.readOnly.sourceRoots) {
         const path = resolve(frame.workingDir, source);
-        if ((await lstat(path)).isSymbolicLink()) sourceRoots[source] = await realpath(path);
+        try {
+          if ((await lstat(path)).isSymbolicLink()) sourceRoots[source] = await realpath(path);
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+        }
       }
       nativePolicy = {
         cli_config: {
           // The SDK flattens object keys as dotted TOML without quoting them.
           [`projects.${JSON.stringify(frame.workingDir)}.trust_level`]: "untrusted",
+          project_doc_max_bytes: 0,
           skills: {
             include_instructions: false,
             config: await disabledWorkspaceSkills(frame.workingDir, frame.readOnly.sourceRoots),
@@ -483,9 +488,13 @@ async function runCopilot(frame: CallFrame, signal: AbortSignal): Promise<JsonOb
   const skillReads = new Map<string, SkillCall>();
   const skillCalls: SkillCall[] = [];
   const permissions = (frame.config.permissions ?? {}) as JsonObject;
-  const approve = async (request: JsonObject): Promise<JsonObject> => {
+  const approve = (request: JsonObject): JsonObject | Promise<JsonObject> => {
+    if (request.kind === "read" && allowedRead)
+      return allowedRead(request.path).then((allowed) =>
+        allowed ? { kind: "approve-once" } : { kind: "reject" },
+      );
     const allowed =
-      (request.kind === "read" && (!allowedRead || (await allowedRead(request.path)))) ||
+      request.kind === "read" ||
       (request.kind === "write" && permissions.filesystem === "write") ||
       (request.kind === "shell" && permissions.shell === "allow") ||
       (request.kind === "url" && permissions.network === "allow");
@@ -506,7 +515,7 @@ async function runCopilot(frame: CallFrame, signal: AbortSignal): Promise<JsonOb
       enableConfigDiscovery: false,
       // Keep general config discovery off; expose only physical workspace skill directories.
       ...(frame.readOnly
-        ? { enableSkills: false }
+        ? { enableSkills: false, skipCustomInstructions: true }
         : skillDirectories.length
           ? { enableSkills: true, skillDirectories }
           : {}),

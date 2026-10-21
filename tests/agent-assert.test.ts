@@ -267,6 +267,32 @@ test("agentAssert rejects absent, released, and non-directory workspaces without
   });
 });
 
+test("agentAssert grades when the candidate unlinked a declared read-only source", async () => {
+  await withGrader(async ({ workspace, queue, context }) => {
+    const destination = join(workspace, "source");
+    await symlink(workspace, destination, "dir");
+    await rm(destination);
+    for (const id of ["openai:codex-sdk", "anthropic:claude-agent-sdk", "copilot-sdk"] as const) {
+      await queue([{ output: verdict() }]);
+      const gradingContext = context(id);
+      const result = await agentAssert("The source was removed", {
+        ...gradingContext,
+        providerResponse: {
+          metadata: {
+            workspace: {
+              path: workspace,
+              sources: [{ destination: "source", permissions: "read-only" }],
+            },
+          },
+        },
+      });
+      assert.equal(result.pass, true, id);
+      assert.equal(result.score, 1, id);
+      assert.deepEqual(result.namedScores, { accuracy: 1, scope: 1 });
+    }
+  });
+}, 30_000);
+
 test("agentAssert supplies file changes and candidate text as untrusted inspection evidence", async () => {
   await withGrader(async ({ queue, calls, context }) => {
     await queue([{ output: verdict() }, { output: verdict() }]);

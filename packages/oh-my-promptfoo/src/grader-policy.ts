@@ -99,11 +99,14 @@ export function withinReadRoot(root: string, path: string): boolean {
 
 /** The grader may read the live workspace and declared protected source targets only. */
 export async function graderReadScope(workingDir: string, sourceRoots: string[]) {
-  const roots = await Promise.all(
-    [workingDir, ...sourceRoots.map((source) => resolve(workingDir, source))].map((path) =>
-      realpath(path),
-    ),
-  );
+  const roots = [await realpath(workingDir)];
+  for (const source of sourceRoots) {
+    try {
+      roots.push(await realpath(resolve(workingDir, source)));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+  }
   return async (path: unknown): Promise<boolean> => {
     if (typeof path !== "string" || !path || path.includes("\0")) return false;
     try {

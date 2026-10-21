@@ -95,7 +95,7 @@ export class CopilotClient {
    const decisions=[];
    for(const path of paths)decisions.push(await config.onPermissionRequest({kind:'read',path}));
    for(const kind of ['write','shell','url','mcp'])decisions.push(await config.onPermissionRequest({kind,path:paths[0]}));
-   return {data:{content:JSON.stringify({decisions,skills:config.enableSkills,skillDirectories:config.skillDirectories})}};
+   return {data:{content:JSON.stringify({decisions,skills:config.enableSkills,skipCustomInstructions:config.skipCustomInstructions,skillDirectories:config.skillDirectories})}};
   },async abort(){},async disconnect(){}
  };}
  async stop(){return [];}async forceStop(){}
@@ -172,6 +172,7 @@ test("Copilot grader reads require a real contained path and never load workspac
       ),
     );
     assert.equal(result.skills, false);
+    assert.equal(result.skipCustomInstructions, true);
     assert.equal(result.skillDirectories, undefined);
   });
 }, 20_000);
@@ -196,6 +197,7 @@ test("Codex reader accepts contained absolute paths and denies outside files and
     assert.equal(result.config.features.shell_tool, false);
     assert.equal(result.config.features.unified_exec, false);
     assert.equal(result.config.skills.include_instructions, false);
+    assert.equal(result.config.project_doc_max_bytes, 0);
     for (const parent of [".agents", ".codex"])
       assert.ok(
         result.config.skills.config.some(
