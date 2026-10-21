@@ -1,18 +1,17 @@
 # oh-my-promptfoo
 
-**Test coding agents and their skills with Promptfoo.**
+**An opinionated way to evaluate coding agents and their skills with Promptfoo.**
 
 <p>
   <a href="https://www.npmjs.com/package/oh-my-promptfoo"><img src="https://img.shields.io/npm/v/oh-my-promptfoo" alt="npm"></a>
   <a href="https://github.com/allagentsdev/oh-my-promptfoo/blob/main/LICENSE"><img src="https://img.shields.io/github/license/allagentsdev/oh-my-promptfoo" alt="License"></a>
 </p>
 
-You've written a skill, an `AGENTS.md` or a prompt for a coding agent. Does it
-work, and will it still work after the next change? oh-my-promptfoo lets you
-test it like any other Promptfoo eval. Each test gets a fresh workspace with
-the repositories and skills you choose. A real agent (Codex, Claude Code,
-GitHub Copilot or Pi) does the task there, and you grade both its answer and
-the files it changed.
+Promptfoo can already run coding agents such as Codex and Claude Code.
+oh-my-promptfoo adds the parts you end up building yourself once you test
+skills and agent instructions seriously: every test runs in its own isolated
+workspace, one judge call grades a whole list of criteria, and GitHub Copilot
+and Pi join Codex and Claude Code behind the same provider.
 
 It's a plain Promptfoo package, not a fork or a wrapper. `promptfoo eval`,
 `promptfoo view`, caching and CI work as they always do.
