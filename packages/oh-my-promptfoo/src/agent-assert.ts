@@ -69,10 +69,10 @@ function changesEvidence(input: unknown): unknown {
   return {
     status: changes.status,
     changedFiles:
-      changes.generatedFiles &&
-      typeof changes.generatedFiles === "object" &&
-      !Array.isArray(changes.generatedFiles)
-        ? Object.entries(changes.generatedFiles).map(([path, entry]) => {
+      changes.changedFiles &&
+      typeof changes.changedFiles === "object" &&
+      !Array.isArray(changes.changedFiles)
+        ? Object.entries(changes.changedFiles).map(([path, entry]) => {
             const file = entry && typeof entry === "object" ? (entry as JsonObject) : {};
             return { path, change: file.change, kind: file.kind, mode: file.mode };
           })

@@ -154,7 +154,7 @@ preserved in `tokensUsed.cost`, although Promptfoo versions may not aggregate it
 
 Codex graders require API-key auth via `grader.config.apiKey` or explicit
 `grader.env.OPENAI_API_KEY`. They do not load or copy ChatGPT `auth.json`, avoiding
-single-use refresh-token corruption. See [ADR 0007](docs/adr/0007-agent-assert-workspace-grading.md)
+single-use refresh-token corruption. See [ADR 0008](docs/adr/0008-agent-assert-workspace-grading.md)
 for the live-workspace and resource-bound tradeoffs.
 
 ## Author and run an eval

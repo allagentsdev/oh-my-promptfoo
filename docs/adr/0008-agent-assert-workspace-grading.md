@@ -1,4 +1,4 @@
-# ADR 0007: Grade the live workspace with a bounded read-only agent
+# ADR 0008: Grade the live workspace with a bounded read-only agent
 
 - Status: Accepted
 - Date: 2026-10-21

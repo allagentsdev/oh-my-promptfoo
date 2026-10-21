@@ -55,7 +55,7 @@ Multiple evaluation processes have independent queues. Reported tokens, request
 counts and cost from all attempts flow through assertion `tokensUsed`. Promptfoo
 0.122 aggregates assertion tokens but not `tokensUsed.cost`; consumers can inspect
 the returned cost directly. A time bound is not a dollar budget. See
-[ADR 0007](adr/0007-agent-assert-workspace-grading.md).
+[ADR 0008](adr/0008-agent-assert-workspace-grading.md).
 
 Codex grading requires `grader.config.apiKey` or explicit
 `grader.env.OPENAI_API_KEY`; ChatGPT login auth is not supported for graders.

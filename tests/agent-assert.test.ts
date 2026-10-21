@@ -311,7 +311,8 @@ test("agentAssert supplies file changes and candidate text as untrusted inspecti
           ...gradingContext.providerResponse.metadata,
           fileChanges: {
             status: "truncated",
-            generatedFiles: {
+            schemaVersion: 2,
+            changedFiles: {
               "input.txt": {
                 change: "modified",
                 kind: "file",
@@ -372,7 +373,8 @@ test("agentAssert supplies file changes and candidate text as untrusted inspecti
           ...gradingContext.providerResponse.metadata,
           fileChanges: {
             status: "failed",
-            generatedFiles: {},
+            schemaVersion: 2,
+            changedFiles: {},
             deletedFiles: [],
             truncated: false,
             failure,
@@ -401,7 +403,8 @@ test("agentAssert omits oversized diffs within default and configured prompt bud
     const captured = Buffer.alloc(1024 * 1024, 0xff).toString("base64");
     const fileChanges = {
       status: "complete",
-      generatedFiles: {
+      schemaVersion: 2,
+      changedFiles: {
         "input.txt": { change: "modified", kind: "file", encoding: "base64", content: captured },
       },
       deletedFiles: [],
@@ -489,7 +492,7 @@ test("agentAssert rejects oversized non-diff evidence before invoking a delegate
           providerResponse: {
             metadata: {
               ...gradingContext.providerResponse.metadata,
-              fileChanges: { generatedFiles: {}, deletedFiles: [huge] },
+              fileChanges: { schemaVersion: 2, changedFiles: {}, deletedFiles: [huge] },
             },
           },
         },
