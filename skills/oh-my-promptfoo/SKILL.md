@@ -184,9 +184,8 @@ for versioned upstream sources and the strict-unset/literal-disable safeguards.
 ## Grading an agent's answer
 
 `llmAssert` sees only the final answer, never tool calls, commands or the
-workspace, and adds no rule of its own about narrated work; there is no
-`candidate` switch, and a config that sets one fails. When the answer comes from
-an agent, state the rule visibly in the suite's `rubricPrompt`:
+workspace, and adds no rule of its own about narrated work. When the answer
+comes from an agent, state the rule visibly in the suite's `rubricPrompt`:
 
 ```yaml
 assert:
@@ -194,7 +193,7 @@ assert:
     value: package:oh-my-promptfoo/assertions:llmAssert
     config:
       rubricPrompt: |
-        Credit only what the answer itself shows. Do not credit a claim that a tool was called, a command was run, a file was inspected, created, edited or deleted, a build or test was run, or an external query was made.
+        Credit only what the answer shows, not claimed actions (tool calls, commands, file reads or edits, builds, tests, queries).
       components:
         - metric: root-cause
           value: The answer names the missing null check in parsePrice as the cause.
