@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.13.0](https://github.com/allagentsdev/oh-my-promptfoo/compare/v1.12.0...v1.13.0) (2026-10-21)
+
+
+### Features
+
+* **assertions:** take llmAssert suite instructions as rubricPrompt and render test variables ([#75](https://github.com/allagentsdev/oh-my-promptfoo/issues/75)) ([6d9acef](https://github.com/allagentsdev/oh-my-promptfoo/commit/6d9acefa323da1200e11322b540242ee46d2add6))
+
 ## [1.12.0](https://github.com/allagentsdev/oh-my-promptfoo/compare/v1.11.0...v1.12.0) (2026-10-21)
 
 
