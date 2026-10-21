@@ -318,14 +318,16 @@ try {
         providers: ["echo"],
         tests: [
           {
+            vars: { subject: "the packaged build" },
             assert: [
               {
                 type: "javascript",
                 value: "package:oh-my-promptfoo/assertions:llmAssert",
                 config: {
                   threshold: 0.7,
+                  rubricPrompt: "Judge only {{ subject }}.",
                   components: [
-                    { metric: "accuracy", value: "Ground claims", weight: 3 },
+                    { metric: "accuracy", value: "Ground claims about {{ subject }}", weight: 3 },
                     { metric: "clarity", value: "Explain clearly" },
                   ],
                 },
@@ -380,6 +382,11 @@ try {
       judgeRequests[0].body.model !== "fake-grader" ||
       judgeRequests[0].body.messages[0].role !== "system" ||
       judgeRequests[0].body.messages[1].role !== "user" ||
+      // Test variables render through the Nunjucks Promptfoo installs, from the packed build.
+      !judgeRequests[0].body.messages[0].content.includes("Judge only the packaged build.") ||
+      !judgeRequests[0].body.messages[0].content.includes(
+        "- accuracy: Ground claims about the packaged build",
+      ) ||
       grade?.score !== 0.925 ||
       grade?.namedScores?.accuracy !== 1 ||
       grade?.namedScores?.clarity !== 0.7 ||
