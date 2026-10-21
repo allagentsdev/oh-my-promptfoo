@@ -1,6 +1,6 @@
 # ADR 0004: Name the llmAssert scoring mode rather than count its steps
 
-- Status: Accepted
+- Status: Accepted; Superseded for the `candidate` field by [ADR 0009](0009-remove-llm-assert-candidate.md)
 - Date: 2026-10-21
 
 ## Context
@@ -26,6 +26,8 @@ The enum does not block the generalisation. A future scale rubric is `scoring: "
 
 Each new scoring style costs an enum value and its prompt text, rather than falling out of arithmetic. That is accepted: a style worth supporting is worth describing, and the set is expected to stay small.
 
+> Superseded by [ADR 0009](0009-remove-llm-assert-candidate.md): `candidate` was removed, and a suite grading an agent's answer states that rule in `rubricPrompt`. The two paragraphs below are kept as history.
+
 `scoring` and `candidate` remain orthogonal. `candidate: agent` states what is being graded — an answer that narrates work the judge cannot verify — and is useful under either scoring mode, so collapsing both into one `mode` would conflate the two questions.
 
 The agent rule explicitly includes claims of edited or deleted files and build or test runs. This makes `candidate: agent` slightly stricter for callers who relied on crediting edit/build/test claims. That is intended: these are narrated actions the judge cannot verify, just like tool calls and file creation, so generic coding-agent suites should not need a repeated `rubricPrompt` workaround.
@@ -34,6 +36,6 @@ The default stays `graded` with no added instructions. Its bar also follows Prom
 
 ### Prompt wording revision
 
-The base prompt now changes for every caller, including `graded`, revising the earlier choice to keep its wording stable. The base, binary and agent instructions consistently call the graded content an "answer", remove duplicate instructions, and state the evidence-only and no-restatement rules without ambiguous conjunctions. No rule was removed: the JSON reply contract, instruction isolation, evidence requirements, binary checklist semantics and separate skill check remain, as do the `rubricPrompt` heading and criteria block. Binary and agent additions still apply only to their respective modes.
+The base prompt now changes for every caller, including `graded`, revising the earlier choice to keep its wording stable. The base, binary and agent instructions consistently call the graded content an "answer", remove duplicate instructions, and state the evidence-only and no-restatement rules without ambiguous conjunctions. No rule was removed: the JSON reply contract, instruction isolation, evidence requirements, binary checklist semantics and separate skill check remain, as do the `rubricPrompt` heading and criteria block. Binary and agent additions still apply only to their respective modes. (The `candidate: agent` addition is superseded by [ADR 0009](0009-remove-llm-assert-candidate.md); `llmAssert` no longer adds it, and only `agentAssert` keeps an agent rule.)
 
 Although the rewrite preserves those rules, graded and binary callers may see small score movement because judge models can respond differently to equivalent wording. This is an intentional clarity tradeoff, separate from the stricter treatment of unverified edit/build/test claims above.

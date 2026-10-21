@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto";
-import { constants, createWriteStream } from "node:fs";
+import { constants, createWriteStream, lstatSync } from "node:fs";
 import type { FileHandle } from "node:fs/promises";
 import { chmod, lstat, open, readdir, realpath } from "node:fs/promises";
-import { isAbsolute, join, relative, resolve, sep } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { canonicalJson } from "../config.js";
@@ -23,6 +23,26 @@ export function localEntries(source: ResolvedLocalSource): readonly LocalEntry[]
 const ordered = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 const READ_FLAGS = constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK;
 
+/**
+ * The default containment boundary for local sources: the root of the Git repository holding
+ * `basePath` (the nearest ancestor with a `.git` entry, which is a file in worktrees and
+ * submodules), or `basePath` itself outside any repository. `ALLAGENTS_LOCAL_SOURCE_ROOT`
+ * replaces it. See docs/adr/0009-resolve-provider-paths-against-the-eval-config.md.
+ */
+export function localSourceBoundary(basePath: string): string {
+  const start = resolve(basePath);
+  for (let directory = start; ; directory = dirname(directory)) {
+    try {
+      lstatSync(join(directory, ".git"));
+      return directory;
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code !== "ENOENT" && code !== "ENOTDIR") throw error;
+    }
+    if (dirname(directory) === directory) return start;
+  }
+}
+
 function sourceRoot(source: LocalSource, channels: RuntimeChannels): string {
   if (process.platform !== "linux")
     throw new Error("Local source acquisition requires Linux descriptor-anchored traversal");
@@ -33,7 +53,7 @@ function sourceRoot(source: LocalSource, channels: RuntimeChannels): string {
   const path = resolve(source.path);
   const rel = relative(trusted, path);
   if (rel === ".." || rel.startsWith(`..${sep}`) || rel.startsWith(sep))
-    throw new Error("Local source must stay inside trusted source root");
+    throw new Error(`Local source must stay inside trusted source root ${JSON.stringify(trusted)}`);
   if (path.split(sep).includes(".git")) throw new Error("Local source cannot select Git metadata");
   return path;
 }

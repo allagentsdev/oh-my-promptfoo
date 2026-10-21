@@ -28,6 +28,10 @@ A source request paired with the immutable identity selected during preparation:
 
 The complete declaration of source requests, destinations, and source permissions for an agent run. The workspace itself is private and writable. The specification contains no credentials or arbitrary commands and is normalized by destination for identity.
 
+## Local source boundary
+
+The directory that a `type: local` source must stay inside. A relative source path first resolves against the eval config's directory, which Promptfoo's loader passes as `basePath`, also for providers included from another file. The boundary defaults to the root of the Git repository containing that directory, or the directory itself outside a repository. A runner's absolute `ALLAGENTS_LOCAL_SOURCE_ROOT` replaces it.
+
 ## Seed cache
 
 The package-owned, content-addressed store outside provider runtime roots. Published immutable seeds and verification metadata are separate from mutable leases, protected prepared checkouts, locks, staging, and trash. Seeds are keyed by resolved acquisition identities and destinations, not source permissions. Hosted workflows may restore only published seeds into a fresh runner and must validate them before use; live shared caches keep their leases until dependent workspaces are detached. Successful workspace cleanup releases leases but keeps reusable seeds.

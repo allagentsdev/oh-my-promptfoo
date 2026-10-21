@@ -24,8 +24,15 @@ npm install --save-dev @earendil-works/pi-coding-agent@1.3.0 # Pi only
 
 Set the agent credential through `delegate.env` in authored evals. Set
 `OPENAI_API_KEY` and `OPENAI_MODEL` separately when using `llmAssert`. OCI inputs
-require ORAS 1.x through `ALLAGENTS_ORAS_PATH`. A trusted runner must provide
-`ALLAGENTS_LOCAL_SOURCE_ROOT` before acquiring `type: local` sources.
+require ORAS 1.x through `ALLAGENTS_ORAS_PATH`.
+
+A relative `type: local` `path`, such as `../plugins/x/skills`, or a relative
+`file://` Git repository resolves against the eval config's directory, like
+Promptfoo's own `file://` references. This includes providers loaded from
+`providers: file://…`. Local sources must stay inside the Git repository that
+contains that directory, or inside the directory itself when it is not in a
+repository. A trusted runner can replace that boundary with an absolute
+`ALLAGENTS_LOCAL_SOURCE_ROOT`.
 
 The workspace provider supports `openai:codex-sdk`, `anthropic:claude-agent-sdk`,
 `copilot-sdk`, and `pi-sdk`. Select each with a labeled provider entry.
@@ -61,12 +68,6 @@ into every rubric by hand.
 The default, `graded`, trusts the judge's verdict, adds no bar unless you state
 one, and says nothing about how to score. Partial credit for a near miss is
 what graded is for, so none of the checklist rules apply to it.
-
-Set `config.candidate: agent` when the output is an agent's answer, and the
-judge is also told to credit only what the answer states — never an unverified
-claim of a tool call, executed command, inspected, created, edited or deleted
-file, build or test run, or external query — and that skill retrieval is gated
-elsewhere.
 
 Put what only the suite knows, such as which claims its domain counts as
 unverified, in `config.rubricPrompt`. Unlike `llm-rubric`, it cannot replace the
@@ -109,6 +110,29 @@ It reports the judge call's token usage back to Promptfoo, which records it unde
 `tokenUsage.assertions` — grader spend, separate from the agent under test. A
 grader that returns no usage reports nothing rather than zero, so an unmeasured
 call is never summed into a run total as a free one.
+
+### Grading an agent's answer
+
+`llmAssert` sees only the final answer, never the agent's tool calls, commands
+or workspace, and it adds no rule of its own about narrated work. When the
+answer comes from an agent, state that rule in the suite's `rubricPrompt`,
+where anyone reading the config can see it:
+
+```yaml
+assert:
+  - type: javascript
+    value: package:oh-my-promptfoo/assertions:llmAssert
+    config:
+      rubricPrompt: |
+        Credit only what the answer shows, not claimed actions (tool calls, commands, file reads or edits, builds, tests, queries).
+      components:
+        - metric: root-cause
+          value: The answer names the missing null check in parsePrice as the cause.
+```
+
+Leave the rule out when narrated actions are the expected output, such as a
+support bot replying "I've cancelled your order". To grade real edits, use
+`agentAssert` below or a JavaScript assertion that reads the workspace.
 
 ### Grade workspace changes with an agent
 
