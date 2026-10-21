@@ -114,7 +114,7 @@ assert:
   - type: javascript
     value: package:oh-my-promptfoo/assertions:llmAssert
     config:
-      threshold: 0.7
+      scoring: binary
       components:
         - metric: schema-evidence
           value: Cites the concrete schema fact supporting the recommendation.
@@ -122,13 +122,15 @@ assert:
           value: Checks the change for unintended row updates.
 ```
 
-`threshold` is the bar for one component's score, not an aggregate: the
+A component passes when the judge's verdict is not false. `threshold` adds a
+numeric bar on top of that verdict, per component rather than as an aggregate,
+and there is no default — the same contract as Promptfoo's `llm-rubric`. The
 assertion passes only when every component passes. For a checklist, where a
-criterion is either met or not, set `scoring: binary` instead of a threshold.
-The judge is then told to score exactly 1 or 0 and never award partial credit,
-and the bar becomes a full score, so the rule does not have to be repeated in
-each suite's `rubric`. Keep `rubric` for guidance only this suite needs, such
-as which claims count as unverified.
+criterion is either met or not, set `scoring: binary` rather than a threshold:
+the judge is told to score exactly 1 or 0, to keep each criterion's scope and
+polarity, and the bar becomes a full score, so none of that has to be repeated
+in each suite's `rubric`. Keep `rubric` for guidance only this suite needs,
+such as which claims its domain counts as unverified.
 
 ## Prove the run
 

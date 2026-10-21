@@ -26,10 +26,12 @@ require ORAS 1.x through `ALLAGENTS_ORAS_PATH`. A trusted runner must provide
 `ALLAGENTS_LOCAL_SOURCE_ROOT` before acquiring `type: local` sources.
 
 `llmAssert` batches named criteria into one judge request. A component passes
-only when its judge verdict is not false and its numeric score meets
-`config.threshold` (default `0.7`). When batching equally weighted rubrics
-alongside other assertions, set the outer Promptfoo `weight` to the number of
-components to preserve the test's weighted score.
+when its judge verdict is not false, and `config.threshold` adds a numeric bar
+on top of that verdict when you state one — the same contract as Promptfoo's
+own `llm-rubric`, which applies a threshold only when the assertion carries
+one. There is no default bar. When batching equally weighted rubrics alongside
+other assertions, set the outer Promptfoo `weight` to the number of components
+to preserve the test's weighted score.
 
 Set `config.scoring: binary` for a checklist, where a criterion is either met or
 not. The judge is told to score exactly 1 or 0 and never award partial credit,
@@ -40,10 +42,9 @@ becomes a full score, so a `threshold` beside the mode that is not 1
 contradicts it and is rejected. Stating the mode replaces writing those rules
 into every rubric by hand.
 
-The default, `graded`, is unchanged: the 0.7 bar, and no instruction about how
-to score. Partial credit for a near miss is what graded is for, so none of the
-checklist rules apply to it and upgrading cannot move an existing caller's
-scores.
+The default, `graded`, trusts the judge's verdict, adds no bar unless you state
+one, and says nothing about how to score. Partial credit for a near miss is
+what graded is for, so none of the checklist rules apply to it.
 
 Set `config.candidate: agent` when the output is an agent's answer, and the
 judge is also told to credit only what the answer states — never a claimed tool

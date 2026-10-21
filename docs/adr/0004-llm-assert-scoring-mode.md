@@ -28,4 +28,4 @@ Each new scoring style costs an enum value and its prompt text, rather than fall
 
 `scoring` and `candidate` remain orthogonal. `candidate: agent` states what is being graded — an answer that narrates work the judge cannot verify — and is useful under either scoring mode, so collapsing both into one `mode` would conflate the two questions.
 
-The default stays `graded` with its existing `0.7` threshold and no added instructions, so upgrading cannot move an existing caller's scores.
+The default stays `graded` with no added instructions. Its bar also follows Promptfoo rather than this package: `llm-rubric` gates on the judge's verdict and applies a numeric threshold only when the assertion states one, so `llmAssert` dropped the `0.7` default it had invented. A drop-in replacement that grades more strictly than the assertion it replaces is the kind of surprise that costs adoption, and the audience here is Promptfoo users rather than migrants from any one harness.

@@ -16,17 +16,18 @@ type Grade = { metric: string; score: number; reason: string; pass?: boolean };
 type GraderResponse = { components?: unknown };
 
 const DEFAULT_BASE_URL = "https://api.openai.com/v1";
-const DEFAULT_THRESHOLD = 0.7;
 
 /** Score all named criteria with one judge request; every criterion must pass. */
 export async function llmAssert(output: unknown, context?: { config?: BatchedRubricConfig }) {
   const config = context?.config;
   const components = config?.components;
   const scoring = config?.scoring ?? "graded";
-  // Binary scoring is a checklist: a criterion is met or it is not, so the only
-  // coherent pass mark is a full score. Callers that state the mode should not also
-  // have to state the bar, and a conflicting bar is a mistake worth reporting.
-  const threshold = scoring === "binary" ? 1 : (config?.threshold ?? DEFAULT_THRESHOLD);
+  // Promptfoo's own llm-rubric gates on the judge's pass flag and applies a numeric
+  // threshold only when the caller states one. Inventing a default bar here would make a
+  // drop-in replacement quietly stricter than the assertion it replaces, so an unstated
+  // threshold stays unstated. `binary` is the exception and says so: a checklist item is
+  // met or it is not, so the bar is a full score and a conflicting one is rejected.
+  const threshold = scoring === "binary" ? 1 : config?.threshold;
   if (
     !config ||
     !Array.isArray(components) ||
@@ -44,10 +45,11 @@ export async function llmAssert(output: unknown, context?: { config?: BatchedRub
             component.weight > 0)),
     ) ||
     new Set(components.map(({ metric }) => metric)).size !== components.length ||
-    typeof threshold !== "number" ||
-    !Number.isFinite(threshold) ||
-    threshold < 0 ||
-    threshold > 1 ||
+    (threshold !== undefined &&
+      (typeof threshold !== "number" ||
+        !Number.isFinite(threshold) ||
+        threshold < 0 ||
+        threshold > 1)) ||
     (config.rubric !== undefined && (typeof config.rubric !== "string" || !config.rubric.trim())) ||
     (config.scoring !== undefined && config.scoring !== "graded" && config.scoring !== "binary") ||
     (scoring === "binary" && config.threshold !== undefined && config.threshold !== 1) ||
@@ -174,7 +176,7 @@ export async function llmAssert(output: unknown, context?: { config?: BatchedRub
     const grade = grades.get(metric);
     if (!grade) throw new Error(`LLM grader did not score component: ${metric}`);
     const effectiveWeight = weight ?? 1;
-    const pass = (grade.pass ?? true) && grade.score >= threshold;
+    const pass = (grade.pass ?? true) && (threshold === undefined || grade.score >= threshold);
     weightedScore += grade.score * effectiveWeight;
     allPassed &&= pass;
     namedScores[metric] = grade.score;
@@ -184,7 +186,13 @@ export async function llmAssert(output: unknown, context?: { config?: BatchedRub
       pass,
       score: grade.score,
       reason: grade.reason,
-      assertion: { type: "llm-rubric", metric, value, threshold, weight: effectiveWeight },
+      assertion: {
+        type: "llm-rubric",
+        metric,
+        value,
+        weight: effectiveWeight,
+        ...(threshold === undefined ? {} : { threshold }),
+      },
     };
   });
   const score = weightedScore / totalWeight;

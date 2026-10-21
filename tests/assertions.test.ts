@@ -440,6 +440,37 @@ test("binary scoring states the checklist rule to the judge and fixes the bar at
       }),
       /candidate of 'text' or 'agent'/,
     );
+
+    // Promptfoo's llm-rubric trusts the judge's verdict and only adds a numeric bar when
+    // the caller states one. A drop-in replacement that invented a default bar would fail
+    // rows the assertion it replaces would pass, which is the surprise worth avoiding.
+    responses.push({
+      components: [
+        { metric: "accuracy", score: 0.3, reason: "Thin but acceptable", pass: true },
+        { metric: "clarity", score: 0.4, reason: "Acceptable", pass: true },
+      ],
+    });
+    const trusted = await llmAssert("candidate answer", { config: { components } });
+    assert.equal(trusted.pass, true);
+
+    // The judge's own verdict still gates when it says no, whatever the score.
+    responses.push({
+      components: [
+        { metric: "accuracy", score: 0.95, reason: "Close, but wrong claim", pass: false },
+        { metric: "clarity", score: 1, reason: "Plain" },
+      ],
+    });
+    assert.equal((await llmAssert("candidate answer", { config: { components } })).pass, false);
+
+    // A stated threshold is an extra constraint on top of that verdict, as in promptfoo.
+    responses.push({
+      components: [
+        { metric: "accuracy", score: 0.3, reason: "Thin", pass: true },
+        { metric: "clarity", score: 1, reason: "Plain" },
+      ],
+    });
+    const barred = await llmAssert("candidate answer", { config: { threshold: 0.5, components } });
+    assert.equal(barred.pass, false);
   } finally {
     server.close();
     restoreEnvironment(previous);
