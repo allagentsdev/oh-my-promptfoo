@@ -40,10 +40,10 @@ other assertions, set the outer Promptfoo `weight` to the number of components
 to preserve the test's weighted score.
 
 Set `config.scoring: binary` for a checklist, where a criterion is either met or
-not. The judge is told to score exactly 1 or 0 and never award partial credit,
-to preserve each criterion's subject, condition, polarity and scope rather than
-accept an easier promise, and to treat a criterion whose condition the output
-never enters as satisfied so long as nothing it forbids occurs. The pass mark
+not. The judge is told to score 1 if the answer fully meets a criterion and 0
+otherwise, to keep its subject, condition, polarity and scope rather than accept
+a weaker promise, and to treat a criterion whose condition the answer never
+reaches as met if the answer does nothing it forbids. The pass mark
 becomes a full score, so a `threshold` beside the mode that is not 1
 contradicts it and is rejected. Stating the mode replaces writing those rules
 into every rubric by hand.
