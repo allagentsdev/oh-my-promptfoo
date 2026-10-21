@@ -186,6 +186,10 @@ for versioned upstream sources and the strict-unset/literal-disable safeguards.
 3. Check `metadata.workspace.sources` for resolved source commits/digests and
    `metadata.workspace.path` while assertions run. Enable `fileChanges: true`
    only when the result needs agent-produced after-bytes and diffs.
+   Read `metadata.fileChanges.changedFiles` for added and modified files
+   (`schemaVersion: 2`); each entry has `change: "added" | "modified"` and
+   base64 `content`. Read `deletedFiles` for removals and check `status` before
+   relying on complete evidence.
 
 The default cwd is the private workspace root. An optional case-private
 `agent-workspace/` directory can be staged and selected with

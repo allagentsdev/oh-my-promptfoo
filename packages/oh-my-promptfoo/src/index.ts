@@ -213,9 +213,9 @@ export class Provider extends Calls {
             fileChanges = baseline
               ? await captureFileChanges(handle, baseline)
               : {
-                  schemaVersion: 1,
+                  schemaVersion: 2,
                   status: "failed",
-                  generatedFiles: {},
+                  changedFiles: {},
                   deletedFiles: [],
                   truncated: false,
                   failure: {

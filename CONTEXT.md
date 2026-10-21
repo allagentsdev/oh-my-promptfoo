@@ -72,6 +72,8 @@ The generic `providerResponse.metadata.workspace` block containing schema versio
 
 The optional bounded agent-attributed result at `providerResponse.metadata.fileChanges`. When enabled, the provider captures exact generated or modified after-bytes, deleted paths, and an optional unified diff after the delegate has fully stopped. The result is durable evaluation data; it does not extend checkout lifetime.
 
+The record uses `schemaVersion: 2`: `changedFiles` holds added and modified files, distinguished by each entry's `change: "added" | "modified"`; `deletedFiles` records removals.
+
 ## Workspace provenance
 
 The manifest digest and resolved Git commits or OCI digests that identify a checkout's immutable inputs. It is durable metadata and contains no local filesystem path.

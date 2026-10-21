@@ -116,3 +116,8 @@ npx promptfoo eval -c promptfooconfig.yaml
 `Provider` starts the agent at its private workspace root unless `workingDir`
 selects a prepared subdirectory. The optional `agent-workspace/` sibling layout
 is documented in the provider guide; the root layout remains the default.
+
+Enable `fileChanges: true` to capture durable file-change evidence in
+`metadata.fileChanges` (schemaVersion 2). `changedFiles` contains added and
+modified files, each with `change: "added" | "modified"` and base64 after-bytes;
+`deletedFiles` and the optional diff record the remaining changes.
