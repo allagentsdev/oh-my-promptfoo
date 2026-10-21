@@ -1,4 +1,4 @@
-# ADR 0009: Resolve Provider file paths against the eval config
+# ADR 0010: Resolve Provider file paths against the eval config
 
 - Status: Accepted
 - Date: 2026-10-22
