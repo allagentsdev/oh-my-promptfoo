@@ -34,24 +34,26 @@ test("capture records exact after bytes, deletions, modes, symlinks and root add
     await symlink(binaryLinkTarget, join(path, "binary-link"), "file");
     const result = await captureFileChanges(handle, baseline);
     expect(result.status).toBe("complete");
+    expect(result.schemaVersion).toBe(2);
     if (result.status === "failed") throw new Error(result.failure.message);
-    expect(Buffer.from(result.generatedFiles["binary.bin"].content, "base64")).toEqual(
+    expect(Buffer.from(result.changedFiles["binary.bin"].content, "base64")).toEqual(
       Buffer.from([0, 255, 128]),
     );
-    expect(result.generatedFiles["old.txt"].change).toBe("modified");
+    expect(result.changedFiles["binary.bin"].change).toBe("added");
+    expect(result.changedFiles["old.txt"].change).toBe("modified");
     expect(result.deletedFiles).toEqual(["delete.txt"]);
-    expect(result.generatedFiles["run.sh"].mode).toBe(
+    expect(result.changedFiles["run.sh"].mode).toBe(
       process.platform === "win32" ? "100644" : "100755",
     );
-    expect(result.generatedFiles.link.kind).toBe("symlink");
-    expect(result.generatedFiles["binary-link"].kind).toBe("symlink");
-    expect(result.generatedFiles["binary-link"].mode).toBe("120000");
-    expect(Buffer.from(result.generatedFiles["binary-link"].content, "base64")).toEqual(
+    expect(result.changedFiles.link.kind).toBe("symlink");
+    expect(result.changedFiles["binary-link"].kind).toBe("symlink");
+    expect(result.changedFiles["binary-link"].mode).toBe("120000");
+    expect(Buffer.from(result.changedFiles["binary-link"].content, "base64")).toEqual(
       process.platform === "win32"
         ? await readlink(join(path, "binary-link"), { encoding: "buffer" })
         : Buffer.from([255]),
     );
-    expect(Buffer.from(result.generatedFiles.link.content, "base64")).toEqual(
+    expect(Buffer.from(result.changedFiles.link.content, "base64")).toEqual(
       process.platform === "win32"
         ? await readlink(join(path, "link"), { encoding: "buffer" })
         : Buffer.from("/outside/not-read"),
@@ -107,7 +109,7 @@ test("baseline ignore rules remain frozen when agent replaces .gitignore", async
     const result = await captureFileChanges(handle, baseline);
     expect(result.status).toBe("complete");
     if (result.status === "failed") throw Error(result.failure.message);
-    expect(Object.keys(result.generatedFiles).sort()).toEqual([".gitignore", "kept.tmp"]);
+    expect(Object.keys(result.changedFiles).sort()).toEqual([".gitignore", "kept.tmp"]);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -180,9 +182,9 @@ test("immutable Git baseline survives agent commits, staging, ignored tracked fi
     const result = await captureFileChanges(handle, baseline);
     expect(result.status).toBe("complete");
     if (result.status === "failed") throw Error(result.failure.message);
-    expect(result.generatedFiles["source/ignored-dir/tracked.txt"].change).toBe("modified");
-    expect(result.generatedFiles["source/tracked.txt"].change).toBe("modified");
-    expect(result.generatedFiles["source/ignored.txt"]).toBeUndefined();
+    expect(result.changedFiles["source/ignored-dir/tracked.txt"].change).toBe("modified");
+    expect(result.changedFiles["source/tracked.txt"].change).toBe("modified");
+    expect(result.changedFiles["source/ignored.txt"]).toBeUndefined();
     expect(await readFile(join(source, ".git/index"))).toEqual(finalIndex);
   } finally {
     await rm(root, { recursive: true, force: true });
@@ -211,8 +213,8 @@ test("nested ignore overrides and rules beyond baseline byte budget remain froze
     await writeFile(join(root, "z", ".gitignore"), "");
     const result = await captureFileChanges(handle, baseline);
     if (result.status === "failed") throw Error(result.failure.message);
-    expect(result.generatedFiles["z/keep.log"]).toBeDefined();
-    expect(result.generatedFiles["z/ignored.txt"]).toBeUndefined();
+    expect(result.changedFiles["z/keep.log"]).toBeDefined();
+    expect(result.changedFiles["z/ignored.txt"]).toBeUndefined();
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -248,8 +250,8 @@ test("replacement of a protected link captures row-owned files without following
     await writeFile(join(path, "project", "new"), "after");
     const result = await captureFileChanges(handle, baseline);
     if (result.status === "failed") throw Error(result.failure.message);
-    expect(result.generatedFiles["project/new"]).toBeDefined();
-    expect(result.generatedFiles["project/private"]).toBeUndefined();
+    expect(result.changedFiles["project/new"]).toBeDefined();
+    expect(result.changedFiles["project/private"]).toBeUndefined();
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -273,12 +275,12 @@ test("aggregate change bytes truncate explicitly without retaining all candidate
     if (result.status !== "truncated") throw Error("Expected bounded result");
     expect(result.truncation.codes).toContain("TOTAL_BYTES");
     expect(
-      Object.values(result.generatedFiles).reduce(
+      Object.values(result.changedFiles).reduce(
         (n, f) => n + Buffer.from(f.content, "base64").length,
         0,
       ),
     ).toBeLessThanOrEqual(4 * 1024 * 1024);
-    expect(Object.keys(result.generatedFiles)).toHaveLength(16);
+    expect(Object.keys(result.changedFiles)).toHaveLength(16);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

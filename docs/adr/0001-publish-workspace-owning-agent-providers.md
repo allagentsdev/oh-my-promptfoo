@@ -1,6 +1,6 @@
 # ADR 0001: Publish a workspace-owning Promptfoo integration package
 
-- Status: Superseded for naming by [ADR 0002](0002-rename-promptfoo-x.md)
+- Status: Superseded for naming by [ADR 0002](0002-rename-promptfoo-x.md); Superseded for the file-change field by [ADR 0007](0007-rename-file-change-capture-field.md)
 - Date: 2026-09-29
 
 ## Context

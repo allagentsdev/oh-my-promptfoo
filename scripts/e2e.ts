@@ -142,7 +142,7 @@ try {
         {
           type: "javascript",
           value:
-            "\nreturn import('node:fs').then(fs=>{ const m=context.providerResponse.metadata; const p=m.workspace.path; return m.workspace.cleanup==='best-effort-evaluation' && fs.readFileSync(p+'/result.txt','utf8')===context.vars.task && fs.readFileSync(p+'/project/input.txt','utf8')==='immutable input\\n' && m.fileChanges.status==='complete' && Buffer.from(m.fileChanges.generatedFiles['result.txt'].content,'base64').toString()===context.vars.task;});",
+            "\nreturn import('node:fs').then(fs=>{ const m=context.providerResponse.metadata; const p=m.workspace.path; return m.workspace.cleanup==='best-effort-evaluation' && fs.readFileSync(p+'/result.txt','utf8')===context.vars.task && fs.readFileSync(p+'/project/input.txt','utf8')==='immutable input\\n' && m.fileChanges.status==='complete' && m.fileChanges.schemaVersion===2 && Buffer.from(m.fileChanges.changedFiles['result.txt'].content,'base64').toString()===context.vars.task;});",
         },
         {
           type: "javascript",

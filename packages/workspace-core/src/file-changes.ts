@@ -40,8 +40,8 @@ export interface CapturedFile extends Omit<Entry, "bytes" | "omittedCode"> {
   content: string;
 }
 interface Result {
-  schemaVersion: 1;
-  generatedFiles: Record<string, CapturedFile>;
+  schemaVersion: 2;
+  changedFiles: Record<string, CapturedFile>;
   deletedFiles: string[];
   diff?: { format: "unified"; content: string; truncated: boolean };
 }
@@ -53,9 +53,9 @@ export type FileChanges =
       truncation: { codes: string[]; omittedPaths: string[] };
     })
   | {
-      schemaVersion: 1;
+      schemaVersion: 2;
       status: "failed";
-      generatedFiles: Record<string, never>;
+      changedFiles: Record<string, never>;
       deletedFiles: [];
       truncated: false;
       failure: { code: string; message: string };
@@ -300,7 +300,7 @@ export async function captureFileChanges(
   try {
     if (baseline.failure) throw Error(baseline.failure);
     const after = await walk(handle, baseline.ignored, false, baseline.tracked, baseline);
-    const generatedFiles: Record<string, CapturedFile> = {};
+    const changedFiles: Record<string, CapturedFile> = {};
     const deletedFiles: string[] = [];
     const omittedPaths: string[] = [];
     const codes = new Set<string>();
@@ -340,7 +340,7 @@ export async function captureFileChanges(
           continue;
         }
         total += current.bytes.length;
-        Object.defineProperty(generatedFiles, path, {
+        Object.defineProperty(changedFiles, path, {
           enumerable: true,
           value: {
             kind: current.kind,
@@ -384,8 +384,8 @@ export async function captureFileChanges(
       }
     }
     const result: Result = {
-      schemaVersion: 1,
-      generatedFiles,
+      schemaVersion: 2,
+      changedFiles,
       deletedFiles,
       ...(diff || diffTruncated
         ? { diff: { format: "unified" as const, content: diff, truncated: diffTruncated } }
@@ -403,9 +403,9 @@ export async function captureFileChanges(
       : { ...result, status: "complete", truncated: false };
   } catch (error) {
     return {
-      schemaVersion: 1,
+      schemaVersion: 2,
       status: "failed",
-      generatedFiles: {},
+      changedFiles: {},
       deletedFiles: [],
       truncated: false,
       failure: {

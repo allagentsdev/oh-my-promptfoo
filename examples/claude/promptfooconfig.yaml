@@ -19,4 +19,4 @@ tests:
       - type: javascript
         value: |
           const changes = context.providerResponse.metadata.fileChanges;
-          return changes.status === 'complete' && Buffer.from(changes.generatedFiles['hello.txt'].content, 'base64').toString().includes('Hello world');
+          return changes.status === 'complete' && Buffer.from(changes.changedFiles['hello.txt'].content, 'base64').toString().includes('Hello world');
