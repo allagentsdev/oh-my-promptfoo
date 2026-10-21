@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.14.0](https://github.com/allagentsdev/oh-my-promptfoo/compare/v1.13.0...v1.14.0) (2026-10-21)
+
+
+### Features
+
+* **assertions:** match llm-rubric template features ([#79](https://github.com/allagentsdev/oh-my-promptfoo/issues/79)) ([98f25f7](https://github.com/allagentsdev/oh-my-promptfoo/commit/98f25f7370246c675ce2b9503819fa40a0eef5dc)), closes [#78](https://github.com/allagentsdev/oh-my-promptfoo/issues/78)
+* **assertions:** tighten the llmAssert grader prompt and treat claimed edits, builds and tests as unverified ([#81](https://github.com/allagentsdev/oh-my-promptfoo/issues/81)) ([0fe9463](https://github.com/allagentsdev/oh-my-promptfoo/commit/0fe946382d411ade2c35ea41ac348f064cc44ea8))
+
 ## [1.13.0](https://github.com/allagentsdev/oh-my-promptfoo/compare/v1.12.0...v1.13.0) (2026-10-21)
 
 
