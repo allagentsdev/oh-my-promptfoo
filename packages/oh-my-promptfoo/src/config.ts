@@ -326,7 +326,8 @@ export function resolveSourcePaths(workspace: WorkspaceSpec, basePath: string): 
         source.repository.startsWith("file://")
       ) {
         const path = source.repository.slice("file://".length);
-        if (path && !isAbsolute(path) && path !== "localhost" && !path.startsWith("localhost/"))
+        // URL hosts are case-insensitive: `file://LOCALHOST/abs` is as absolute as `file:///abs`.
+        if (path && !isAbsolute(path) && !/^localhost(\/|$)/i.test(path))
           return { ...source, repository: pathToFileURL(resolve(basePath, path)).href };
       }
       return raw;

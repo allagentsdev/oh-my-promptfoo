@@ -214,6 +214,12 @@ describe("closed configuration", () => {
           },
           {
             type: "git",
+            repository: "file://LOCALHOST/abs/repo.git",
+            ref: "main",
+            destination: "g",
+          },
+          {
+            type: "git",
             repository: "https://example.test/repo.git",
             ref: "main",
             destination: "f",
@@ -228,6 +234,7 @@ describe("closed configuration", () => {
       "file:///suite/repo.git",
       "file:///abs/repo.git",
       "file://localhost/abs/repo.git",
+      "file://LOCALHOST/abs/repo.git",
       "https://example.test/repo.git",
     ]);
   });
