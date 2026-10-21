@@ -115,7 +115,7 @@ assert:
     value: package:oh-my-promptfoo/assertions:llmAssert
     config:
       rubricPrompt: |
-        Credit only what the answer itself shows. Do not credit a claim that a tool was called, a command was run, a file was inspected, created, edited or deleted, a build or test was run, or an external query was made.
+        Credit only what the answer shows, not claimed actions (tool calls, commands, file reads or edits, builds, tests, queries).
       components:
         - metric: root-cause
           value: The answer names the missing null check in parsePrice as the cause.
@@ -123,10 +123,7 @@ assert:
 
 Leave the rule out when narrated actions are the expected output, such as a
 support bot replying "I've cancelled your order". To grade real edits, use
-`agentAssert` below or a JavaScript assertion that reads the workspace. The
-former `config.candidate` field was removed; a config that still sets it fails
-and points to `rubricPrompt`. See
-[ADR 0009](docs/adr/0009-remove-llm-assert-candidate.md).
+`agentAssert` below or a JavaScript assertion that reads the workspace.
 
 ### Grade workspace changes with an agent
 
