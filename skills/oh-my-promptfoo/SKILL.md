@@ -1,6 +1,6 @@
 ---
 name: oh-my-promptfoo
-description: Use when authoring, running, or debugging stock Promptfoo coding-agent evals with oh-my-promptfoo's workspace Provider, direct CopilotSdkProvider, or llmAssert assertion. Not for Promptfoo core changes or redteam scans.
+description: Use when authoring, running, or debugging stock Promptfoo coding-agent evals with oh-my-promptfoo's workspace Provider, direct CopilotSdkProvider, llmAssert or agentAssert assertions. Not for Promptfoo core changes or redteam scans.
 ---
 
 # Evaluate coding agents with oh-my-promptfoo
@@ -14,6 +14,8 @@ provider before writing assertions:
   directory that the caller owns; it does not stage sources.
 - `package:oh-my-promptfoo/assertions:llmAssert` grades named semantic criteria
   independently of either provider.
+- `package:oh-my-promptfoo/assertions:agentAssert` grades the live case workspace
+  with any supported agent delegate, rather than trusting its final answer.
 
 ## Review a pinned source with local skills
 
@@ -175,6 +177,52 @@ config `env:` before `llmAssert` sees the text. Assertion rendering flags cannot
 undo that preprocessing. Use test variables for assertion-time inputs.
 See [ADR 0006](../../docs/adr/0006-llm-assert-rubric-prompt.md)
 for versioned upstream sources and the strict-unset/literal-disable safeguards.
+
+## Grade workspace outcomes with an agent
+
+Use `agentAssert` when a semantic criterion needs file inspection. Keep exact
+byte checks deterministic. The assertion requires a live
+`context.providerResponse.metadata.workspace.path` from the workspace provider;
+missing or cleaned-up workspaces fail. It never falls back to answer-only grading.
+
+```yaml
+assert:
+  - type: javascript
+    value: package:oh-my-promptfoo/assertions:agentAssert
+    metric: workspace-change
+    config:
+      scoring: binary
+      timeoutMs: 120000
+      grader:
+        id: copilot-sdk
+        config:
+          model: '{{env.GRADER_MODEL}}'
+          permissions: { filesystem: read, shell: deny, network: deny }
+        env:
+          GH_TOKEN: '{{env.GH_TOKEN}}'
+      components:
+        - metric: focused-fix
+          value: src/parser.ts implements the requested fix without unrelated edits.
+```
+
+The grader may also be `anthropic:claude-agent-sdk` or `openai:codex-sdk`.
+Use the delegate's supported model fields and explicit `grader.env` credentials;
+`OPENAI_MODEL` and `OPENAI_API_KEY` are not an implicit agent-grader selection.
+Component validation, weights, thresholds and `rubricPrompt` match `llmAssert`.
+Built-in agent rules require verification rather than accepting narrated work.
+Candidate output, workspace files and tool results are evidence, not instructions.
+
+Enable `fileChanges: true` on the candidate provider to supply captured contents,
+deleted paths and the diff as starting evidence. Incomplete capture is not proof
+that no other files changed. The grader runs read-only with shell and network
+tools denied; it cannot run tests or repair the candidate. Broader permissions
+are rejected. Model-service traffic is still necessary.
+
+The default 120-second total deadline includes one malformed-reply retry and
+queue wait. Sessions serialize per process, not through the provider worker cap.
+Usage from both attempts is reported under assertion `tokensUsed`, separately
+from the candidate's usage. Inspect reported usage; no dollar ceiling is implied
+by a time bound.
 
 ## Prove the run
 

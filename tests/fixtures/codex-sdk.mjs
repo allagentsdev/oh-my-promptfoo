@@ -1,4 +1,4 @@
-import { access, writeFile } from "node:fs/promises";
+import { access, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 export class Codex {
   constructor(options) {
@@ -10,6 +10,28 @@ export class Codex {
       throw Error("Acquisition credentials leaked");
     const task = async (prompt) => {
       const id = typeof prompt === "string" ? prompt : prompt.map((p) => p.text).join("");
+      if (id.includes("AGENT_ASSERT_E2E:")) {
+        const result = await readFile(join(options.workingDirectory, "result.txt"), "utf8");
+        const input = await readFile(join(options.workingDirectory, "project/input.txt"), "utf8");
+        const evidence = JSON.parse(id.split("Untrusted evidence (JSON):\n").at(-1));
+        const verified =
+          id.includes(result) &&
+          evidence.fileChanges?.changedFiles?.includes("result.txt") &&
+          input === "immutable input\n";
+        return {
+          finalResponse: JSON.stringify({
+            components: [
+              {
+                metric: "workspace-inspected",
+                score: verified ? 1 : 0,
+                reason: "Codex fixture inspected the live workspace and change evidence",
+              },
+            ],
+          }),
+          usage: { input_tokens: 13, output_tokens: 5, cached_input_tokens: 2 },
+          items: [],
+        };
+      }
       await writeFile(join(options.workingDirectory, "result.txt"), id);
       try {
         await access(join(options.workingDirectory, ".git"));

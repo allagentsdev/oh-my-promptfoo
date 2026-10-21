@@ -26,6 +26,7 @@ export interface CallFrame {
   prompt: string;
   context: JsonObject;
   delegateEnvKeys?: string[];
+  readOnly?: { sourceRoots: string[]; codexHome?: string };
 }
 export interface TraceFrame {
   version: 1;

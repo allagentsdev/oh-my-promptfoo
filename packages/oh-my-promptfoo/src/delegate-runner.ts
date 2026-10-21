@@ -1,12 +1,14 @@
 import { lstatSync, readFileSync, statSync } from "node:fs";
-import { stat } from "node:fs/promises";
+import { lstat, realpath, stat } from "node:fs/promises";
 import { basename, dirname, isAbsolute, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { context as otelContext, propagation, trace } from "@opentelemetry/api";
 import { AsyncLocalStorageContextManager } from "@opentelemetry/context-async-hooks";
 import { W3CTraceContextPropagator } from "@opentelemetry/core";
 import { NodeTracerProvider } from "@opentelemetry/sdk-trace-node";
+import { destination } from "../../workspace-core/src/config.js";
 import { closed, type JsonObject, object, validateDelegateConfig, validateEnv } from "./config.js";
+import { graderConfig, READ_TOOLS, workspaceReaderPath } from "./grader-policy.js";
 import {
   type CallFrame,
   jsonSafe,
@@ -134,6 +136,7 @@ async function execute(input: JsonObject): Promise<void> {
         "prompt",
         "context",
         "delegateEnvKeys",
+        "readOnly",
       ],
       "call",
     );
@@ -155,6 +158,20 @@ async function execute(input: JsonObject): Promise<void> {
       throw new Error("working_dir is not a directory");
     const frame = input as unknown as CallFrame;
     validateDelegateConfig(frame.delegate, frame.config);
+    if (frame.readOnly !== undefined) {
+      const policy = closed(frame.readOnly, ["sourceRoots", "codexHome"], "readOnly");
+      if (!Array.isArray(policy.sourceRoots))
+        throw new Error("readOnly.sourceRoots must be an array");
+      for (const path of policy.sourceRoots) destination(path);
+      graderConfig(frame.delegate, frame.config);
+      if (
+        frame.delegate === "openai:codex-sdk" &&
+        (typeof policy.codexHome !== "string" ||
+          !isAbsolute(policy.codexHome) ||
+          policy.codexHome !== process.env.CODEX_HOME)
+      )
+        throw new Error("Read-only Codex grading requires its owned authentication home");
+    }
     if (
       !Array.isArray(frame.delegateEnvKeys) ||
       frame.delegateEnvKeys.some((key) => typeof key !== "string")
@@ -215,34 +232,76 @@ async function runNative(frame: CallFrame, signal: AbortSignal): Promise<JsonObj
   const load = peer.loadApiProvider ?? peer.default?.loadApiProvider;
   if (typeof load !== "function")
     throw new Error("The consumer Promptfoo peer does not export loadApiProvider");
-  // Native providers may retain conversation caches: every runner handles exactly one row.
-  const config = {
-    ...frame.config,
-    working_dir: frame.workingDir,
-    ...(frame.delegate === "openai:codex-sdk"
-      ? {
-          skip_git_repo_check: true,
-          cli_env: Object.fromEntries(
-            (frame.delegateEnvKeys ?? []).map((key) => [key, process.env[key]]),
-          ),
-        }
-      : {}),
-  };
-  const provider = await load(frame.delegate, {
-    basePath: frame.basePath,
-    options: { config, env: process.env },
-  });
-  let response: JsonObject;
+  let provider:
+    | { callApi: (...args: unknown[]) => Promise<JsonObject>; cleanup?: () => Promise<void> }
+    | undefined;
   try {
-    response = await provider.callApi(
+    let nativePolicy: JsonObject = {};
+    if (frame.readOnly && frame.delegate === "openai:codex-sdk") {
+      const sourceRoots: Record<string, string> = {};
+      for (const source of frame.readOnly.sourceRoots) {
+        const path = resolve(frame.workingDir, source);
+        if ((await lstat(path)).isSymbolicLink()) sourceRoots[source] = await realpath(path);
+      }
+      nativePolicy = {
+        cli_config: {
+          projects: { [frame.workingDir]: { trust_level: "untrusted" } },
+          features: {
+            shell_tool: false,
+            unified_exec: false,
+            js_repl: false,
+            code_mode: false,
+            multi_agent: false,
+            multi_agent_v2: false,
+            apps: false,
+            hooks: false,
+            codex_hooks: false,
+            plugins: false,
+            plugin_hooks: false,
+          },
+          mcp_servers: {
+            workspace_reader: {
+              command: process.execPath,
+              args: [workspaceReaderPath(), frame.workingDir, JSON.stringify(sourceRoots)],
+            },
+          },
+        },
+      };
+    } else if (frame.readOnly && frame.delegate === "anthropic:claude-agent-sdk") {
+      nativePolicy = {
+        setting_sources: [],
+        strict_mcp_config: true,
+        can_use_tool: async (tool: string, input: unknown) =>
+          READ_TOOLS.includes(tool)
+            ? { behavior: "allow", updatedInput: input }
+            : { behavior: "deny", message: "Read-only workspace grader" },
+      };
+    }
+    const config = {
+      ...(frame.readOnly ? graderConfig(frame.delegate, frame.config) : frame.config),
+      ...nativePolicy,
+      working_dir: frame.workingDir,
+      ...(frame.delegate === "openai:codex-sdk"
+        ? {
+            skip_git_repo_check: true,
+            cli_env: Object.fromEntries(
+              (frame.delegateEnvKeys ?? []).map((key) => [key, process.env[key]]),
+            ),
+          }
+        : {}),
+    };
+    provider = await load(frame.delegate, {
+      basePath: frame.basePath,
+      options: { config, env: process.env },
+    });
+    return await provider!.callApi(
       frame.prompt,
       { ...frame.context, bustCache: true },
       { abortSignal: signal },
     );
   } finally {
-    if (typeof provider.cleanup === "function") await provider.cleanup();
+    if (typeof provider?.cleanup === "function") await provider.cleanup();
   }
-  return response;
 }
 
 interface SessionLike {

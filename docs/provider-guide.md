@@ -17,6 +17,36 @@ staged directory, including scripts and untracked files. It hashes sorted
 relative paths, modes, and file bytes. This is input provenance, not a record
 of agent edits.
 
+### Agent workspace grading
+
+`package:oh-my-promptfoo/assertions:agentAssert` accepts the same `components`,
+`threshold`, `scoring`, `candidate` and `rubricPrompt` fields as `llmAssert`,
+plus required `grader: { id, config?, env? }` and optional `timeoutMs`.
+The grader IDs are the same three supported delegates as the workspace provider.
+Use explicit `grader.env` for credentials. The assertion consumes
+`context.providerResponse.metadata.workspace.path`; absent or released paths
+are errors even when a candidate answer or durable file changes are available.
+
+The grader inspects the live directory without acquiring a new workspace or
+extending its lifetime. Do not call provider cleanup or mutate the directory
+while assertions are running. Optional `metadata.fileChanges`, including capture
+status and truncation information, is supplied as evidence. Files, tool output
+and candidate text cannot override grading instructions.
+
+Agent tools are restricted to filesystem reads, with shell and network denied;
+conflicting native settings are rejected. Model-service network traffic is not
+blocked. These SDK restrictions are not an OS sandbox against malicious
+same-user processes. No chmod or snapshot changes the candidate workspace.
+
+`timeoutMs` defaults to 120,000 ms and bounds queue wait plus up to two attempts
+(one retry for malformed verdicts), independently of `workspaceTimeoutMs`.
+Grading sessions serialize within a process, separately from provider workers.
+Multiple evaluation processes have independent queues. Reported tokens, request
+counts and cost from all attempts flow through assertion `tokensUsed`. Promptfoo
+0.122 aggregates assertion tokens but not `tokensUsed.cost`; consumers can inspect
+the returned cost directly. A time bound is not a dollar budget. See
+[ADR 0007](adr/0007-agent-assert-workspace-grading.md).
+
 ## Workspace provider configuration
 
 Provider config is closed: only `delegate`, `workspace`, `workspaceTimeoutMs`, `workingDir`, `fileChanges`, and `timeoutMs` are accepted. The delegates are exactly `openai:codex-sdk`, `anthropic:claude-agent-sdk`, and `copilot-sdk`. Prompt-level config can change allowed `delegate.config` fields only. Delegate-level working directories, sessions, executable overrides, discovery, arbitrary native passthroughs, environment inheritance, acquisition variables, and cache controls are rejected. The wrapper forces execution and rejects cached responses. Use explicit `delegate.env` for model credentials.

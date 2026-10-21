@@ -20,6 +20,7 @@ await build({
 await build({
   entry: {
     "delegate-runner": "packages/oh-my-promptfoo/src/delegate-runner.ts",
+    "workspace-reader": "packages/oh-my-promptfoo/src/workspace-reader.ts",
     cli: "packages/oh-my-promptfoo/src/cli.ts",
   },
   outDir: "packages/oh-my-promptfoo/dist",

@@ -119,6 +119,21 @@ try {
       fileChanges: true,
     },
   });
+  const workspaceAssertion = (id: string) => ({
+    type: "javascript",
+    value: "package:oh-my-promptfoo/assertions:agentAssert",
+    config: {
+      scoring: "binary",
+      grader: { id, config: id === "anthropic:claude-agent-sdk" ? { apiKeyRequired: false } : {} },
+      components: [
+        {
+          metric: "workspace-inspected",
+          value:
+            "AGENT_ASSERT_E2E: Read result.txt and project/input.txt in the live workspace. result.txt must equal {{ task }} and input.txt must remain immutable input. Verify the fileChanges evidence lists result.txt.",
+        },
+      ],
+    },
+  });
   const config = {
     description: "Built package / real stock Promptfoo with deterministic SDK fixtures",
     tracing: { enabled: true },
@@ -155,6 +170,7 @@ try {
       {
         vars: { task: "readonly-row" },
         assert: [
+          workspaceAssertion("openai:codex-sdk"),
           { type: "skill-used", value: "demo" },
           { type: "trajectory:tool-used", value: "probe" },
           {
@@ -165,11 +181,18 @@ try {
           { type: "trajectory:step-count", value: { min: 1, max: 20 } },
         ],
       },
-      { providers: ["writable"], vars: { task: "writable-row" } },
+      {
+        providers: ["writable"],
+        vars: { task: "writable-row" },
+        assert: [workspaceAssertion("copilot-sdk")],
+      },
       {
         providers: ["claude"],
         vars: { task: "claude-row" },
-        assert: [{ type: "skill-used", value: "demo" }],
+        assert: [
+          { type: "skill-used", value: "demo" },
+          workspaceAssertion("anthropic:claude-agent-sdk"),
+        ],
       },
     ],
   };
@@ -220,6 +243,11 @@ try {
     const response = row.providerResponse ?? row.response;
     if (!response?.metadata?.workspace)
       throw Error(`Export row missing workspace: ${Object.keys(row).join(",")}`);
+    const workspaceGrade = (row.gradingResult?.componentResults ?? []).find(
+      (component: any) => component.namedScores?.["workspace-inspected"] === 1,
+    );
+    if (!workspaceGrade?.pass || !(workspaceGrade.tokensUsed?.total > 0))
+      throw Error("Packed agentAssert did not inspect the workspace and report grader usage");
     const path = response.metadata.workspace.path;
     try {
       await import("node:fs/promises").then((fs) => fs.access(path));
