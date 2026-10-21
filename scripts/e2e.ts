@@ -4,7 +4,7 @@ import { realpathSync } from "node:fs";
 import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join, relative, resolve } from "node:path";
 import { removeTree } from "../packages/workspace-core/src/fs";
 import { WorkspaceManager } from "../packages/workspace-core/src/index";
 
@@ -21,8 +21,10 @@ const repo = resolve(".");
 const promptfooVersion = "0.124.0";
 const cwd = await mkdtemp(join(realpathSync(tmpdir()), "allagents-e2e-"));
 const workspaceParent = await mkdtemp(join(realpathSync(tmpdir()), "allagents-e2e-workspaces-"));
+// Local sources must work from the eval config alone, without a runner-supplied boundary.
+const { ALLAGENTS_LOCAL_SOURCE_ROOT: _localSourceRoot, ...inherited } = process.env;
 const testEnvironment = {
-  ...process.env,
+  ...inherited,
   PROMPTFOO_DISABLE_TELEMETRY: "1",
   PROMPTFOO_DISABLE_UPDATE: "1",
   PROMPTFOO_CONFIG_DIR: join(cwd, "pf-state"),
@@ -321,6 +323,76 @@ try {
     ],
   });
   if (direct.stats.successes !== 1) throw Error("Direct Copilot named constructor failed");
+  // Promptfoo hands every provider the eval config's directory as basePath, including one
+  // included from `providers: file://…`. A relative local path and the default boundary (the
+  // config's Git repository) follow it, with the CLI started from another directory.
+  const suite = join(cwd, "suite");
+  const skills = join(suite, "plugins", "demo", "skills");
+  await mkdir(join(skills, "demo"), { recursive: true });
+  await mkdir(join(suite, "evals", "providers"), { recursive: true });
+  await writeFile(join(skills, "demo", "SKILL.md"), "config-relative skill\n");
+  run("git", ["init", "--initial-branch=main", suite]);
+  const relativeWrapper = wrapper("openai:codex-sdk", "config-relative", "all");
+  const relativeProvider = {
+    ...relativeWrapper,
+    config: {
+      ...relativeWrapper.config,
+      workspace: {
+        sources: [{ type: "local", path: "../plugins/demo/skills", destination: ".agents/skills" }],
+      },
+    },
+  };
+  // JSON is valid YAML; Promptfoo parses included provider files as YAML.
+  await writeFile(
+    join(suite, "evals", "providers", "workspace.yaml"),
+    JSON.stringify([relativeProvider]),
+  );
+  const relativeRuns: Record<string, number> = {};
+  for (const [name, providers] of [
+    ["inline", [relativeProvider]],
+    ["included", "file://providers/workspace.yaml"],
+  ] as const) {
+    const configPath = join(suite, "evals", `${name}.json`);
+    const resultsPath = join(cwd, `config-relative-${name}-results.json`);
+    await writeFile(
+      configPath,
+      JSON.stringify({
+        prompts: ["{{task}}"],
+        providers,
+        tests: [
+          {
+            vars: { task: `config-relative-${name}` },
+            assert: [
+              {
+                type: "javascript",
+                value: `\nreturn import('node:fs').then(fs=>{const w=context.providerResponse.metadata.workspace;return fs.readFileSync(w.path+'/.agents/skills/demo/SKILL.md','utf8')==='config-relative skill\\n'&&w.sources[0].path===${JSON.stringify(skills)};});`,
+              },
+            ],
+          },
+        ],
+      }),
+    );
+    run(
+      "node",
+      [
+        cli,
+        "eval",
+        "--config",
+        relative(workspaceParent, configPath),
+        "--no-cache",
+        "--no-progress-bar",
+        "--output",
+        resultsPath,
+      ],
+      workspaceParent,
+    );
+    const exported = JSON.parse(await readFile(resultsPath, "utf8")).results;
+    if (exported.stats.successes !== 1 || exported.stats.errors !== 0)
+      throw Error(
+        `Config-relative ${name} local source failed: ${JSON.stringify(exported.results[0]?.response?.error ?? exported.stats)}`,
+      );
+    relativeRuns[name] = exported.stats.successes;
+  }
   const judgeRequests: {
     url: string | undefined;
     body: { model: string; messages: { role: string; content: string }[] };
@@ -554,7 +626,9 @@ try {
       2,
     )}\n`,
   );
-  console.log(`Built Promptfoo E2E passed: ${JSON.stringify(stats)}`);
+  console.log(
+    `Built Promptfoo E2E passed: ${JSON.stringify(stats)}; config-relative local sources: ${JSON.stringify(relativeRuns)}`,
+  );
 } finally {
   const recovery = new WorkspaceManager(
     { sources: [] },

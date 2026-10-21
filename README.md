@@ -23,8 +23,15 @@ npm install --save-dev @github/copilot-sdk@1.0.17 # Copilot only
 
 Set the agent credential through `delegate.env` in authored evals. Set
 `OPENAI_API_KEY` and `OPENAI_MODEL` separately when using `llmAssert`. OCI inputs
-require ORAS 1.x through `ALLAGENTS_ORAS_PATH`. A trusted runner must provide
-`ALLAGENTS_LOCAL_SOURCE_ROOT` before acquiring `type: local` sources.
+require ORAS 1.x through `ALLAGENTS_ORAS_PATH`.
+
+A relative `type: local` `path`, such as `../plugins/x/skills`, or a relative
+`file://` Git repository resolves against the eval config's directory, like
+Promptfoo's own `file://` references. This includes providers loaded from
+`providers: file://…`. Local sources must stay inside the Git repository that
+contains that directory, or inside the directory itself when it is not in a
+repository. A trusted runner can replace that boundary with an absolute
+`ALLAGENTS_LOCAL_SOURCE_ROOT`.
 
 Several `type: local` sources may name the same `destination` and merge into one
 tree, so N plugins can stage their skills into a single `.agents/skills`. They

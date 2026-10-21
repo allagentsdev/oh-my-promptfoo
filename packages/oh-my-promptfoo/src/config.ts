@@ -1,4 +1,5 @@
-import { resolve } from "node:path";
+import { isAbsolute, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { destination, resolveWorkspaceTimeoutMs } from "../../workspace-core/src/config.js";
 import type { WorkspaceSpec } from "../../workspace-core/src/types.js";
 
@@ -296,6 +297,42 @@ export function envelope(options: ProviderOptions): { config: JsonObject; basePa
   if (basePath !== undefined && typeof basePath !== "string")
     throw new Error("Loader basePath must be a string");
   return { config, basePath: resolve((basePath as string | undefined) ?? process.cwd()) };
+}
+/**
+ * Resolves relative source paths as Promptfoo resolves `file://` references: against the
+ * loader basePath, which is the eval config's directory even when the provider comes from a
+ * separate `providers: file://…` file. Absolute paths and `file:///` or `file://localhost/`
+ * URLs are unchanged; validation of the result is left to the workspace specification.
+ * See docs/adr/0009-resolve-provider-paths-against-the-eval-config.md.
+ */
+export function resolveSourcePaths(workspace: WorkspaceSpec, basePath: string): WorkspaceSpec {
+  const sources: unknown = workspace.sources;
+  if (!Array.isArray(sources)) return workspace;
+  return {
+    ...workspace,
+    sources: sources.map((raw) => {
+      if (!raw || typeof raw !== "object" || Array.isArray(raw)) return raw;
+      const source = raw as JsonObject;
+      if (
+        source.type === "local" &&
+        typeof source.path === "string" &&
+        source.path &&
+        !isAbsolute(source.path)
+      )
+        return { ...source, path: resolve(basePath, source.path) };
+      if (
+        source.type === "git" &&
+        typeof source.repository === "string" &&
+        source.repository.startsWith("file://")
+      ) {
+        const path = source.repository.slice("file://".length);
+        // URL hosts are case-insensitive: `file://LOCALHOST/abs` is as absolute as `file:///abs`.
+        if (path && !isAbsolute(path) && !/^localhost(\/|$)/i.test(path))
+          return { ...source, repository: pathToFileURL(resolve(basePath, path)).href };
+      }
+      return raw;
+    }) as WorkspaceSpec["sources"],
+  };
 }
 export function validateProviderConfig(value: unknown): ProviderConfig {
   const c = closed(
