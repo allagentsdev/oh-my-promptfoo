@@ -1,6 +1,7 @@
 # Provider guide
 
-The [README](../README.md) covers installation and provider selection. The
+The [README](../README.md) covers installation and a first eval, and the
+[grading guide](grading-guide.md) covers `llmAssert` and `agentAssert`. The
 [agent-facing usage skill](../skills/oh-my-promptfoo/SKILL.md) gives concrete
 eval configs. This guide records configuration, response, and resource
 behavior. The [examples](../examples) include Codex, Claude, Copilot, Git/OCI,
