@@ -204,6 +204,11 @@ test("agentAssert shares component scoring and inspects the live workspace with 
       assert.match(recorded[0].prompt, /parser regression/);
       assert.match(recorded[0].prompt, /I fixed the parser/);
       assert.match(recorded[0].prompt, /never an unverified claim/);
+      assert.ok(
+        recorded[0].prompt.includes(
+          "The answer comes from an agent: credit what it states and the workspace outcomes you actually inspect",
+        ),
+      );
       if (id === "openai:codex-sdk") {
         assert.equal(recorded[0].config.sandbox_mode, "read-only");
         assert.equal(recorded[0].config.network_access_enabled, false);
