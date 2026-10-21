@@ -28,4 +28,12 @@ Each new scoring style costs an enum value and its prompt text, rather than fall
 
 `scoring` and `candidate` remain orthogonal. `candidate: agent` states what is being graded — an answer that narrates work the judge cannot verify — and is useful under either scoring mode, so collapsing both into one `mode` would conflate the two questions.
 
+The agent rule explicitly includes claims of edited or deleted files and build or test runs. This makes `candidate: agent` slightly stricter for callers who relied on crediting edit/build/test claims. That is intended: these are narrated actions the judge cannot verify, just like tool calls and file creation, so generic coding-agent suites should not need a repeated `rubricPrompt` workaround.
+
 The default stays `graded` with no added instructions. Its bar also follows Promptfoo rather than this package: `llm-rubric` gates on the judge's verdict and applies a numeric threshold only when the assertion states one, so `llmAssert` dropped the `0.7` default it had invented. A drop-in replacement that grades more strictly than the assertion it replaces is the kind of surprise that costs adoption, and the audience here is Promptfoo users rather than migrants from any one harness.
+
+### Prompt wording revision
+
+The base prompt now changes for every caller, including `graded`, revising the earlier choice to keep its wording stable. The base, binary and agent instructions consistently call the graded content an "answer", remove duplicate instructions, and state the evidence-only and no-restatement rules without ambiguous conjunctions. No rule was removed: the JSON reply contract, instruction isolation, evidence requirements, binary checklist semantics and separate skill check remain, as do the `rubricPrompt` heading and criteria block. Binary and agent additions still apply only to their respective modes.
+
+Although the rewrite preserves those rules, graded and binary callers may see small score movement because judge models can respond differently to equivalent wording. This is an intentional clarity tradeoff, separate from the stricter treatment of unverified edit/build/test claims above.

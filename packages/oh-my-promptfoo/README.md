@@ -53,8 +53,10 @@ one, and says nothing about how to score. Partial credit for a near miss is
 what graded is for, so none of the checklist rules apply to it.
 
 Set `config.candidate: agent` when the output is an agent's answer, and the
-judge is also told to credit only what the answer states — never a claimed tool
-call, command, file or query — and that skill retrieval is gated elsewhere.
+judge is also told to credit only what the answer states — never an unverified
+claim of a tool call, executed command, inspected, created, edited or deleted
+file, build or test run, or external query — and that skill retrieval is gated
+elsewhere.
 
 Put what only the suite knows, such as which claims its domain counts as
 unverified, in `config.rubricPrompt`. Unlike `llm-rubric`, it cannot replace the
