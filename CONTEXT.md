@@ -97,3 +97,7 @@ A deterministic or model-graded Promptfoo check that contributes to the evaluati
 ## Batched rubric assertion
 
 A Promptfoo JavaScript assertion that asks one judge to score multiple named criteria and returns their individual results alongside a weighted overall score. It is independent of the agent and workspace providers, and is not a native `llm-rubric` assertion.
+
+## Workspace rubric assertion
+
+A batched rubric assertion whose agent judge verifies criteria against the candidate's live workspace and optional file-change evidence. The judge is read-only; a released workspace cannot be replaced by the candidate's narrated answer.

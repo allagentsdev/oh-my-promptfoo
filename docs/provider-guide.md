@@ -17,6 +17,52 @@ staged directory, including scripts and untracked files. It hashes sorted
 relative paths, modes, and file bytes. This is input provenance, not a record
 of agent edits.
 
+### Agent workspace grading
+
+`package:oh-my-promptfoo/assertions:agentAssert` accepts the same `components`,
+`threshold`, `scoring`, `candidate` and `rubricPrompt` fields as `llmAssert`,
+plus required `grader: { id, config?, env? }` and optional `timeoutMs`,
+`queueTimeoutMs` and `maxPromptBytes`.
+The grader IDs are the same three supported delegates as the workspace provider.
+Use explicit `grader.env` for credentials. The assertion consumes
+`context.providerResponse.metadata.workspace.path`; absent or released paths
+are errors even when a candidate answer or durable file changes are available.
+
+The grader inspects the live directory without acquiring a new workspace or
+extending its lifetime. Do not call provider cleanup or mutate the directory
+while assertions are running. Optional `metadata.fileChanges` contributes only
+changed-file paths/change/kind/mode, deleted paths, the diff and completeness,
+truncation and failure information, never captured base64 contents. Files, tool
+output and candidate text cannot override grading instructions.
+
+`maxPromptBytes` defaults to 131,072 UTF-8 bytes (128 KiB), with an allowed
+integer range of 1–16,777,216. It measures the full assembled prompt, including
+rules, criteria and evidence. An oversized prompt drops the diff with a notice
+stating the omitted byte count; if still too large, the assertion fails before
+starting a grader and reports the measured size and budget.
+
+Agent tools are restricted to filesystem reads, with shell and network denied;
+conflicting native settings are rejected. Model-service network traffic is not
+blocked. These SDK restrictions are not an OS sandbox against malicious
+same-user processes. No chmod or snapshot changes the candidate workspace.
+
+`timeoutMs` defaults to 120,000 ms and bounds execution across up to two attempts
+(one retry for malformed verdicts), starting after acquiring a grader slot.
+`queueTimeoutMs` separately bounds queue wait, defaulting to 900,000 ms. Both
+accept integers from 1 to 3,600,000 and are independent of `workspaceTimeoutMs`.
+Sessions serialize within a process, separately from provider workers.
+Multiple evaluation processes have independent queues. Reported tokens, request
+counts and cost from all attempts flow through assertion `tokensUsed`. Promptfoo
+0.122 aggregates assertion tokens but not `tokensUsed.cost`; consumers can inspect
+the returned cost directly. A time bound is not a dollar budget. See
+[ADR 0008](adr/0008-agent-assert-workspace-grading.md).
+
+Codex grading requires `grader.config.apiKey` or explicit
+`grader.env.OPENAI_API_KEY`; ChatGPT login auth is not supported for graders.
+The temporary Codex home never copies `auth.json`, avoiding refresh-token races
+with the user's normal sessions. This restriction does not change candidate
+provider authentication.
+
 ## Workspace provider configuration
 
 Provider config is closed: only `delegate`, `workspace`, `workspaceTimeoutMs`, `workingDir`, `fileChanges`, and `timeoutMs` are accepted. The delegates are exactly `openai:codex-sdk`, `anthropic:claude-agent-sdk`, and `copilot-sdk`. Prompt-level config can change allowed `delegate.config` fields only. Delegate-level working directories, sessions, executable overrides, discovery, arbitrary native passthroughs, environment inheritance, acquisition variables, and cache controls are rejected. The wrapper forces execution and rejects cached responses. Use explicit `delegate.env` for model credentials.

@@ -1,12 +1,20 @@
 import { lstatSync, readFileSync, statSync } from "node:fs";
-import { stat } from "node:fs/promises";
+import { lstat, realpath, stat } from "node:fs/promises";
 import { basename, dirname, isAbsolute, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { context as otelContext, propagation, trace } from "@opentelemetry/api";
 import { AsyncLocalStorageContextManager } from "@opentelemetry/context-async-hooks";
 import { W3CTraceContextPropagator } from "@opentelemetry/core";
 import { NodeTracerProvider } from "@opentelemetry/sdk-trace-node";
+import { destination } from "../../workspace-core/src/config.js";
 import { closed, type JsonObject, object, validateDelegateConfig, validateEnv } from "./config.js";
+import {
+  claudeReadAllowed,
+  disabledWorkspaceSkills,
+  graderConfig,
+  graderReadScope,
+  workspaceReaderPath,
+} from "./grader-policy.js";
 import {
   type CallFrame,
   jsonSafe,
@@ -134,6 +142,7 @@ async function execute(input: JsonObject): Promise<void> {
         "prompt",
         "context",
         "delegateEnvKeys",
+        "readOnly",
       ],
       "call",
     );
@@ -155,6 +164,20 @@ async function execute(input: JsonObject): Promise<void> {
       throw new Error("working_dir is not a directory");
     const frame = input as unknown as CallFrame;
     validateDelegateConfig(frame.delegate, frame.config);
+    if (frame.readOnly !== undefined) {
+      const policy = closed(frame.readOnly, ["sourceRoots", "codexHome"], "readOnly");
+      if (!Array.isArray(policy.sourceRoots))
+        throw new Error("readOnly.sourceRoots must be an array");
+      for (const path of policy.sourceRoots) destination(path);
+      graderConfig(frame.delegate, frame.config);
+      if (
+        frame.delegate === "openai:codex-sdk" &&
+        (typeof policy.codexHome !== "string" ||
+          !isAbsolute(policy.codexHome) ||
+          policy.codexHome !== process.env.CODEX_HOME)
+      )
+        throw new Error("Read-only Codex grading requires its owned authentication home");
+    }
     if (
       !Array.isArray(frame.delegateEnvKeys) ||
       frame.delegateEnvKeys.some((key) => typeof key !== "string")
@@ -215,34 +238,110 @@ async function runNative(frame: CallFrame, signal: AbortSignal): Promise<JsonObj
   const load = peer.loadApiProvider ?? peer.default?.loadApiProvider;
   if (typeof load !== "function")
     throw new Error("The consumer Promptfoo peer does not export loadApiProvider");
-  // Native providers may retain conversation caches: every runner handles exactly one row.
-  const config = {
-    ...frame.config,
-    working_dir: frame.workingDir,
-    ...(frame.delegate === "openai:codex-sdk"
-      ? {
-          skip_git_repo_check: true,
-          cli_env: Object.fromEntries(
-            (frame.delegateEnvKeys ?? []).map((key) => [key, process.env[key]]),
-          ),
-        }
-      : {}),
-  };
-  const provider = await load(frame.delegate, {
-    basePath: frame.basePath,
-    options: { config, env: process.env },
-  });
-  let response: JsonObject;
+  let provider:
+    | { callApi: (...args: unknown[]) => Promise<JsonObject>; cleanup?: () => Promise<void> }
+    | undefined;
   try {
-    response = await provider.callApi(
+    let nativePolicy: JsonObject = {};
+    if (frame.readOnly && frame.delegate === "openai:codex-sdk") {
+      const sourceRoots: Record<string, string> = {};
+      for (const source of frame.readOnly.sourceRoots) {
+        const path = resolve(frame.workingDir, source);
+        try {
+          if ((await lstat(path)).isSymbolicLink()) sourceRoots[source] = await realpath(path);
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+        }
+      }
+      nativePolicy = {
+        cli_config: {
+          // The SDK flattens object keys as dotted TOML without quoting them.
+          [`projects.${JSON.stringify(frame.workingDir)}.trust_level`]: "untrusted",
+          project_doc_max_bytes: 0,
+          skills: {
+            include_instructions: false,
+            config: await disabledWorkspaceSkills(frame.workingDir, frame.readOnly.sourceRoots),
+          },
+          features: {
+            shell_tool: false,
+            unified_exec: false,
+            js_repl: false,
+            code_mode: false,
+            multi_agent: false,
+            multi_agent_v2: false,
+            apps: false,
+            hooks: false,
+            codex_hooks: false,
+            plugins: false,
+            plugin_hooks: false,
+          },
+          mcp_servers: {
+            workspace_reader: {
+              command: process.execPath,
+              args: [workspaceReaderPath(), frame.workingDir, JSON.stringify(sourceRoots)],
+            },
+          },
+        },
+      };
+    } else if (frame.readOnly && frame.delegate === "anthropic:claude-agent-sdk") {
+      const allowed = await graderReadScope(frame.workingDir, frame.readOnly.sourceRoots);
+      const canRead = (tool: string, input: unknown) => claudeReadAllowed(tool, input, allowed);
+      nativePolicy = {
+        setting_sources: [],
+        skills: [],
+        strict_mcp_config: true,
+        can_use_tool: async (tool: string, input: unknown) =>
+          (await canRead(tool, input))
+            ? { behavior: "allow", updatedInput: input }
+            : { behavior: "deny", message: "Read-only workspace grader" },
+        // Native in-workspace reads can bypass permission prompts; check those too.
+        hooks: {
+          PreToolUse: [
+            {
+              matcher: "Read|Glob|Grep",
+              hooks: [
+                async (event: { tool_name: string; tool_input: unknown }) =>
+                  (await canRead(event.tool_name, event.tool_input))
+                    ? {}
+                    : {
+                        hookSpecificOutput: {
+                          hookEventName: "PreToolUse",
+                          permissionDecision: "deny",
+                          permissionDecisionReason:
+                            "Read is outside the grader workspace or protected sources",
+                        },
+                      },
+              ],
+            },
+          ],
+        },
+      };
+    }
+    const config = {
+      ...(frame.readOnly ? graderConfig(frame.delegate, frame.config) : frame.config),
+      ...nativePolicy,
+      working_dir: frame.workingDir,
+      ...(frame.delegate === "openai:codex-sdk"
+        ? {
+            skip_git_repo_check: true,
+            cli_env: Object.fromEntries(
+              (frame.delegateEnvKeys ?? []).map((key) => [key, process.env[key]]),
+            ),
+          }
+        : {}),
+    };
+    provider = await load(frame.delegate, {
+      basePath: frame.basePath,
+      options: { config, env: process.env },
+    });
+    return await provider!.callApi(
       frame.prompt,
       { ...frame.context, bustCache: true },
       { abortSignal: signal },
     );
   } finally {
-    if (typeof provider.cleanup === "function") await provider.cleanup();
+    if (typeof provider?.cleanup === "function") await provider.cleanup();
   }
-  return response;
 }
 
 interface SessionLike {
@@ -353,7 +452,10 @@ async function runCopilot(frame: CallFrame, signal: AbortSignal): Promise<JsonOb
   const sdk = await import(pathToFileURL(resolvePeer(frame.basePath, "@github/copilot-sdk")).href);
   if (typeof sdk.CopilotClient !== "function")
     throw new Error("Install the supported @github/copilot-sdk@1.0.17 peer");
-  const skillDirectories = workspaceSkillDirectories(frame.workingDir);
+  const skillDirectories = frame.readOnly ? [] : workspaceSkillDirectories(frame.workingDir);
+  const allowedRead = frame.readOnly
+    ? await graderReadScope(frame.workingDir, frame.readOnly.sourceRoots)
+    : undefined;
   const client: ClientLike = new sdk.CopilotClient({
     workingDirectory: frame.workingDir,
     env: process.env,
@@ -386,7 +488,11 @@ async function runCopilot(frame: CallFrame, signal: AbortSignal): Promise<JsonOb
   const skillReads = new Map<string, SkillCall>();
   const skillCalls: SkillCall[] = [];
   const permissions = (frame.config.permissions ?? {}) as JsonObject;
-  const approve = (request: JsonObject): JsonObject => {
+  const approve = (request: JsonObject): JsonObject | Promise<JsonObject> => {
+    if (request.kind === "read" && allowedRead)
+      return allowedRead(request.path).then((allowed) =>
+        allowed ? { kind: "approve-once" } : { kind: "reject" },
+      );
     const allowed =
       request.kind === "read" ||
       (request.kind === "write" && permissions.filesystem === "write") ||
@@ -408,7 +514,11 @@ async function runCopilot(frame: CallFrame, signal: AbortSignal): Promise<JsonOb
       onPermissionRequest: approve,
       enableConfigDiscovery: false,
       // Keep general config discovery off; expose only physical workspace skill directories.
-      ...(skillDirectories.length ? { enableSkills: true, skillDirectories } : {}),
+      ...(frame.readOnly
+        ? { enableSkills: false, skipCustomInstructions: true }
+        : skillDirectories.length
+          ? { enableSkills: true, skillDirectories }
+          : {}),
       infiniteSessions: { enabled: false },
     });
     unsubscribe = session.on((event) => {
@@ -544,7 +654,16 @@ async function runCopilot(frame: CallFrame, signal: AbortSignal): Promise<JsonOb
       [...(callError ? [callError] : []), ...cleanupErrors],
       "Copilot cleanup failed",
     );
-  if (callError) throw callError;
+  if (callError) {
+    if (usage.numRequests || cost > 0)
+      return {
+        error: callError instanceof Error ? callError.message : String(callError),
+        ...(output ? { output } : {}),
+        tokenUsage: usage,
+        cost,
+      };
+    throw callError;
+  }
   if (!result) throw new Error("Copilot session returned no result");
   return result;
 }

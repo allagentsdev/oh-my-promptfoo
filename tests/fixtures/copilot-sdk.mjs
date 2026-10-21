@@ -23,6 +23,43 @@ export class CopilotClient {
         return () => {};
       },
       async sendAndWait({ prompt }) {
+        if (prompt.includes("AGENT_ASSERT_E2E:")) {
+          const requests = await Promise.all(
+            ["read", "write", "shell", "url", "mcp"].map((kind) =>
+              config.onPermissionRequest({
+                kind,
+                path: join(config.workingDirectory, "result.txt"),
+              }),
+            ),
+          );
+          const denied =
+            requests.map(({ kind }) => kind).join(",") ===
+            "approve-once,reject,reject,reject,reject";
+          const result = await readFile(join(config.workingDirectory, "result.txt"), "utf8");
+          const input = await readFile(join(config.workingDirectory, "project/input.txt"), "utf8");
+          const evidence = JSON.parse(prompt.split("Untrusted evidence (JSON):\n").at(-1));
+          const verified =
+            denied &&
+            prompt.includes(result) &&
+            evidence.fileChanges?.changedFiles?.some((file) => file.path === "result.txt") &&
+            input === "immutable input\n";
+          const content = JSON.stringify({
+            components: [
+              {
+                metric: "workspace-inspected",
+                score: verified ? 1 : 0,
+                reason:
+                  "Copilot fixture inspected the live workspace; write, shell and network requests were denied",
+              },
+            ],
+          });
+          callback({
+            type: "assistant.usage",
+            data: { inputTokens: 13, outputTokens: 5, cost: 0.001 },
+          });
+          callback({ type: "assistant.message", data: { content } });
+          return { data: { content } };
+        }
         if (prompt === "hang") {
           await new Promise(() => {});
         }

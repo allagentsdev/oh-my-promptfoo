@@ -9,6 +9,7 @@ independent assertion for named semantic criteria.
 | Isolated workspace with pinned Git, OCI artifact, or trusted local-directory sources | `package:oh-my-promptfoo:Provider` |
 | Copilot in a directory managed by the caller | `package:oh-my-promptfoo:CopilotSdkProvider` |
 | One judge request for named rubric criteria | `package:oh-my-promptfoo/assertions:llmAssert` |
+| Inspect the candidate workspace with an agent judge | `package:oh-my-promptfoo/assertions:agentAssert` |
 
 ## Install
 
@@ -99,6 +100,62 @@ It reports the judge call's token usage back to Promptfoo, which records it unde
 `tokenUsage.assertions` — grader spend, separate from the agent under test. A
 grader that returns no usage reports nothing rather than zero, so an unmeasured
 call is never summed into a run total as a free one.
+
+### Grade workspace changes with an agent
+
+`agentAssert` uses the same named components, weights, scoring, threshold and
+`rubricPrompt` contract, but verifies claims against the live case workspace.
+Choose any supported delegate, including Copilot:
+
+```yaml
+assert:
+  - type: javascript
+    value: package:oh-my-promptfoo/assertions:agentAssert
+    metric: workspace-change
+    config:
+      scoring: binary
+      grader:
+        id: copilot-sdk
+        config:
+          model: '{{env.GRADER_MODEL}}'
+          permissions: { filesystem: read, shell: deny, network: deny }
+        env:
+          GH_TOKEN: '{{env.GH_TOKEN}}'
+      components:
+        - metric: parser-fix-present
+          value: The workspace contains a focused fix in src/parser.ts for the reported bug.
+        - metric: no-unrelated-edits
+          value: No files outside src/parser.ts and its test were modified.
+```
+
+Use this with the workspace `Provider`; a missing or released
+`metadata.workspace.path` fails instead of falling back to the answer text.
+Enable provider `fileChanges: true` to give the judge changed-file paths and
+metadata plus the diff, not captured base64 contents. Files and the answer remain untrusted;
+claims earn credit only when verified. Graders cannot write, run shell commands
+or access the network through agent tools. They therefore cannot execute tests.
+Model-service requests still require the delegate's credentials and network.
+
+`maxPromptBytes` bounds the full assembled grader prompt in UTF-8 bytes,
+including rules, criteria and evidence. The default is 131,072 bytes (128 KiB);
+it accepts integers from 1 to 16,777,216. If the prompt is too large, the diff
+is omitted with an explicit notice recording the omitted byte count. If the
+remaining prompt still exceeds the budget, grading fails before a delegate
+starts, naming both the measured size and budget. Files remain available for
+on-demand inspection; increasing the budget never sends captured base64 bytes.
+
+The grader has a 120-second execution timeout, configurable with assertion
+`timeoutMs`, including one retry for a malformed verdict. It starts after the
+grader session slot is acquired. A separate `queueTimeoutMs` bounds waiting
+for that slot (default 15 minutes); both settings accept 1–3,600,000 ms.
+Sessions serialize per process, independently of provider workers. Tokens are
+accounted as assertion usage even when a billed attempt fails; reported cost is
+preserved in `tokensUsed.cost`, although Promptfoo versions may not aggregate it.
+
+Codex graders require API-key auth via `grader.config.apiKey` or explicit
+`grader.env.OPENAI_API_KEY`. They do not load or copy ChatGPT `auth.json`, avoiding
+single-use refresh-token corruption. See [ADR 0008](docs/adr/0008-agent-assert-workspace-grading.md)
+for the live-workspace and resource-bound tradeoffs.
 
 ## Author and run an eval
 
