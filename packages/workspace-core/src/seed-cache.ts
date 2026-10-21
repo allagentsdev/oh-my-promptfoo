@@ -69,15 +69,47 @@ export function acquisitionIdentity(source: ResolvedSource): Record<string, unkn
     materializerVersion: source.materializerVersion ?? 1,
   };
 }
-export function protectedCheckoutKey(source: ResolvedSource, viewMode: ViewMode = "auto"): string {
-  const identity = canonicalJson(acquisitionIdentity(source));
+/**
+ * Destination alone stopped being a total order when sources began merging into one
+ * destination, so the canonical identity text breaks ties. Specs whose destinations
+ * are distinct keep the ordering, and therefore the digests, they had before.
+ */
+function sortedIdentities(sources: ResolvedSource[]): Record<string, unknown>[] {
+  return sources
+    .map((source) => {
+      const identity = acquisitionIdentity(source);
+      return { destination: source.destination, identity, text: canonicalJson(identity) };
+    })
+    .sort((a, b) =>
+      a.destination < b.destination
+        ? -1
+        : a.destination > b.destination
+          ? 1
+          : a.text < b.text
+            ? -1
+            : a.text > b.text
+              ? 1
+              : 0,
+    )
+    .map((entry) => entry.identity);
+}
+/**
+ * One protected checkout serves one destination. When several sources merge into that
+ * destination the key covers every contributor, so a different merge set can never
+ * reuse a checkout prepared from another one. A lone source keeps its former key.
+ */
+export function protectedCheckoutKey(
+  sources: ResolvedSource[],
+  viewMode: ViewMode = "auto",
+): string {
+  const identity =
+    sources.length === 1
+      ? canonicalJson(acquisitionIdentity(sources[0]))
+      : canonicalJson({ schemaVersion: 1, merged: sortedIdentities(sources) });
   return hash(viewMode === "copy-only" ? `${identity}\0copy-only` : identity);
 }
 export function manifestDigest(sources: ResolvedSource[]): Digest {
-  const identities = [...sources]
-    .sort((a, b) => (a.destination < b.destination ? -1 : a.destination > b.destination ? 1 : 0))
-    .map(acquisitionIdentity);
-  return `sha256:${hash(canonicalJson({ schemaVersion: 1, sources: identities }))}`;
+  return `sha256:${hash(canonicalJson({ schemaVersion: 1, sources: sortedIdentities(sources) }))}`;
 }
 const MAX_INVENTORY_JSON_BYTES = 512 * 1024 ** 2;
 // Cache age is measured in days; refreshing a recently verified entry on every
@@ -455,16 +487,20 @@ export class SeedCache {
       }
     });
   }
+  /** `sources` is every source contributing to one destination, merged or alone. */
   async protectedSource(
     record: RecoveryRecord,
-    source: ResolvedSource,
+    sources: ResolvedSource[],
     signal?: AbortSignal,
     viewMode: ViewMode = "auto",
     caseIndex?: number,
     sourceIndex?: number,
     sourceCount?: number,
   ): Promise<{ key: string; path: string }> {
-    const key = protectedCheckoutKey(source, viewMode);
+    const destination = sources[0]?.destination;
+    if (destination === undefined || sources.some((source) => source.destination !== destination))
+      throw new Error("Protected checkout requires sources sharing one destination");
+    const key = protectedCheckoutKey(sources, viewMode);
     const path = join(this.root, "checkouts", key, "tree");
     return this.lockAcquisition(
       join(this.root, "locks", "admission"),
@@ -497,7 +533,7 @@ export class SeedCache {
                 );
               }
             } else {
-              const seedSource = join(this.seedPath(record.digest), source.destination);
+              const seedSource = join(this.seedPath(record.digest), destination);
               await measuredPhase("checkout-admission", async () =>
                 this.admit(
                   (await conservativeCopyBytes(seedSource)) * 1.1 +

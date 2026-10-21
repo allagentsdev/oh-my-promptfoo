@@ -59,7 +59,7 @@ async function project(moduleName: string, source: string): Promise<string> {
   await writeFile(join(dir, "index.js"), source);
   return path;
 }
-const native = `import {chmod,readFile,utimes,writeFile} from 'node:fs/promises';
+const native = `import {chmod,readdir,readFile,utimes,writeFile} from 'node:fs/promises';
 import {writeSync} from 'node:fs';
 export async function loadApiProvider(id, options) {
  return {async callApi(prompt,context,callOptions){
@@ -69,6 +69,7 @@ export async function loadApiProvider(id, options) {
   if(prompt==='write')await writeFile(options.options.config.working_dir+'/generated.txt','generated durable content');
   if(prompt==='edit-local-skill')await writeFile(options.options.config.working_dir+'/.agents/skills/example/scripts/task.sh','echo agent\\n');
   if(prompt==='read-local-skill')return {output:await readFile(options.options.config.working_dir+'/.agents/skills/example/scripts/task.sh','utf8')};
+  if(prompt==='list-local-skills')return {output:(await readdir(options.options.config.working_dir+'/.agents/skills')).sort().join(',')};
   if(prompt==='tamper-protected'){const file=options.options.config.working_dir+'/repo/input.txt';await chmod(file,0o644);await writeFile(file,'modified protected source');}
   if(prompt==='tamper-secondary'){const file=options.options.config.working_dir+'/secondary/input.txt';await chmod(file,0o644);await writeFile(file,'modified protected source');}
   if(prompt==='tamper-protected-metadata'){const file=options.options.config.working_dir+'/repo/.git/HEAD';await utimes(file,new Date(0),new Date(0));}
@@ -961,6 +962,54 @@ describe("workspace provider publication and lifetime", () => {
         } finally {
           await fresh.cleanup();
         }
+      } finally {
+        await provider.cleanup();
+      }
+    },
+    45_000,
+  );
+  onLinux(
+    "merged local sources let the agent discover every staged plugin's skills",
+    async () => {
+      const root = await project("promptfoo", native);
+      const plugins = ["alpha", "beta", "gamma", "delta"];
+      for (const name of plugins) {
+        await mkdir(join(root, "inputs", name, `${name}-skill`), { recursive: true });
+        await writeFile(
+          join(root, "inputs", name, `${name}-skill`, "SKILL.md"),
+          `# ${name} skill\n`,
+        );
+      }
+      const provider = new Provider({
+        config: {
+          basePath: root,
+          delegate: { id: "openai:codex-sdk" as const },
+          workspace: {
+            sources: plugins.map((name) => ({
+              type: "local" as const,
+              path: join(root, "inputs", name),
+              destination: ".agents/skills",
+              permissions: "all" as const,
+            })),
+          },
+        },
+        env: {
+          ALLAGENTS_LOCAL_SOURCE_ROOT: join(root, "inputs"),
+          ALLAGENTS_CACHE_ROOT: join(root, "cache"),
+          ALLAGENTS_WORKSPACE_ROOT: join(root, "runtime"),
+        },
+      });
+      try {
+        const result = await provider.callApi("list-local-skills");
+        expect(result.error).toBeUndefined();
+        expect(result.output).toBe(
+          plugins
+            .map((name) => `${name}-skill`)
+            .sort()
+            .join(","),
+        );
+        const metadata = result.metadata as { workspace: WorkspaceMetadata };
+        expect(metadata.workspace.sources).toHaveLength(plugins.length);
       } finally {
         await provider.cleanup();
       }

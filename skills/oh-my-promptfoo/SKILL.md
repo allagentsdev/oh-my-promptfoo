@@ -69,6 +69,14 @@ empty-workspace example below. For other pinned Git/OCI layouts and source
 permissions, read [the provider guide](../../docs/provider-guide.md) and
 [the source permissions example](../../examples/source-permissions/promptfooconfig.yaml).
 
+To stage several plugins' skills side by side, repeat `destination:
+.agents/skills` on one `type: local` source per plugin; the trees merge into
+that one directory. Every source sharing a destination must declare the same
+`permissions`, and no two may contribute the same relative path — a collision
+fails the run and names both source paths instead of one plugin silently
+shadowing another. Only `type: local` sources merge, and a destination nested
+inside another (`a` and `a/b`) is still rejected.
+
 ## Check generated files without model grading
 
 When the task requires an exact file, assert its bytes through the workspace

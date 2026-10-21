@@ -473,6 +473,22 @@ describe("workspace configuration", () => {
         ],
       }),
     ).toThrow("overlap");
+    // A merge set is a list the author writes; defaulting below the ceiling would only
+    // force them to restate its length beside it. Ten plugins staged into one skills
+    // directory must validate with no `limits` block at all.
+    const merged = Array.from({ length: 10 }, (_, index) => ({
+      type: "local" as const,
+      path: `/plugins/plugin-${index}/skills`,
+      destination: ".agents/skills",
+    }));
+    expect(validateWorkspace({ sources: merged }).sources).toHaveLength(10);
+    // A caller wanting a tighter policy than the ceiling still gets one.
+    expect(() => validateWorkspace({ sources: merged, limits: { maxSources: 4 } })).toThrow(
+      "Too many workspace sources",
+    );
+    expect(() => validateWorkspace({ sources: merged, limits: { maxSources: 65 } })).toThrow(
+      "Invalid source limit maxSources",
+    );
     expect(() =>
       validateWorkspace({
         sources: [
@@ -504,6 +520,53 @@ describe("workspace configuration", () => {
     expect(() => validateWorkspace({ sources: [], viewMode: "reflink-only" })).toThrow("viewMode");
     expect(() => validateWorkspace({ sources: [], viewMode: "copy" })).toThrow("viewMode");
   });
+  test("shared destinations merge only for local sources under one permissions policy", () => {
+    const local = (path: string, permissions?: "all" | "read-only") => ({
+      type: "local" as const,
+      path,
+      destination: ".agents/skills",
+      ...(permissions ? { permissions } : {}),
+    });
+    expect(
+      validateWorkspace({ sources: [local("/host/a"), local("/host/b"), local("/host/c")] })
+        .sources,
+    ).toHaveLength(3);
+    expect(
+      validateWorkspace({
+        sources: [local("/host/a", "read-only"), local("/host/b", "read-only")],
+      }).sources.every((source) => source.permissions === "read-only"),
+    ).toBe(true);
+    expect(() =>
+      validateWorkspace({ sources: [local("/host/a", "all"), local("/host/b", "read-only")] }),
+    ).toThrow(/must declare the same permissions.*\/host\/a.*\/host\/b/s);
+    expect(() =>
+      validateWorkspace({ sources: [local("/host/a"), local("/host/b", "read-only")] }),
+    ).toThrow(/same permissions/);
+    expect(() =>
+      validateWorkspace({
+        sources: [
+          local("/host/a"),
+          {
+            type: "git",
+            repository: "https://example.test/r.git",
+            ref: "main",
+            destination: ".agents/skills",
+          },
+        ],
+      }),
+    ).toThrow(/Only local sources may share destination.*\/host\/a.*example\.test/s);
+    expect(() =>
+      validateWorkspace({
+        sources: [local("/host/a"), { ...local("/host/b"), destination: ".agents/skills/extra" }],
+      }),
+    ).toThrow("Source destinations overlap");
+    expect(() =>
+      validateWorkspace({
+        sources: [{ ...local("/host/a"), destination: ".agents" }, local("/host/b")],
+      }),
+    ).toThrow("Source destinations overlap");
+  });
+
   test("local source validation requires an absolute path and excludes package-managed roots", async () => {
     expect(() =>
       validateWorkspace({
@@ -708,6 +771,155 @@ describe("workspace lifecycle", () => {
       expect(protectedPath).not.toContain(`${sep}published${sep}`);
       expect(await readFile(join(protectedPath, "SKILL.md"), "utf8")).toBe("# Original\n");
       expect(await readFile(join(source, "SKILL.md"), "utf8")).toBe("# Original\n");
+    },
+    30_000,
+  );
+  onLinux(
+    "several local sources merge one destination, keeping every plugin's skills",
+    async () => {
+      const root = await mkdtemp(join(realpathSync(tmpdir()), "allagents-local-merge-"));
+      temporary.push(root);
+      const host = join(root, "host");
+      const plugins = ["alpha", "beta", "gamma"];
+      for (const name of plugins) {
+        await mkdir(join(host, name, `${name}-skill`), { recursive: true });
+        await writeFile(join(host, name, `${name}-skill`, "SKILL.md"), `# ${name}\n`);
+        await mkdir(join(host, name, "common"), { recursive: true });
+        await chmod(join(host, name, "common"), 0o755);
+        await writeFile(join(host, name, "common", `${name}.md`), `shared ${name}\n`);
+      }
+      const channels: RuntimeChannels = {
+        ALLAGENTS_LOCAL_SOURCE_ROOT: host,
+        ALLAGENTS_CACHE_ROOT: join(root, "cache"),
+        ALLAGENTS_WORKSPACE_ROOT: join(root, "runtime"),
+      };
+      const spec: WorkspaceSpec = {
+        sources: plugins.map((name) => ({
+          type: "local" as const,
+          path: join(host, name),
+          destination: ".agents/skills",
+          permissions: "all" as const,
+        })),
+      };
+      const owner = manager(spec, channels);
+      const handle = await owner.prepare();
+      const skills = join(handle.path, ".agents", "skills");
+      expect((await readdir(skills)).sort()).toEqual([
+        "alpha-skill",
+        "beta-skill",
+        "common",
+        "gamma-skill",
+      ]);
+      for (const name of plugins) {
+        expect(await readFile(join(skills, `${name}-skill`, "SKILL.md"), "utf8")).toBe(
+          `# ${name}\n`,
+        );
+        expect(await readFile(join(skills, "common", `${name}.md`), "utf8")).toBe(
+          `shared ${name}\n`,
+        );
+      }
+      expect(handle.adapters.filter((view) => view.destination === ".agents/skills")).toHaveLength(
+        1,
+      );
+      expect(handle.sources).toHaveLength(3);
+      await writeFile(join(host, "beta", "beta-skill", "SKILL.md"), "# beta changed\n");
+      const fresh = manager(spec, channels);
+      const next = await fresh.prepare();
+      expect(next.manifestDigest).not.toBe(handle.manifestDigest);
+      expect(
+        await readFile(join(next.path, ".agents", "skills", "beta-skill", "SKILL.md"), "utf8"),
+      ).toBe("# beta changed\n");
+    },
+    30_000,
+  );
+  onLinux(
+    "a relative path contributed by two merged sources fails naming both sources",
+    async () => {
+      const root = await mkdtemp(join(realpathSync(tmpdir()), "allagents-local-collide-"));
+      temporary.push(root);
+      const host = join(root, "host");
+      for (const name of ["alpha", "beta"]) {
+        await mkdir(join(host, name, "shared-skill"), { recursive: true });
+        await writeFile(join(host, name, "shared-skill", "SKILL.md"), `# ${name}\n`);
+      }
+      const owner = manager(
+        {
+          sources: ["alpha", "beta"].map((name) => ({
+            type: "local" as const,
+            path: join(host, name),
+            destination: ".agents/skills",
+          })),
+        },
+        {
+          ALLAGENTS_LOCAL_SOURCE_ROOT: host,
+          ALLAGENTS_CACHE_ROOT: join(root, "cache"),
+          ALLAGENTS_WORKSPACE_ROOT: join(root, "runtime"),
+        },
+      );
+      const failure = await owner.prepare().then(
+        () => undefined,
+        (error: unknown) => String(error),
+      );
+      expect(failure).toContain("shared-skill/SKILL.md");
+      expect(failure).toContain(join(host, "alpha"));
+      expect(failure).toContain(join(host, "beta"));
+    },
+    30_000,
+  );
+  onLinux(
+    "a merged read-only destination is one protected checkout with a verifiable stamp",
+    async () => {
+      const root = await mkdtemp(join(realpathSync(tmpdir()), "allagents-local-merge-protected-"));
+      temporary.push(root);
+      const host = join(root, "host");
+      for (const name of ["alpha", "beta"]) {
+        await mkdir(join(host, name, `${name}-skill`), { recursive: true });
+        await writeFile(join(host, name, `${name}-skill`, "SKILL.md"), `# ${name}\n`);
+      }
+      const channels: RuntimeChannels = {
+        ALLAGENTS_LOCAL_SOURCE_ROOT: host,
+        ALLAGENTS_CACHE_ROOT: join(root, "cache"),
+        ALLAGENTS_WORKSPACE_ROOT: join(root, "runtime"),
+      };
+      const merged = ["alpha", "beta"].map((name) => ({
+        type: "local" as const,
+        path: join(host, name),
+        destination: ".agents/skills",
+        permissions: "read-only" as const,
+      }));
+      const owner = manager({ sources: merged }, channels);
+      const handle = await owner.prepare();
+      const checkout = await readlink(join(handle.path, ".agents", "skills"));
+      expect(await readFile(join(checkout, "alpha-skill", "SKILL.md"), "utf8")).toBe("# alpha\n");
+      expect(await readFile(join(checkout, "beta-skill", "SKILL.md"), "utf8")).toBe("# beta\n");
+      const views = handle.adapters.filter((view) => view.destination === ".agents/skills");
+      expect(views).toHaveLength(1);
+      expect(views[0]!.adapter).toBe("read-only");
+      expect(views[0]!.checkoutKey).toMatch(/^[a-f0-9]{64}$/);
+      await owner.validateProtected(handle);
+      const records = join(dirname(dirname(handle.path)), "records");
+      const recovery = await Promise.all(
+        (await readdir(records)).map((name) => json<RecoveryRecord>(join(records, name))),
+      );
+      expect(
+        recovery
+          .flatMap((record) => record.views)
+          .filter((view) => !view.probe && view.destination === ".agents/skills"),
+      ).toHaveLength(1);
+      // A different merge set must never reuse the checkout prepared for this one.
+      const single = manager({ sources: [merged[0]!] }, channels);
+      const alone = await single.prepare();
+      const aloneView = alone.adapters.find((view) => view.destination === ".agents/skills");
+      expect(aloneView?.checkoutKey).not.toBe(views[0]!.checkoutKey);
+      expect(
+        await readFile(
+          join(await readlink(join(alone.path, ".agents", "skills")), "alpha-skill", "SKILL.md"),
+          "utf8",
+        ),
+      ).toBe("# alpha\n");
+      await expect(
+        readdir(join(await readlink(join(alone.path, ".agents", "skills")), "beta-skill")),
+      ).rejects.toThrow();
     },
     30_000,
   );
@@ -1414,7 +1626,7 @@ test("admission retains a shared protected checkout when reused by a different s
   const cache = new SeedCache(cacheRoot);
   const reused = await cache.protectedSource(
     record,
-    metadata.sources.find((s) => s.destination === "project")!,
+    metadata.sources.filter((s) => s.destination === "project"),
   );
   expect(reused.key).toBe(key!);
   expect(await readFile(join(reused.path, "source.txt"), "utf8")).toBe("immutable input\n");

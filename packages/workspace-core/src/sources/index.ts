@@ -10,7 +10,7 @@ import {
 import { publishProgress } from "../progress.js";
 import type { ResolvedSource, RuntimeChannels, SourceLimits, WorkspaceSpec } from "../types.ts";
 import { materializeGit, resolveGit } from "./git.ts";
-import { materializeLocal, resolveLocal } from "./local.ts";
+import { type LocalEntry, localEntries, materializeLocal, resolveLocal } from "./local.ts";
 import { materializeOci, resolveOci } from "./oci.ts";
 import { PhysicalWriter } from "./process.ts";
 
@@ -145,6 +145,37 @@ async function logicalBytes(root: string): Promise<number> {
   return total;
 }
 
+/**
+ * Sources sharing a destination merge into one tree, so what lands there must follow
+ * from the set of sources and never from acquisition order. Every file path is owned
+ * by exactly one source; a directory path may repeat only when its mode agrees, since
+ * the copy chmods each directory it visits and a disagreement would be last-writer-wins.
+ */
+function assertMergeable(destination: string, group: ResolvedSource[]): void {
+  const owners = new Map<string, { path: string; entry: LocalEntry }>();
+  for (const source of group) {
+    if (source.type !== "local")
+      throw new Error(
+        `Only local sources may share destination ${JSON.stringify(destination)}; ${source.type} source ${JSON.stringify(source.repository)} cannot merge`,
+      );
+    for (const entry of localEntries(source)) {
+      const owner = owners.get(entry.path);
+      if (!owner) {
+        owners.set(entry.path, { path: source.path, entry });
+        continue;
+      }
+      if (owner.entry.size !== undefined || entry.size !== undefined)
+        throw new Error(
+          `Sources sharing destination ${JSON.stringify(destination)} both provide ${JSON.stringify(entry.path)}: ${owner.path} and ${source.path}`,
+        );
+      if (owner.entry.mode !== entry.mode)
+        throw new Error(
+          `Sources sharing destination ${JSON.stringify(destination)} disagree on the mode of directory ${JSON.stringify(entry.path)}: ${owner.path} and ${source.path}`,
+        );
+    }
+  }
+}
+
 export async function materializeSources(
   resolved: ResolvedSource[],
   staging: string,
@@ -155,6 +186,14 @@ export async function materializeSources(
 ): Promise<void> {
   signal?.throwIfAborted();
   if (resolved.length > limits.maxSources) throw new Error("Too many resolved sources");
+  const groups = new Map<string, ResolvedSource[]>();
+  for (const source of resolved) {
+    const group = groups.get(source.destination);
+    if (group) group.push(source);
+    else groups.set(source.destination, [source]);
+  }
+  for (const [destination, group] of groups)
+    if (group.length > 1) assertMergeable(destination, group);
   staging = resolve(staging);
   const writer = await PhysicalWriter.create(
     staging,
