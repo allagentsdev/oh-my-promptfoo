@@ -482,6 +482,15 @@ test("binary scoring states the checklist rule to the judge and fixes the bar at
 test("rubricPrompt and criteria render test variables beneath a fixed system prompt", async () => {
   const previous = Object.fromEntries(environmentKeys.map((name) => [name, process.env[name]]));
   const previousTemplating = process.env.PROMPTFOO_DISABLE_TEMPLATING;
+  const templateKeys = [
+    "PROMPTFOO_DISABLE_OBJECT_STRINGIFY",
+    "OMP_TEMPLATE_SOURCE",
+    "PROMPTFOO_DISABLE_TEMPLATE_ENV_VARS",
+    "PROMPTFOO_SELF_HOSTED",
+  ];
+  const previousTemplateEnv = Object.fromEntries(
+    templateKeys.map((key) => [key, process.env[key]]),
+  );
   const requests: { messages: { role: string; content: string }[] }[] = [];
   const server = createServer(async (request, response) => {
     let body = "";
@@ -582,9 +591,109 @@ test("rubricPrompt and criteria render test variables beneath a fixed system pro
     process.env.PROMPTFOO_DISABLE_TEMPLATING = "true";
     await llmAssert("answer", { config: { components: faithful }, vars: {} });
     assert.match(requests[1].messages[0].content, /this source: \{\{ tool_result \}\}/);
+
+    delete process.env.PROMPTFOO_DISABLE_TEMPLATING;
+    delete process.env.PROMPTFOO_DISABLE_OBJECT_STRINGIFY;
+    delete process.env.PROMPTFOO_DISABLE_TEMPLATE_ENV_VARS;
+    delete process.env.PROMPTFOO_SELF_HOSTED;
+    process.env.OMP_TEMPLATE_SOURCE = "approved";
+    const templateConfig = {
+      rubricPrompt:
+        "Source {{ env.OMP_TEMPLATE_SOURCE }}: {{ object }} / {{ array }} / {{ (json | load).status }}",
+      components: [
+        {
+          metric: "faithful",
+          value: "{{ env.OMP_TEMPLATE_SOURCE }} {{ (json | load).status }} {{ object.status }}",
+        },
+      ],
+    };
+    const templateVars = {
+      object: { status: "valid" },
+      array: ["one", { status: "two" }],
+      json: '{"status":"loaded"}',
+    };
+    await llmAssert("answer", { config: templateConfig, vars: templateVars });
+    assert.ok(
+      requests[2].messages[0].content.includes(
+        'Source approved: {"status":"valid"} / one,{"status":"two"} / loaded',
+      ),
+    );
+    assert.ok(requests[2].messages[0].content.includes("approved loaded valid"));
+    assert.deepEqual(templateVars.object, { status: "valid" });
+
+    for (const disabled of ["true", "1", "YES"]) {
+      process.env.PROMPTFOO_DISABLE_OBJECT_STRINGIFY = disabled;
+      await llmAssert("answer", { config: templateConfig, vars: templateVars });
+      assert.ok(
+        requests
+          .at(-1)
+          ?.messages[0].content.includes(
+            "Source approved: [object Object] / one,[object Object] / loaded",
+          ),
+      );
+    }
+    for (const template of ["{{ env.OMP_UNSET_TEMPLATE_ENV }}", "{{ bad | load }}"]) {
+      for (const inRubric of [true, false]) {
+        await assert.rejects(
+          llmAssert("answer", {
+            config: {
+              rubricPrompt: inRubric ? template : "Instructions",
+              components: [{ metric: "faithful", value: inRubric ? "Criterion" : template }],
+            },
+            vars: { bad: "not JSON" },
+          }),
+          /could not render its test variables/,
+        );
+      }
+    }
+    // Neither text nor JS references can safely resolve without the config directory.
+    for (const reference of ["file://grading.txt", "file://grader.js:fn"]) {
+      for (const disabled of [undefined, "true"]) {
+        if (disabled) process.env.PROMPTFOO_DISABLE_TEMPLATING = disabled;
+        else delete process.env.PROMPTFOO_DISABLE_TEMPLATING;
+        for (const inRubric of [true, false]) {
+          await assert.rejects(
+            llmAssert("answer", {
+              config: {
+                rubricPrompt: inRubric ? reference : "Instructions",
+                components: [{ metric: "faithful", value: inRubric ? "Criterion" : reference }],
+              },
+            }),
+            /cannot resolve file:\/\/: the eval config directory is not available/,
+          );
+        }
+      }
+    }
+    process.env.PROMPTFOO_DISABLE_TEMPLATING = "1";
+    await llmAssert("answer", { config: templateConfig });
+    assert.ok(requests.at(-1)?.messages[0].content.includes(templateConfig.rubricPrompt));
+    assert.ok(requests.at(-1)?.messages[0].content.includes(templateConfig.components[0].value));
+    delete process.env.PROMPTFOO_DISABLE_TEMPLATING;
+    for (const flag of ["PROMPTFOO_DISABLE_TEMPLATE_ENV_VARS", "PROMPTFOO_SELF_HOSTED"]) {
+      process.env[flag] = "true";
+      await assert.rejects(
+        llmAssert("answer", { config: templateConfig, vars: templateVars }),
+        /could not render its test variables/,
+      );
+      delete process.env[flag];
+    }
+    process.env.PROMPTFOO_SELF_HOSTED = "true";
+    process.env.PROMPTFOO_DISABLE_TEMPLATE_ENV_VARS = "false";
+    await llmAssert("answer", { config: templateConfig, vars: templateVars });
+    assert.ok(requests.at(-1)?.messages[0].content.includes("Source approved:"));
+    delete process.env.PROMPTFOO_SELF_HOSTED;
+    delete process.env.PROMPTFOO_DISABLE_TEMPLATE_ENV_VARS;
+    // Shared llm-rubric templates must not leak into llmAssert.
+    await llmAssert("answer", {
+      config: { components: [{ metric: "faithful", value: "Criterion" }] },
+      options: { rubricPrompt: "Grade {{ output }}" },
+      test: { options: { rubricPrompt: "Grade {{ output }}" } },
+    } as Parameters<typeof llmAssert>[1]);
+    assert.ok(!requests.at(-1)?.messages[0].content.includes("Grade {{ output }}"));
   } finally {
     server.close();
     restoreEnvironment(previous);
+    restoreEnvironment(previousTemplateEnv);
     if (previousTemplating === undefined) delete process.env.PROMPTFOO_DISABLE_TEMPLATING;
     else process.env.PROMPTFOO_DISABLE_TEMPLATING = previousTemplating;
   }

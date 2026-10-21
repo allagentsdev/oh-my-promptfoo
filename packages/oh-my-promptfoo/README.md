@@ -61,10 +61,28 @@ unverified, in `config.rubricPrompt`. Unlike `llm-rubric`, it cannot replace the
 system prompt: one request scores every criterion only because the reply format
 is fixed, so the suite's text is added beneath the built-in rules. The answer is
 always sent to the judge on its own, and the criteria come from `components`, so
-a template that uses `{{ output }}` or `{{ rubric }}` is rejected. Test
-variables render in `rubricPrompt` and in each component's `value` as they do in
-an `llm-rubric` value, and an unset variable fails the assertion instead of
-rendering empty. `PROMPTFOO_DISABLE_TEMPLATING` leaves both literal.
+a template that uses `{{ output }}` or `{{ rubric }}` is rejected.
+
+Both `rubricPrompt` and component `value` templates receive test variables,
+`{{ env.NAME }}` from the permitted process environment, and the `load` filter
+(`JSON.parse`, not a file loader). Component values keep structured variables.
+In `rubricPrompt` only, objects become JSON strings; arrays remain arrays with
+object elements JSON-stringified and primitives unchanged, matching Promptfoo's
+grader-prompt conversion. Set `PROMPTFOO_DISABLE_OBJECT_STRINGIFY=true` or `1` to
+keep structured variables there too, or use `load` to parse a JSON string before
+property access. Unset variables fail rather than render empty.
+`PROMPTFOO_DISABLE_TEMPLATING=true` or `1` leaves both text fields literal.
+
+`env` honors process-level `PROMPTFOO_DISABLE_TEMPLATE_ENV_VARS`, defaulting to
+disabled with `PROMPTFOO_SELF_HOSTED`; config-level `env`, async environment
+overrides, and custom `nunjucksFilters` are not exposed to this script assertion.
+Only assertion `config.rubricPrompt` is read, never `options.rubricPrompt`.
+Share inline guidance with YAML anchors (`rubricPrompt: &guidance |` at its
+first definition, `rubricPrompt: *guidance` on later assertions). `file://`
+templates fail with a missing-config-directory error: supported Promptfoo script
+contexts expose no config directory, and `llmAssert` never guesses from `cwd`.
+See [ADR 0006](docs/adr/0006-llm-assert-rubric-prompt.md) for upstream sources
+and deliberate differences from Promptfoo's grader defaults.
 
 It reports the judge call's token usage back to Promptfoo, which records it under
 `tokenUsage.assertions` — grader spend, separate from the agent under test. A

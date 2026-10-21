@@ -16,7 +16,11 @@ export interface BatchedRubricConfig {
 
 type Grade = { metric: string; score: number; reason: string; pass?: boolean };
 type GraderResponse = { components?: unknown };
-type TemplateEngine = { renderString(source: string, context: object): string };
+type TemplateEngine = {
+  renderString(source: string, context: object): string;
+  addGlobal(name: string, value: unknown): void;
+  addFilter(name: string, filter: (value: string) => unknown): void;
+};
 type NunjucksModule = {
   Environment: new (
     loader: null,
@@ -32,6 +36,11 @@ const PROMPTFOO_TEMPLATE_SLOT = /\{\{-?\s*(output|rubric)\b/;
 
 let templateEngine: TemplateEngine | undefined;
 
+function envFlag(name: string, fallback = false): boolean {
+  const value = process.env[name];
+  return value === undefined ? fallback : /^(1|true|yes|yup|yeppers)$/i.test(value);
+}
+
 /**
  * Render with the Nunjucks that Promptfoo itself depends on, so test variables expand in
  * criteria and `rubricPrompt` exactly as they do in an `llm-rubric` value. Promptfoo is a
@@ -44,19 +53,46 @@ function templates(): TemplateEngine {
     // A variable the test never set would otherwise render as an empty string, and an
     // empty source silently turns a faithfulness criterion into one anything passes.
     templateEngine = new nunjucks.Environment(null, { autoescape: false, throwOnUndefined: true });
+    templateEngine.addFilter("load", JSON.parse);
   }
+  templateEngine.addGlobal(
+    "env",
+    envFlag("PROMPTFOO_DISABLE_TEMPLATE_ENV_VARS", envFlag("PROMPTFOO_SELF_HOSTED"))
+      ? {}
+      : process.env,
+  );
   return templateEngine;
 }
 
 function render(source: string, vars: Record<string, unknown>, label: string): string {
+  // Script assertions are not given Promptfoo's internal state.basePath. Never guess
+  // cwd: a config in another directory could silently load an unrelated file.
+  if (source.startsWith("file://")) {
+    throw new Error(
+      `LLM assertion ${label} cannot resolve file://: the eval config directory is not available in Promptfoo's JavaScript assertion context`,
+    );
+  }
   if (PROMPTFOO_TEMPLATE_SLOT.test(source)) {
     throw new Error(
       `LLM assertion ${label} cannot use {{ output }} or {{ rubric }}: the answer is already sent to the grader and the criteria come from components`,
     );
   }
-  const disabled = process.env.PROMPTFOO_DISABLE_TEMPLATING;
-  if (disabled === "true" || disabled === "1") return source;
+  if (envFlag("PROMPTFOO_DISABLE_TEMPLATING")) return source;
   try {
+    if (label === "rubricPrompt" && !envFlag("PROMPTFOO_DISABLE_OBJECT_STRINGIFY")) {
+      vars = Object.fromEntries(
+        Object.entries(vars).map(([key, value]) => [
+          key,
+          Array.isArray(value)
+            ? value.map((item) =>
+                typeof item === "object" && item !== null ? JSON.stringify(item) : item,
+              )
+            : typeof value === "object" && value !== null
+              ? JSON.stringify(value)
+              : value,
+        ]),
+      );
+    }
     return templates().renderString(source, vars);
   } catch (error) {
     throw new Error(
