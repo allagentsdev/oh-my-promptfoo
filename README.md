@@ -73,14 +73,23 @@ keep structured variables there too, or use `load` to parse a JSON string before
 property access. Unset variables fail rather than render empty.
 `PROMPTFOO_DISABLE_TEMPLATING=true` or `1` leaves both text fields literal.
 
-`env` honors process-level `PROMPTFOO_DISABLE_TEMPLATE_ENV_VARS`, defaulting to
-disabled with `PROMPTFOO_SELF_HOSTED`; config-level `env`, async environment
-overrides, and custom `nunjucksFilters` are not exposed to this script assertion.
+`llmAssert`'s own `env` global honors process-level
+`PROMPTFOO_DISABLE_TEMPLATE_ENV_VARS`, defaulting to disabled with
+`PROMPTFOO_SELF_HOSTED` (an empty disable flag also uses that default).
+It does not read private config-level or async environment overrides or custom
+`nunjucksFilters`. Separately, Promptfoo's config-load pass can already render
+`{{ env.NAME }}` using merged config `env:` before this assertion receives it;
+these pre-rendered values are not controlled by `llmAssert`'s rendering flags.
 Only assertion `config.rubricPrompt` is read, never `options.rubricPrompt`.
 Share inline guidance with YAML anchors (`rubricPrompt: &guidance |` at its
-first definition, `rubricPrompt: *guidance` on later assertions). `file://`
-templates fail with a missing-config-directory error: supported Promptfoo script
-contexts expose no config directory, and `llmAssert` never guesses from `cwd`.
+first definition, `rubricPrompt: *guidance` on later assertions). A `file://`
+reference that reaches `llmAssert` fails with a missing-config-directory error:
+script contexts expose no config directory, and it never guesses from `cwd`.
+For tests loaded through `tests: file://*.yaml` (also JSON/JSONL), Promptfoo can
+inline nested `config.rubricPrompt` and component `value` file references from
+its base path before the assertion runs. Loaded strings follow normal template
+checks; parsed JSON/YAML objects or arrays are not string templates and fail
+type validation. The assertion cannot identify their original file path.
 See [ADR 0006](docs/adr/0006-llm-assert-rubric-prompt.md) for upstream sources
 and deliberate differences from Promptfoo's grader defaults.
 

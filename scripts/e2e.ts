@@ -330,12 +330,12 @@ try {
                 config: {
                   threshold: 0.7,
                   rubricPrompt:
-                    "Judge only {{ subject }}. Environment {{ env.PACKED_ASSERTION_SUBJECT }}; object {{ details }}; {% set parsed = encoded | load %}loaded {{ parsed.subject }}.",
+                    "Judge only {{ subject }}. Environment {% set e = env.PACKED_ASSERTION_SUBJECT %}{{ e }}; object {{ details }}; {% set parsed = encoded | load %}loaded {{ parsed.subject }}.",
                   components: [
                     {
                       metric: "accuracy",
                       value:
-                        "Ground claims about {{ subject }}; environment {{ env.PACKED_ASSERTION_SUBJECT }}; {% set parsed = encoded | load %}loaded {{ parsed.subject }}; nested {{ details.subject }}",
+                        "Ground claims about {{ subject }}; environment {% set e = env.PACKED_ASSERTION_SUBJECT %}{{ e }}; {% set parsed = encoded | load %}loaded {{ parsed.subject }}; nested {{ details.subject }}",
                       weight: 3,
                     },
                     { metric: "clarity", value: "Explain {{ details.subject }} clearly" },

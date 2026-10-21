@@ -580,6 +580,15 @@ test("rubricPrompt and criteria render test variables beneath a fixed system pro
     );
     await assert.rejects(
       llmAssert("answer", {
+        config: {
+          rubricPrompt: { instructions: "Grade" } as unknown as string,
+          components: faithful,
+        },
+      }),
+      /rubricPrompt must be a string.*including parsed JSON\/YAML file contents/,
+    );
+    await assert.rejects(
+      llmAssert("answer", {
         config: { rubric: "Only judge the answer.", components: faithful } as never,
         vars,
       }),
@@ -678,6 +687,16 @@ test("rubricPrompt and criteria render test variables beneath a fixed system pro
       delete process.env[flag];
     }
     process.env.PROMPTFOO_SELF_HOSTED = "true";
+    for (const disabled of [undefined, ""]) {
+      if (disabled === undefined) delete process.env.PROMPTFOO_DISABLE_TEMPLATE_ENV_VARS;
+      else process.env.PROMPTFOO_DISABLE_TEMPLATE_ENV_VARS = disabled;
+      const before: number = requests.length;
+      await assert.rejects(
+        llmAssert("answer", { config: templateConfig, vars: templateVars }),
+        /could not render its test variables/,
+      );
+      assert.equal(requests.length, before, "hidden environment must not reach the judge");
+    }
     process.env.PROMPTFOO_DISABLE_TEMPLATE_ENV_VARS = "false";
     await llmAssert("answer", { config: templateConfig, vars: templateVars });
     assert.ok(requests.at(-1)?.messages[0].content.includes("Source approved:"));

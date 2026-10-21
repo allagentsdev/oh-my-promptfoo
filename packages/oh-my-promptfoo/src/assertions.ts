@@ -38,7 +38,7 @@ let templateEngine: TemplateEngine | undefined;
 
 function envFlag(name: string, fallback = false): boolean {
   const value = process.env[name];
-  return value === undefined ? fallback : /^(1|true|yes|yup|yeppers)$/i.test(value);
+  return value ? /^(1|true|yes|yup|yeppers)$/i.test(value) : fallback;
 }
 
 /**
@@ -120,7 +120,7 @@ export async function llmAssert(
   }
   if (config?.rubricPrompt !== undefined && typeof config.rubricPrompt !== "string") {
     throw new Error(
-      "LLM assertion rubricPrompt must be a string: llmAssert keeps its own system prompt and reply format, so a Promptfoo chat template cannot replace them",
+      "LLM assertion rubricPrompt must be a string, not an object or array (including parsed JSON/YAML file contents): use inline text or a text-file string. llmAssert keeps its own system prompt and reply format; chat templates cannot replace them",
     );
   }
   if (

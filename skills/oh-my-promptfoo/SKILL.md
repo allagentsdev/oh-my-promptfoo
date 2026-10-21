@@ -146,8 +146,12 @@ not paste an `llm-rubric` template that uses `{{ output }}` or `{{ rubric }}`.
 Only assertion `config.rubricPrompt` is read; `options.rubricPrompt` is ignored.
 To share these instructions, define a YAML anchor as above and use
 `rubricPrompt: *suiteGuidance` in another assertion's `config` in the same YAML
-document. Do not use `file://`: supported Promptfoo script contexts provide no
-config directory, so it fails clearly rather than resolving against `cwd`.
+document. A `file://` reference still present when `llmAssert` runs fails clearly:
+script contexts provide no config directory, and it never guesses from `cwd`.
+For tests loaded via `tests: file://*.yaml` (also JSON/JSONL), Promptfoo can
+inline nested rubricPrompt/component file references from its base path first.
+Loaded strings receive the normal checks; parsed JSON/YAML objects or arrays
+fail string-template validation. Their original file paths are not available.
 
 Test variables such as `{{ source }}` render in `rubricPrompt` and component
 values, which is how a faithfulness criterion receives its source text. Define
@@ -162,11 +166,14 @@ on a stringified object, or set `PROMPTFOO_DISABLE_OBJECT_STRINGIFY=true` or `1`
 to retain structured variables.
 
 `PROMPTFOO_DISABLE_TEMPLATING=true` or `1` leaves both text fields literal.
-Process-level `PROMPTFOO_DISABLE_TEMPLATE_ENV_VARS` disables process access
-through `env`, defaulting to disabled with `PROMPTFOO_SELF_HOSTED`. Config-level
-`env`, async environment overrides, and custom `nunjucksFilters` are not exposed
-to this assertion. Use test variables instead of depending on that private
-Promptfoo state. See [ADR 0006](../../docs/adr/0006-llm-assert-rubric-prompt.md)
+The assertion's own `env` global honors process-level
+`PROMPTFOO_DISABLE_TEMPLATE_ENV_VARS`, defaulting to disabled with
+`PROMPTFOO_SELF_HOSTED`; an empty disable flag also uses this default.
+It does not read private config/async environment overrides or custom filters.
+However, Promptfoo's config-load pass can render `{{ env.NAME }}` using merged
+config `env:` before `llmAssert` sees the text. Assertion rendering flags cannot
+undo that preprocessing. Use test variables for assertion-time inputs.
+See [ADR 0006](../../docs/adr/0006-llm-assert-rubric-prompt.md)
 for versioned upstream sources and the strict-unset/literal-disable safeguards.
 
 ## Prove the run
