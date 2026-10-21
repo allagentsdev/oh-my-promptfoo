@@ -7,12 +7,12 @@
   <a href="https://github.com/allagentsdev/oh-my-promptfoo/blob/main/LICENSE"><img src="https://img.shields.io/github/license/allagentsdev/oh-my-promptfoo" alt="License"></a>
 </p>
 
-You've written a skill, an `AGENTS.md` or a prompt for a coding agent, and you
-want to know whether it works, and whether it still works after the next
-change. oh-my-promptfoo lets you test it like any other Promptfoo eval. Each
-test gets a fresh workspace holding the repositories and skills you choose. A
-real agent (Codex, Claude Code, GitHub Copilot or Pi) does the task there, and
-you grade both its answer and the files it changed.
+You've written a skill, an `AGENTS.md` or a prompt for a coding agent. Does it
+work, and will it still work after the next change? oh-my-promptfoo lets you
+test it like any other Promptfoo eval. Each test gets a fresh workspace with
+the repositories and skills you choose. A real agent (Codex, Claude Code,
+GitHub Copilot or Pi) does the task there, and you grade both its answer and
+the files it changed.
 
 It's a plain Promptfoo package, not a fork or a wrapper. `promptfoo eval`,
 `promptfoo view`, caching and CI work as they always do.
@@ -27,7 +27,7 @@ npm install --save-dev @github/copilot-sdk@1.0.17               # only if you us
 npm install --save-dev @earendil-works/pi-coding-agent@1.3.0    # only if you use Pi
 ```
 
-Add a `promptfooconfig.yaml` next to your skills:
+Add a `promptfooconfig.yaml` next to your `skills` folder:
 
 ```yaml
 prompts: ["{{task}}"]
@@ -37,7 +37,7 @@ providers:
       delegate:
         id: copilot-sdk
         env:
-          GH_TOKEN: "{{env.GH_TOKEN}}"   # the agent sees only what you pass here
+          GH_TOKEN: "{{env.GH_TOKEN}}"   # pass the agent's credentials here
       workspace:
         sources:
           - type: local
@@ -73,9 +73,10 @@ pinned Git and OCI sources, and larger runs.
 
 ## What you can do
 
-- **Give every test a clean workspace.** Stage Git repositories at a pinned
-  commit, OCI artifacts, or local directories. The agent never sees your own
-  checkout, and one test's edits never leak into the next.
+- **Start every test from a clean workspace.** List the Git repositories (at a
+  pinned commit), OCI artifacts or local folders a test needs. The agent works
+  on copies, so your checkout stays untouched and one test's edits never reach
+  the next.
 - **Swap the agent without rewriting tests.** Codex, Claude Code, Copilot and
   Pi run behind the same provider. Give each one a label to compare them side
   by side in one run.
@@ -87,22 +88,22 @@ pinned Git and OCI sources, and larger runs.
 - **Grade what the agent did, not what it says it did.** `agentAssert` sends a
   read-only agent into the workspace to check the changes. Turn on
   `fileChanges` to read them in your own JavaScript assertions.
-- **Run Copilot in a directory you already have.** `CopilotSdkProvider` skips
-  the workspace and runs Copilot where you point it.
+- **Run Copilot in a folder you already have.** `CopilotSdkProvider` runs
+  Copilot where you point it, without creating a workspace.
 
 ## Writing evals with an AI agent
 
 If an agent is writing your evals, point it at the
 [oh-my-promptfoo skill](https://github.com/allagentsdev/oh-my-promptfoo/blob/main/skills/oh-my-promptfoo/SKILL.md). It covers workspace
-layouts, source permissions, file assertions and grading, with worked
-configs.
+layouts, source permissions, file assertions and grading, with complete
+examples.
 
 ## Learn more
 
 - [Provider guide](https://github.com/allagentsdev/oh-my-promptfoo/blob/main/docs/provider-guide.md): sources, permissions, each agent's
   settings, limits, cleanup and caching
 - [Grading guide](https://github.com/allagentsdev/oh-my-promptfoo/blob/main/docs/grading-guide.md): `llmAssert` and `agentAssert` in
-  full, including scoring modes, templates, token usage and judge budgets
+  full, including scoring modes, templates, token usage and prompt size limits
 - [Examples](https://github.com/allagentsdev/oh-my-promptfoo/tree/main/examples): complete Promptfoo configs
 - [Architecture decisions](https://github.com/allagentsdev/oh-my-promptfoo/tree/main/docs/adr): why things work the way they do
 - [Changelog](https://github.com/allagentsdev/oh-my-promptfoo/blob/main/CHANGELOG.md)
