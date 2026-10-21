@@ -27,7 +27,7 @@ const READ_FLAGS = constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBL
  * The default containment boundary for local sources: the root of the Git repository holding
  * `basePath` (the nearest ancestor with a `.git` entry, which is a file in worktrees and
  * submodules), or `basePath` itself outside any repository. `ALLAGENTS_LOCAL_SOURCE_ROOT`
- * replaces it. See docs/adr/0009-resolve-provider-paths-against-the-eval-config.md.
+ * replaces it. See docs/adr/0010-resolve-provider-paths-against-the-eval-config.md.
  */
 export function localSourceBoundary(basePath: string): string {
   const start = resolve(basePath);

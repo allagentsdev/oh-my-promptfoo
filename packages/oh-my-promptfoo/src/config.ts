@@ -349,7 +349,7 @@ export function envelope(options: ProviderOptions): { config: JsonObject; basePa
  * loader basePath, which is the eval config's directory even when the provider comes from a
  * separate `providers: file://…` file. Absolute paths and `file:///` or `file://localhost/`
  * URLs are unchanged; validation of the result is left to the workspace specification.
- * See docs/adr/0009-resolve-provider-paths-against-the-eval-config.md.
+ * See docs/adr/0010-resolve-provider-paths-against-the-eval-config.md.
  */
 export function resolveSourcePaths(workspace: WorkspaceSpec, basePath: string): WorkspaceSpec {
   const sources: unknown = workspace.sources;
