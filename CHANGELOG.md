@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.12.0](https://github.com/allagentsdev/oh-my-promptfoo/compare/v1.11.0...v1.12.0) (2026-10-21)
+
+
+### Features
+
+* **workspace:** let local sources share a destination ([#72](https://github.com/allagentsdev/oh-my-promptfoo/issues/72)) ([536976c](https://github.com/allagentsdev/oh-my-promptfoo/commit/536976cb2b63dad9a5313378975d056ea66298e2))
+
 ## [1.11.0](https://github.com/allagentsdev/oh-my-promptfoo/compare/v1.10.0...v1.11.0) (2026-10-21)
 
 
