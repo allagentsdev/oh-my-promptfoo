@@ -17,7 +17,7 @@ import {
 } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { context as otelContext, propagation, trace } from "@opentelemetry/api";
@@ -26,6 +26,7 @@ import { W3CTraceContextPropagator } from "@opentelemetry/core";
 import { NodeTracerProvider } from "@opentelemetry/sdk-trace-node";
 import {
   promptConfig,
+  resolveSourcePaths,
   validateCopilotConfig,
   validateDelegateConfig,
   validateProviderConfig,
@@ -196,6 +197,39 @@ describe("closed configuration", () => {
         { model: "base", sandbox_mode: "workspace-write" },
       ),
     ).toEqual({ model: "override", sandbox_mode: "workspace-write" });
+  });
+  test("resolves only relative source paths against the loader basePath", () => {
+    const spec = resolveSourcePaths(
+      {
+        sources: [
+          { type: "local", path: "../skills", destination: "a" },
+          { type: "local", path: "/abs/skills", destination: "b" },
+          { type: "git", repository: "file://../repo.git", ref: "main", destination: "c" },
+          { type: "git", repository: "file:///abs/repo.git", ref: "main", destination: "d" },
+          {
+            type: "git",
+            repository: "file://localhost/abs/repo.git",
+            ref: "main",
+            destination: "e",
+          },
+          {
+            type: "git",
+            repository: "https://example.test/repo.git",
+            ref: "main",
+            destination: "f",
+          },
+        ],
+      },
+      "/suite/evals",
+    );
+    expect(spec.sources.map((s) => (s.type === "local" ? s.path : s.repository))).toEqual([
+      "/suite/skills",
+      "/abs/skills",
+      "file:///suite/repo.git",
+      "file:///abs/repo.git",
+      "file://localhost/abs/repo.git",
+      "https://example.test/repo.git",
+    ]);
   });
 });
 describe("workspace provider publication and lifetime", () => {
@@ -1016,6 +1050,177 @@ describe("workspace provider publication and lifetime", () => {
     },
     45_000,
   );
+  // An eval config in `repo/evals`, a plugin elsewhere in that repository, and a sibling
+  // directory outside it. The consumer project (`root`) is not itself a Git repository.
+  async function configRepository() {
+    const root = await project("promptfoo", native);
+    const repo = join(root, "repo");
+    const evals = join(repo, "evals");
+    const skills = join(repo, "plugins", "demo", "skills");
+    await mkdir(evals, { recursive: true });
+    await promisify(execFile)("git", ["init", "-q", repo]);
+    for (const [dir, body] of [
+      [skills, "echo plugin\n"],
+      [join(root, "outside"), "echo outside\n"],
+      [join(repo, "other"), "echo other\n"],
+    ]) {
+      await mkdir(join(dir, "example", "scripts"), { recursive: true });
+      await writeFile(join(dir, "example", "scripts", "task.sh"), body);
+    }
+    return { root, repo, evals, skills };
+  }
+  async function readLocal(
+    root: string,
+    basePath: string,
+    path: string,
+    localRoot?: string,
+  ): Promise<{ output?: unknown; error?: unknown; metadata?: unknown }> {
+    const provider = new Provider({
+      config: {
+        basePath,
+        delegate: { id: "openai:codex-sdk" as const },
+        workspace: { sources: [{ type: "local", path, destination: ".agents/skills" }] },
+      },
+      env: {
+        ...(localRoot ? { ALLAGENTS_LOCAL_SOURCE_ROOT: localRoot } : {}),
+        ALLAGENTS_CACHE_ROOT: join(root, "cache"),
+        ALLAGENTS_WORKSPACE_ROOT: join(root, "runtime"),
+      },
+    });
+    try {
+      return await provider.callApi("read-local-skill");
+    } finally {
+      await provider.cleanup();
+    }
+  }
+  async function withoutLocalRootVariable<T>(run: () => Promise<T>): Promise<T> {
+    const inherited = process.env.ALLAGENTS_LOCAL_SOURCE_ROOT;
+    delete process.env.ALLAGENTS_LOCAL_SOURCE_ROOT;
+    try {
+      return await run();
+    } finally {
+      if (inherited !== undefined) process.env.ALLAGENTS_LOCAL_SOURCE_ROOT = inherited;
+    }
+  }
+  onLinux(
+    "relative local paths resolve against the loader basePath, not the process cwd",
+    () =>
+      withoutLocalRootVariable(async () => {
+        const { root, evals, skills } = await configRepository();
+        // Promptfoo 0.124 passes an absolute basePath; 0.122 passes it relative to the cwd.
+        for (const basePath of [evals, relative(process.cwd(), evals)]) {
+          const result = await readLocal(root, basePath, "../plugins/demo/skills");
+          expect(result.error).toBeUndefined();
+          expect(result.output).toBe("echo plugin\n");
+          const source = (result.metadata as { workspace: WorkspaceMetadata }).workspace.sources[0];
+          expect(source?.type === "local" && source.path).toBe(skills);
+        }
+      }),
+    45_000,
+  );
+  onLinux(
+    "without ALLAGENTS_LOCAL_SOURCE_ROOT, local sources stay inside the config's Git repository",
+    () =>
+      withoutLocalRootVariable(async () => {
+        const { root, repo, evals } = await configRepository();
+        for (const outside of [
+          "../../outside",
+          "../plugins/../../outside",
+          join(root, "outside"),
+        ]) {
+          const result = await readLocal(root, evals, outside);
+          expect(result.output).toBeUndefined();
+          expect(String(result.error)).toContain(
+            `Local source must stay inside trusted source root ${JSON.stringify(repo)}`,
+          );
+        }
+        // Outside any repository, the boundary is the config directory itself.
+        const loose = join(root, "outside", "evals");
+        await mkdir(loose);
+        expect((await readLocal(root, loose, "..")).error).toContain(JSON.stringify(loose));
+        await mkdir(join(loose, "skills", "example", "scripts"), { recursive: true });
+        await writeFile(join(loose, "skills", "example", "scripts", "task.sh"), "echo loose\n");
+        expect((await readLocal(root, loose, "skills")).output).toBe("echo loose\n");
+      }),
+    45_000,
+  );
+  onLinux(
+    "ALLAGENTS_LOCAL_SOURCE_ROOT replaces the repository boundary",
+    async () => {
+      const { root, repo, evals } = await configRepository();
+      const narrowed = join(repo, "plugins");
+      const escaped = await readLocal(root, evals, "../other", narrowed);
+      expect(escaped.output).toBeUndefined();
+      expect(String(escaped.error)).toContain(
+        `Local source must stay inside trusted source root ${JSON.stringify(narrowed)}`,
+      );
+      expect((await readLocal(root, evals, "../plugins/demo/skills", narrowed)).output).toBe(
+        "echo plugin\n",
+      );
+      expect((await readLocal(root, evals, "../../outside", root)).output).toBe("echo outside\n");
+      expect((await readLocal(root, evals, "../other", "relative/root")).error).toContain(
+        "absolute ALLAGENTS_LOCAL_SOURCE_ROOT",
+      );
+    },
+    45_000,
+  );
+  test("relative file:// Git repositories resolve against the loader basePath", async () => {
+    const root = await project("promptfoo", native);
+    const evals = join(root, "evals");
+    const repository = join(root, "vendor", "source");
+    await mkdir(evals);
+    await mkdir(repository, { recursive: true });
+    await writeFile(join(repository, "input.txt"), "relative source");
+    const git = promisify(execFile);
+    await git("git", ["init", "-q", repository]);
+    await git("git", ["-C", repository, "add", "."]);
+    await git("git", [
+      "-C",
+      repository,
+      "-c",
+      "user.name=Fixture",
+      "-c",
+      "user.email=fixture@example.test",
+      "commit",
+      "-qm",
+      "fixture",
+    ]);
+    const { stdout } = await git("git", ["-C", repository, "rev-parse", "HEAD"]);
+    const provider = new Provider({
+      config: {
+        basePath: evals,
+        delegate: { id: "openai:codex-sdk" },
+        workspace: {
+          sources: [
+            {
+              type: "git",
+              repository: "file://../vendor/source",
+              ref: "HEAD",
+              destination: "repo",
+            },
+          ],
+        },
+      },
+      env: {
+        ALLAGENTS_CACHE_ROOT: join(root, "cache"),
+        ALLAGENTS_WORKSPACE_ROOT: join(root, "runtime"),
+      },
+    });
+    try {
+      const result = await provider.callApi("success");
+      expect(result.error).toBeUndefined();
+      const workspace = (result.metadata as { workspace: WorkspaceMetadata }).workspace;
+      expect(workspace.sources[0]).toMatchObject({
+        repository: pathToFileURL(repository).href,
+        commit: stdout.trim(),
+      });
+      expect(await readFile(join(workspace.path, "repo", "input.txt"), "utf8")).toBe(
+        "relative source",
+      );
+    } finally {
+      await provider.cleanup();
+    }
+  }, 30_000);
 });
 describe("protocol and native adapters", () => {
   test("native SDK discovery uses the consumer while agent writes use external workspace storage", async () => {

@@ -26,6 +26,7 @@ import {
   materializeSources,
   resolveSources,
 } from "../packages/workspace-core/src/sources/index.ts";
+import { localSourceBoundary } from "../packages/workspace-core/src/sources/local.ts";
 import {
   digest,
   PhysicalWriter,
@@ -201,6 +202,18 @@ localDescribe("bounded host-local acquisition", () => {
     await expect(
       resolveSources(spec, { ALLAGENTS_LOCAL_SOURCE_ROOT: root }, controller.signal),
     ).rejects.toThrow("host acquisition cancelled");
+  });
+  test("defaults the boundary to the nearest Git repository root, else the base path", async () => {
+    const root = await temporary();
+    const repo = join(root, "repo");
+    const worktree = join(repo, "nested");
+    await mkdir(join(repo, ".git"), { recursive: true });
+    await mkdir(join(worktree, "evals", "deep"), { recursive: true });
+    // Linked worktrees and submodules carry a `.git` file rather than a directory.
+    await writeFile(join(worktree, ".git"), "gitdir: ../.git/worktrees/nested\n");
+    expect(localSourceBoundary(join(repo, "evals"))).toBe(repo);
+    expect(localSourceBoundary(join(worktree, "evals", "deep"))).toBe(worktree);
+    expect(localSourceBoundary(join(root, "loose", "evals"))).toBe(join(root, "loose", "evals"));
   });
 });
 

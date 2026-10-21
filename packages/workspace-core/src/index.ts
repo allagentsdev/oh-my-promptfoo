@@ -49,6 +49,7 @@ import type {
 export { canonicalJson, DEFAULT_LIMITS, RUNTIME_CHANNELS, validateWorkspace } from "./config.js";
 export { helperInvoke } from "./helper.js";
 export { CACHE_CEILING, CACHE_MAX_AGE, manifestDigest, SeedCache } from "./seed-cache.js";
+export { localSourceBoundary } from "./sources/local.js";
 export * from "./types.js";
 
 function overlaps(a: string, b: string): boolean {

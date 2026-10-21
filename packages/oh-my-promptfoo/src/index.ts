@@ -7,6 +7,7 @@ import {
   type FileChanges,
 } from "../../workspace-core/src/file-changes.js";
 import {
+  localSourceBoundary,
   RUNTIME_CHANNELS,
   type WorkspaceHandle,
   WorkspaceManager,
@@ -21,6 +22,7 @@ import {
   type ProviderConfig,
   type ProviderOptions,
   promptConfig,
+  resolveSourcePaths,
   validateCopilotConfig,
   validateProviderConfig,
 } from "./config.js";
@@ -102,11 +104,22 @@ export class Provider extends Calls {
   constructor(options: ProviderOptions = {}) {
     super();
     const { config, basePath } = envelope(options);
-    this.config = immutable(validateProviderConfig(JSON.parse(jsonSafe(config))));
+    const validated = validateProviderConfig(JSON.parse(jsonSafe(config)));
+    this.config = immutable({
+      ...validated,
+      workspace: resolveSourcePaths(validated.workspace, basePath),
+    });
     this.basePath = basePath;
     this.providerId = options.id ?? "allagents:workspace";
     const channels: Record<string, string | undefined> = {};
     for (const key of RUNTIME_CHANNELS) channels[key] = options.env?.[key] ?? process.env[key];
+    // Without a runner override, local sources stay inside the repository holding the config.
+    if (
+      channels.ALLAGENTS_LOCAL_SOURCE_ROOT === undefined &&
+      Array.isArray(this.config.workspace.sources) &&
+      this.config.workspace.sources.some((source) => source?.type === "local")
+    )
+      channels.ALLAGENTS_LOCAL_SOURCE_ROOT = localSourceBoundary(basePath);
     this.manager = new WorkspaceManager(
       this.config.workspace as unknown as WorkspaceSpec,
       channels,

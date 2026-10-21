@@ -19,10 +19,10 @@ provider before writing assertions:
 
 ## Review a pinned source with local skills
 
-This example assumes the eval runs in a trusted checkout containing
-`plugins/cargowise/skills`. The source checkout is protected; skills have a
-private writable view for the case. The agent starts at the workspace root,
-with `CargoWise/` and `.agents/skills/` as siblings.
+This example assumes `promptfooconfig.yaml` sits in `evals/` of a trusted
+checkout that also contains `plugins/cargowise/skills`. The source checkout is
+protected; skills have a private writable view for the case. The agent starts
+at the workspace root, with `CargoWise/` and `.agents/skills/` as siblings.
 
 ```yaml
 prompts: ["{{task}}"]
@@ -47,7 +47,7 @@ providers:
             destination: CargoWise
             permissions: read-only
           - type: local
-            path: "{{env.EVAL_SKILLS_DIR}}"
+            path: ../plugins/cargowise/skills
             destination: .agents/skills
             permissions: all
 tests:
@@ -58,8 +58,11 @@ tests:
         value: cw-sql-schema-migration
 ```
 
-Supply `EVAL_SKILLS_DIR` as an absolute path within a trusted
-`ALLAGENTS_LOCAL_SOURCE_ROOT`. A runner, not authored YAML, supplies that root.
+A relative local `path` resolves against the eval config's directory, as
+Promptfoo resolves its own `file://` references, even when the provider is
+loaded from `providers: file://…`. It must stay inside the Git repository that
+contains that directory (or the directory itself outside a repository); a
+runner can replace that boundary with an absolute `ALLAGENTS_LOCAL_SOURCE_ROOT`.
 Local directories include untracked and ignored files. Keep secrets and build
 outputs outside them; their resolved `metadata.workspace.sources[].digest`
 identifies the staged content. `CargoWise.git` is private: the trusted runner
