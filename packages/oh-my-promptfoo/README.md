@@ -32,19 +32,22 @@ alongside other assertions, set the outer Promptfoo `weight` to the number of
 components to preserve the test's weighted score.
 
 Set `config.scoring: binary` for a checklist, where a criterion is either met or
-not: the judge is told to score exactly 1 or 0 and never award partial credit,
-and the pass mark becomes a full score. Stating the mode replaces hand-writing
-that rule into every rubric and pairing it with `threshold: 1`; a `threshold`
-beside it that is not 1 contradicts the mode and is rejected. The default,
-`graded`, keeps the 0.7 bar and says nothing about how to score.
+not. The judge is told to score exactly 1 or 0 and never award partial credit,
+to preserve each criterion's subject, condition, polarity and scope rather than
+accept an easier promise, and to treat a criterion whose condition the output
+never enters as satisfied so long as nothing it forbids occurs. The pass mark
+becomes a full score, so a `threshold` beside the mode that is not 1
+contradicts it and is rejected. Stating the mode replaces writing those rules
+into every rubric by hand.
 
-Every judge is told the rules that belong to grading itself rather than to any
-caller's domain: preserve each criterion's subject, condition, polarity and
-scope, never accept an easier promise in its place, and treat a criterion whose
-condition the output never enters as satisfied so long as nothing it forbids
-occurs. Set `config.candidate: agent` when the output is an agent's answer, and
-the judge is also told to credit only what the answer states — never a claimed
-tool call, command, file or query — and that skill retrieval is gated elsewhere.
+The default, `graded`, is unchanged: the 0.7 bar, and no instruction about how
+to score. Partial credit for a near miss is what graded is for, so none of the
+checklist rules apply to it and upgrading cannot move an existing caller's
+scores.
+
+Set `config.candidate: agent` when the output is an agent's answer, and the
+judge is also told to credit only what the answer states — never a claimed tool
+call, command, file or query — and that skill retrieval is gated elsewhere.
 Keep `rubric` for what only the suite knows, such as which claims its domain
 counts as unverified.
 

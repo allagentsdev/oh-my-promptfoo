@@ -398,11 +398,16 @@ test("binary scoring states the checklist rule to the judge and fixes the bar at
     assert.equal(graded.pass, true);
     assert.equal(prompts[2].includes("binary checklist item"), false);
 
-    // Judging discipline belongs to every caller, so it is stated without being asked for.
-    assert.match(prompts[2], /Preserve each criterion's subject, condition, polarity and scope/);
-    assert.match(prompts[2], /scoped to a condition the output never enters/);
-    // An agent narrates work the judge cannot see; a text candidate has no such claims.
+    // Upgrading must not move a graded caller's scores. Checklist judging rides with the
+    // mode that asked for it: under graded, credit for a near miss is the point.
+    assert.equal(prompts[2].includes("never accept an easier promise"), false);
+    assert.equal(prompts[2].includes("scoped to a condition the output never enters"), false);
     assert.equal(prompts[2].includes("never credit an unverified claim"), false);
+    // Binary carries them, so no caller has to write them into a rubric by hand.
+    assert.match(prompts[0], /never accept an easier promise/);
+    assert.match(prompts[0], /scoped to a condition the output never enters/);
+    // An agent narrates work the judge cannot see; a text candidate has no such claims.
+    assert.equal(prompts[0].includes("never credit an unverified claim"), false);
 
     responses.push({
       components: [
