@@ -55,8 +55,16 @@ what graded is for, so none of the checklist rules apply to it.
 Set `config.candidate: agent` when the output is an agent's answer, and the
 judge is also told to credit only what the answer states — never a claimed tool
 call, command, file or query — and that skill retrieval is gated elsewhere.
-Keep `rubric` for what only the suite knows, such as which claims its domain
-counts as unverified.
+
+Put what only the suite knows, such as which claims its domain counts as
+unverified, in `config.rubricPrompt`. Unlike `llm-rubric`, it cannot replace the
+system prompt: one request scores every criterion only because the reply format
+is fixed, so the suite's text is added beneath the built-in rules. The answer is
+always sent to the judge on its own, and the criteria come from `components`, so
+a template that uses `{{ output }}` or `{{ rubric }}` is rejected. Test
+variables render in `rubricPrompt` and in each component's `value` as they do in
+an `llm-rubric` value, and an unset variable fails the assertion instead of
+rendering empty. `PROMPTFOO_DISABLE_TEMPLATING` leaves both literal.
 
 It reports the judge call's token usage back to Promptfoo, which records it under
 `tokenUsage.assertions` — grader spend, separate from the agent under test. A

@@ -91,7 +91,9 @@ try {
     );
     await writeFile(
       join(cwd, "assertions-smoke.mjs"),
-      `import assert from 'node:assert/strict';import {createRequire} from 'node:module';import {llmAssert} from 'oh-my-promptfoo/assertions';const require=createRequire(import.meta.url);const c=require('oh-my-promptfoo/assertions');assert.equal(typeof c.llmAssert,'function');await assert.rejects(llmAssert('answer',{config:{components:[]}}),/unique named components/);await assert.rejects(c.llmAssert('answer',{config:{components:[]}}),/unique named components/);`,
+      // The undefined-variable message comes from Nunjucks itself, so it proves each package
+      // manager's layout lets the packed build resolve Nunjucks through Promptfoo.
+      `import assert from 'node:assert/strict';import {createRequire} from 'node:module';import {llmAssert} from 'oh-my-promptfoo/assertions';const require=createRequire(import.meta.url);const c=require('oh-my-promptfoo/assertions');assert.equal(typeof c.llmAssert,'function');await assert.rejects(llmAssert('answer',{config:{components:[]}}),/unique named components/);await assert.rejects(c.llmAssert('answer',{config:{components:[]}}),/unique named components/);const unset={config:{components:[{metric:'m',value:'{{ missing }}'}]},vars:{}};await assert.rejects(llmAssert('answer',unset),/attempted to output null or undefined value/);await assert.rejects(c.llmAssert('answer',unset),/attempted to output null or undefined value/);`,
     );
     run("node", ["smoke.mjs", "without-copilot"], cwd);
     run("node", ["node_modules/oh-my-promptfoo/dist/cli.js", "--help"], cwd);

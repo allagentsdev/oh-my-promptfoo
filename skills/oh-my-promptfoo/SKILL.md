@@ -137,8 +137,12 @@ assertion passes only when every component passes. For a checklist, where a
 criterion is either met or not, set `scoring: binary` rather than a threshold:
 the judge is told to score exactly 1 or 0, to keep each criterion's scope and
 polarity, and the bar becomes a full score, so none of that has to be repeated
-in each suite's `rubric`. Keep `rubric` for guidance only this suite needs,
-such as which claims its domain counts as unverified.
+in each suite's `rubricPrompt`. Keep `rubricPrompt` for instructions only this
+suite needs, such as which claims its domain counts as unverified. It is added
+beneath the built-in rules and cannot replace them or the reply format, so do
+not paste an `llm-rubric` template that uses `{{ output }}` or `{{ rubric }}`.
+Test variables such as `{{ source }}` render in `rubricPrompt` and in component
+values, which is how a faithfulness criterion receives its source text.
 
 ## Prove the run
 

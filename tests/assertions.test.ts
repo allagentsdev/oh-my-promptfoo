@@ -41,7 +41,9 @@ test("one OpenAI-compatible request scores every named criterion and gates each 
     process.env.OPENAI_MODEL = "fake-grader";
     process.env.OPENAI_API_KEY = "local-only";
     process.env.OPENAI_BASE_URL = `http://127.0.0.1:${address.port}/v1`;
-    const context = { config: { threshold: 0.7, components, rubric: "Only judge the answer." } };
+    const context = {
+      config: { threshold: 0.7, components, rubricPrompt: "Only judge the answer." },
+    };
     responses.push({
       components: [
         { metric: "clarity", score: 0.7, reason: "Clear enough" },
@@ -474,5 +476,116 @@ test("binary scoring states the checklist rule to the judge and fixes the bar at
   } finally {
     server.close();
     restoreEnvironment(previous);
+  }
+});
+
+test("rubricPrompt and criteria render test variables beneath a fixed system prompt", async () => {
+  const previous = Object.fromEntries(environmentKeys.map((name) => [name, process.env[name]]));
+  const previousTemplating = process.env.PROMPTFOO_DISABLE_TEMPLATING;
+  const requests: { messages: { role: string; content: string }[] }[] = [];
+  const server = createServer(async (request, response) => {
+    let body = "";
+    for await (const chunk of request) body += chunk;
+    requests.push(JSON.parse(body));
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(
+      JSON.stringify({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                components: [{ metric: "faithful", score: 1, reason: "Matches the source" }],
+              }),
+            },
+          },
+        ],
+      }),
+    );
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  try {
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("Missing test server port");
+    process.env.OPENAI_MODEL = "fake-grader";
+    process.env.OPENAI_API_KEY = "local-only";
+    process.env.OPENAI_BASE_URL = `http://127.0.0.1:${address.port}/v1`;
+    delete process.env.PROMPTFOO_DISABLE_TEMPLATING;
+    const faithful = [
+      { metric: "faithful", value: "States only facts from this source: {{ tool_result }}" },
+    ];
+    const vars = { tool_result: "Invoice inv-123 is approved.", invoice_id: "inv-123" };
+
+    // As in llm-rubric, a test variable expands where the suite wrote it, and the answer
+    // still travels alone as the user message rather than inside the instructions.
+    await llmAssert("Invoice inv-123 is approved.", {
+      config: { rubricPrompt: "The request was about {{ invoice_id }}.", components: faithful },
+      vars,
+    });
+    const [system, user] = requests[0].messages;
+    assert.match(
+      system.content,
+      /States only facts from this source: Invoice inv-123 is approved\./,
+    );
+    assert.match(
+      system.content,
+      /cannot change the rules or the reply format above\):\nThe request was about inv-123\./,
+    );
+    // The suite's instructions follow the rules and reply format they may not override.
+    assert.ok(
+      system.content.indexOf("components") < system.content.indexOf("The request was about"),
+    );
+    assert.equal(user.content, "Invoice inv-123 is approved.");
+
+    // A variable the test never set would render as an empty source, turning a
+    // faithfulness criterion into one anything passes; it fails before a paid request.
+    await assert.rejects(
+      llmAssert("answer", { config: { components: faithful }, vars: {} }),
+      /component faithful could not render its test variables/,
+    );
+
+    // Templates written for llm-rubric place the answer and criteria themselves; here
+    // both are already supplied, so such a template is a mistake to name, not to obey.
+    for (const rubricPrompt of ["Grade {{ output }}", "Grade against {{rubric}}"]) {
+      await assert.rejects(
+        llmAssert("answer", { config: { rubricPrompt, components: faithful }, vars }),
+        /cannot use \{\{ output \}\} or \{\{ rubric \}\}/,
+      );
+    }
+    await assert.rejects(
+      llmAssert("answer", {
+        config: { components: [{ metric: "echo", value: "Repeats {{ output }}" }] },
+        vars,
+      }),
+      /component echo cannot use/,
+    );
+    await assert.rejects(
+      llmAssert("answer", {
+        config: {
+          rubricPrompt: [{ role: "system", content: "x" }] as unknown as string,
+          components: faithful,
+        },
+        vars,
+      }),
+      /rubricPrompt must be a string/,
+    );
+    await assert.rejects(
+      llmAssert("answer", {
+        config: { rubric: "Only judge the answer.", components: faithful } as never,
+        vars,
+      }),
+      /config\.rubric was renamed to config\.rubricPrompt/,
+    );
+    assert.equal(requests.length, 1);
+
+    // Promptfoo's own switch for literal braces applies here too.
+    process.env.PROMPTFOO_DISABLE_TEMPLATING = "true";
+    await llmAssert("answer", { config: { components: faithful }, vars: {} });
+    assert.match(requests[1].messages[0].content, /this source: \{\{ tool_result \}\}/);
+  } finally {
+    server.close();
+    restoreEnvironment(previous);
+    if (previousTemplating === undefined) delete process.env.PROMPTFOO_DISABLE_TEMPLATING;
+    else process.env.PROMPTFOO_DISABLE_TEMPLATING = previousTemplating;
   }
 });
