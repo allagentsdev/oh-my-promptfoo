@@ -20,9 +20,10 @@ of agent edits.
 ### Agent workspace grading
 
 `package:oh-my-promptfoo/assertions:agentAssert` accepts the same `components`,
-`threshold`, `scoring`, `candidate` and `rubricPrompt` fields as `llmAssert`,
+`threshold`, `scoring` and `rubricPrompt` fields as `llmAssert`,
 plus required `grader: { id, config?, env? }` and optional `timeoutMs`,
-`queueTimeoutMs` and `maxPromptBytes`.
+`queueTimeoutMs` and `maxPromptBytes`. Like `llmAssert`, it rejects the removed
+`candidate` field; its workspace verification rule is always built in.
 The grader IDs are the same three supported delegates as the workspace provider.
 Use explicit `grader.env` for credentials. The assertion consumes
 `context.providerResponse.metadata.workspace.path`; absent or released paths

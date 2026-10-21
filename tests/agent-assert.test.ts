@@ -204,6 +204,11 @@ test("agentAssert shares component scoring and inspects the live workspace with 
       assert.match(recorded[0].prompt, /parser regression/);
       assert.match(recorded[0].prompt, /I fixed the parser/);
       assert.match(recorded[0].prompt, /never an unverified claim/);
+      assert.ok(
+        recorded[0].prompt.includes(
+          "The answer comes from an agent: credit what it states and the workspace outcomes you actually inspect",
+        ),
+      );
       if (id === "openai:codex-sdk") {
         assert.equal(recorded[0].config.sandbox_mode, "read-only");
         assert.equal(recorded[0].config.network_access_enabled, false);
@@ -665,7 +670,8 @@ test("agentAssert uses llmAssert validation and component error messages", async
       { components: [{ metric: "constructor", value: "Unsafe metric" }] },
       { components: [{ metric: "m", value: "Criterion", weight: 0 }] },
       { scoring: "binary", threshold: 0.5 },
-      { candidate: "human" },
+      { candidate: "agent" },
+      { candidate: "text" },
       { rubricPrompt: "Grade {{ output }}" },
       { components: [{ metric: "m", value: "{{ missing }}" }] },
     ];
@@ -680,6 +686,11 @@ test("agentAssert uses llmAssert validation and component error messages", async
       }
       assert.ok(expected instanceof Error);
       const expectedMessage = expected.message;
+      if ("candidate" in override)
+        assert.equal(
+          expectedMessage,
+          "LLM assertion config.candidate was removed; state the grading rule in config.rubricPrompt",
+        );
       await assert.rejects(
         agentAssert("answer", { ...gradingContext, config } as never),
         (error: unknown) => error instanceof Error && error.message === expectedMessage,
