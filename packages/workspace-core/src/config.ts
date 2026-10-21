@@ -1,7 +1,12 @@
 import { isAbsolute, posix } from "node:path";
 import type { SourceLimits, WorkspaceLimits, WorkspaceSpec } from "./types.js";
+// `maxSources` defaults to the hard ceiling because the check compares an author's source
+// list against a number the same author writes beside it: a lower default only forces that
+// number to be restated, which is noise rather than a bound. A caller enforcing a policy
+// tighter than 64 can still state one. The byte and time limits are different - they bound
+// what a source turns out to contain, which the author cannot see when writing the config.
 export const DEFAULT_LIMITS: SourceLimits = {
-  maxSources: 8,
+  maxSources: 64,
   maxDownloadBytes: 268435456,
   maxExtractedBytes: 536870912,
   timeoutMs: 120000,

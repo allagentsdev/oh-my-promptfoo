@@ -473,6 +473,22 @@ describe("workspace configuration", () => {
         ],
       }),
     ).toThrow("overlap");
+    // A merge set is a list the author writes; defaulting below the ceiling would only
+    // force them to restate its length beside it. Ten plugins staged into one skills
+    // directory must validate with no `limits` block at all.
+    const merged = Array.from({ length: 10 }, (_, index) => ({
+      type: "local" as const,
+      path: `/plugins/plugin-${index}/skills`,
+      destination: ".agents/skills",
+    }));
+    expect(validateWorkspace({ sources: merged }).sources).toHaveLength(10);
+    // A caller wanting a tighter policy than the ceiling still gets one.
+    expect(() => validateWorkspace({ sources: merged, limits: { maxSources: 4 } })).toThrow(
+      "Too many workspace sources",
+    );
+    expect(() => validateWorkspace({ sources: merged, limits: { maxSources: 65 } })).toThrow(
+      "Invalid source limit maxSources",
+    );
     expect(() =>
       validateWorkspace({
         sources: [
