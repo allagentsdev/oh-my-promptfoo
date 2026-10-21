@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.11.0](https://github.com/allagentsdev/oh-my-promptfoo/compare/v1.10.0...v1.11.0) (2026-10-21)
+
+
+### Features
+
+* **assertions:** add a binary scoring mode to llmAssert ([#69](https://github.com/allagentsdev/oh-my-promptfoo/issues/69)) ([0487ee3](https://github.com/allagentsdev/oh-my-promptfoo/commit/0487ee39211a86599e19b8236eebcac18cd24e74))
+
 ## [1.10.0](https://github.com/allagentsdev/oh-my-promptfoo/compare/v1.9.1...v1.10.0) (2026-10-16)
 
 
