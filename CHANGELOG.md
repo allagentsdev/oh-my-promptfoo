@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.15.0](https://github.com/allagentsdev/oh-my-promptfoo/compare/v1.14.0...v1.15.0) (2026-10-21)
+
+
+### Features
+
+* **provider:** rename fileChanges.generatedFiles to changedFiles ([#83](https://github.com/allagentsdev/oh-my-promptfoo/issues/83)) ([5fd0c83](https://github.com/allagentsdev/oh-my-promptfoo/commit/5fd0c8342c05c6508efc18b2893b26047c2dddb3))
+
 ## [1.14.0](https://github.com/allagentsdev/oh-my-promptfoo/compare/v1.13.0...v1.14.0) (2026-10-21)
 
 
