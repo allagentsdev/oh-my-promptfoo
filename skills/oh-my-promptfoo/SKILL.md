@@ -178,6 +178,29 @@ undo that preprocessing. Use test variables for assertion-time inputs.
 See [ADR 0006](../../docs/adr/0006-llm-assert-rubric-prompt.md)
 for versioned upstream sources and the strict-unset/literal-disable safeguards.
 
+## Grading an agent's answer
+
+`llmAssert` sees only the final answer, never tool calls, commands or the
+workspace, and adds no rule of its own about narrated work; there is no
+`candidate` switch, and a config that sets one fails. When the answer comes from
+an agent, state the rule visibly in the suite's `rubricPrompt`:
+
+```yaml
+assert:
+  - type: javascript
+    value: package:oh-my-promptfoo/assertions:llmAssert
+    config:
+      rubricPrompt: |
+        Credit only what the answer itself shows. Do not credit a claim that a tool was called, a command was run, a file was inspected, created, edited or deleted, a build or test was run, or an external query was made.
+      components:
+        - metric: root-cause
+          value: The answer names the missing null check in parsePrice as the cause.
+```
+
+Omit the rule when narrated actions are the expected output, such as a support
+bot replying "I've cancelled your order". To grade real edits, use `agentAssert`
+below or a JavaScript assertion that reads the workspace path.
+
 ## Grade workspace outcomes with an agent
 
 Use `agentAssert` when a semantic criterion needs file inspection. Keep exact

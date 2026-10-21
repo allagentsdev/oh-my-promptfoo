@@ -665,7 +665,8 @@ test("agentAssert uses llmAssert validation and component error messages", async
       { components: [{ metric: "constructor", value: "Unsafe metric" }] },
       { components: [{ metric: "m", value: "Criterion", weight: 0 }] },
       { scoring: "binary", threshold: 0.5 },
-      { candidate: "human" },
+      { candidate: "agent" },
+      { candidate: "text" },
       { rubricPrompt: "Grade {{ output }}" },
       { components: [{ metric: "m", value: "{{ missing }}" }] },
     ];
@@ -680,6 +681,11 @@ test("agentAssert uses llmAssert validation and component error messages", async
       }
       assert.ok(expected instanceof Error);
       const expectedMessage = expected.message;
+      if ("candidate" in override)
+        assert.equal(
+          expectedMessage,
+          "LLM assertion config.candidate was removed; state the grading rule in config.rubricPrompt",
+        );
       await assert.rejects(
         agentAssert("answer", { ...gradingContext, config } as never),
         (error: unknown) => error instanceof Error && error.message === expectedMessage,

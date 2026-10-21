@@ -53,12 +53,6 @@ The default, `graded`, trusts the judge's verdict, adds no bar unless you state
 one, and says nothing about how to score. Partial credit for a near miss is
 what graded is for, so none of the checklist rules apply to it.
 
-Set `config.candidate: agent` when the output is an agent's answer, and the
-judge is also told to credit only what the answer states — never an unverified
-claim of a tool call, executed command, inspected, created, edited or deleted
-file, build or test run, or external query — and that skill retrieval is gated
-elsewhere.
-
 Put what only the suite knows, such as which claims its domain counts as
 unverified, in `config.rubricPrompt`. Unlike `llm-rubric`, it cannot replace the
 system prompt: one request scores every criterion only because the reply format
@@ -100,6 +94,32 @@ It reports the judge call's token usage back to Promptfoo, which records it unde
 `tokenUsage.assertions` — grader spend, separate from the agent under test. A
 grader that returns no usage reports nothing rather than zero, so an unmeasured
 call is never summed into a run total as a free one.
+
+### Grading an agent's answer
+
+`llmAssert` sees only the final answer, never the agent's tool calls, commands
+or workspace, and it adds no rule of its own about narrated work. When the
+answer comes from an agent, state that rule in the suite's `rubricPrompt`,
+where anyone reading the config can see it:
+
+```yaml
+assert:
+  - type: javascript
+    value: package:oh-my-promptfoo/assertions:llmAssert
+    config:
+      rubricPrompt: |
+        Credit only what the answer itself shows. Do not credit a claim that a tool was called, a command was run, a file was inspected, created, edited or deleted, a build or test was run, or an external query was made.
+      components:
+        - metric: root-cause
+          value: The answer names the missing null check in parsePrice as the cause.
+```
+
+Leave the rule out when narrated actions are the expected output, such as a
+support bot replying "I've cancelled your order". To grade real edits, use
+`agentAssert` below or a JavaScript assertion that reads the workspace. The
+former `config.candidate` field was removed; a config that still sets it fails
+and points to `rubricPrompt`. See
+[ADR 0009](docs/adr/0009-remove-llm-assert-candidate.md).
 
 ### Grade workspace changes with an agent
 
