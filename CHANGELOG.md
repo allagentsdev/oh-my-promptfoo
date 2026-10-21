@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.16.0](https://github.com/allagentsdev/oh-my-promptfoo/compare/v1.15.0...v1.16.0) (2026-10-21)
+
+
+### Features
+
+* **assertions:** grade live workspaces with read-only agent delegates ([#80](https://github.com/allagentsdev/oh-my-promptfoo/issues/80)) ([8da0f0c](https://github.com/allagentsdev/oh-my-promptfoo/commit/8da0f0c245998dbc8ed9e29aaf3409981c0670ab)), closes [#76](https://github.com/allagentsdev/oh-my-promptfoo/issues/76)
+* **assertions:** remove llmAssert candidate in favour of rubricPrompt ([#87](https://github.com/allagentsdev/oh-my-promptfoo/issues/87)) ([c0ae8c7](https://github.com/allagentsdev/oh-my-promptfoo/commit/c0ae8c74848f5b318ceb374ef82607082941b085))
+* **provider:** resolve source paths against the eval config directory ([#88](https://github.com/allagentsdev/oh-my-promptfoo/issues/88)) ([92eaecb](https://github.com/allagentsdev/oh-my-promptfoo/commit/92eaecbe89ae5c46ff58934d6312502bb3c2e0d7)), closes [#86](https://github.com/allagentsdev/oh-my-promptfoo/issues/86)
+
 ## [1.15.0](https://github.com/allagentsdev/oh-my-promptfoo/compare/v1.14.0...v1.15.0) (2026-10-21)
 
 
