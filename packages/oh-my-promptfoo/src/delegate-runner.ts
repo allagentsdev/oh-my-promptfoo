@@ -8,7 +8,13 @@ import { W3CTraceContextPropagator } from "@opentelemetry/core";
 import { NodeTracerProvider } from "@opentelemetry/sdk-trace-node";
 import { destination } from "../../workspace-core/src/config.js";
 import { closed, type JsonObject, object, validateDelegateConfig, validateEnv } from "./config.js";
-import { graderConfig, READ_TOOLS, workspaceReaderPath } from "./grader-policy.js";
+import {
+  claudeReadAllowed,
+  disabledWorkspaceSkills,
+  graderConfig,
+  graderReadScope,
+  workspaceReaderPath,
+} from "./grader-policy.js";
 import {
   type CallFrame,
   jsonSafe,
@@ -245,7 +251,12 @@ async function runNative(frame: CallFrame, signal: AbortSignal): Promise<JsonObj
       }
       nativePolicy = {
         cli_config: {
-          projects: { [frame.workingDir]: { trust_level: "untrusted" } },
+          // The SDK flattens object keys as dotted TOML without quoting them.
+          [`projects.${JSON.stringify(frame.workingDir)}.trust_level`]: "untrusted",
+          skills: {
+            include_instructions: false,
+            config: await disabledWorkspaceSkills(frame.workingDir),
+          },
           features: {
             shell_tool: false,
             unified_exec: false,
@@ -268,13 +279,37 @@ async function runNative(frame: CallFrame, signal: AbortSignal): Promise<JsonObj
         },
       };
     } else if (frame.readOnly && frame.delegate === "anthropic:claude-agent-sdk") {
+      const allowed = await graderReadScope(frame.workingDir, frame.readOnly.sourceRoots);
+      const canRead = (tool: string, input: unknown) => claudeReadAllowed(tool, input, allowed);
       nativePolicy = {
         setting_sources: [],
+        skills: [],
         strict_mcp_config: true,
         can_use_tool: async (tool: string, input: unknown) =>
-          READ_TOOLS.includes(tool)
+          (await canRead(tool, input))
             ? { behavior: "allow", updatedInput: input }
             : { behavior: "deny", message: "Read-only workspace grader" },
+        // Native in-workspace reads can bypass permission prompts; check those too.
+        hooks: {
+          PreToolUse: [
+            {
+              matcher: "Read|Glob|Grep",
+              hooks: [
+                async (event: { tool_name: string; tool_input: unknown }) =>
+                  (await canRead(event.tool_name, event.tool_input))
+                    ? {}
+                    : {
+                        hookSpecificOutput: {
+                          hookEventName: "PreToolUse",
+                          permissionDecision: "deny",
+                          permissionDecisionReason:
+                            "Read is outside the grader workspace or protected sources",
+                        },
+                      },
+              ],
+            },
+          ],
+        },
       };
     }
     const config = {
@@ -412,7 +447,10 @@ async function runCopilot(frame: CallFrame, signal: AbortSignal): Promise<JsonOb
   const sdk = await import(pathToFileURL(resolvePeer(frame.basePath, "@github/copilot-sdk")).href);
   if (typeof sdk.CopilotClient !== "function")
     throw new Error("Install the supported @github/copilot-sdk@1.0.17 peer");
-  const skillDirectories = workspaceSkillDirectories(frame.workingDir);
+  const skillDirectories = frame.readOnly ? [] : workspaceSkillDirectories(frame.workingDir);
+  const allowedRead = frame.readOnly
+    ? await graderReadScope(frame.workingDir, frame.readOnly.sourceRoots)
+    : undefined;
   const client: ClientLike = new sdk.CopilotClient({
     workingDirectory: frame.workingDir,
     env: process.env,
@@ -445,9 +483,9 @@ async function runCopilot(frame: CallFrame, signal: AbortSignal): Promise<JsonOb
   const skillReads = new Map<string, SkillCall>();
   const skillCalls: SkillCall[] = [];
   const permissions = (frame.config.permissions ?? {}) as JsonObject;
-  const approve = (request: JsonObject): JsonObject => {
+  const approve = async (request: JsonObject): Promise<JsonObject> => {
     const allowed =
-      request.kind === "read" ||
+      (request.kind === "read" && (!allowedRead || (await allowedRead(request.path)))) ||
       (request.kind === "write" && permissions.filesystem === "write") ||
       (request.kind === "shell" && permissions.shell === "allow") ||
       (request.kind === "url" && permissions.network === "allow");
@@ -467,7 +505,11 @@ async function runCopilot(frame: CallFrame, signal: AbortSignal): Promise<JsonOb
       onPermissionRequest: approve,
       enableConfigDiscovery: false,
       // Keep general config discovery off; expose only physical workspace skill directories.
-      ...(skillDirectories.length ? { enableSkills: true, skillDirectories } : {}),
+      ...(frame.readOnly
+        ? { enableSkills: false }
+        : skillDirectories.length
+          ? { enableSkills: true, skillDirectories }
+          : {}),
       infiniteSessions: { enabled: false },
     });
     unsubscribe = session.on((event) => {
@@ -603,7 +645,16 @@ async function runCopilot(frame: CallFrame, signal: AbortSignal): Promise<JsonOb
       [...(callError ? [callError] : []), ...cleanupErrors],
       "Copilot cleanup failed",
     );
-  if (callError) throw callError;
+  if (callError) {
+    if (usage.numRequests || cost > 0)
+      return {
+        error: callError instanceof Error ? callError.message : String(callError),
+        ...(output ? { output } : {}),
+        tokenUsage: usage,
+        cost,
+      };
+    throw callError;
+  }
   if (!result) throw new Error("Copilot session returned no result");
   return result;
 }

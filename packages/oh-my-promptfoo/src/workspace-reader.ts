@@ -67,15 +67,23 @@ function within(root: string, path: string): boolean {
   return rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel);
 }
 async function contained(path: unknown): Promise<string> {
-  if (typeof path !== "string" || path.includes("\0"))
-    throw new Error("path must be a workspace-relative string");
+  if (typeof path !== "string" || !path || path.includes("\0"))
+    throw new Error("path must name a workspace or declared protected source entry");
   const target = resolve(root, path);
-  if (isAbsolute(path) || !within(root, target))
-    throw new Error("path must stay inside the workspace");
+  const declaredTarget = Object.values(sourceRoots).some((allowed) => within(allowed, target));
+  if (
+    !within(root, target) &&
+    !(isAbsolute(path) && (within(physicalRoot, target) || declaredTarget))
+  )
+    throw new Error("path must stay inside the workspace or declared protected sources");
   const physical = await realpath(target);
   if (within(physicalRoot, physical)) return physical;
   for (const [source, allowed] of Object.entries(sourceRoots))
-    if (within(resolve(root, source), target) && within(allowed, physical)) return physical;
+    if (
+      (within(resolve(root, source), target) || (isAbsolute(path) && within(allowed, target))) &&
+      within(allowed, physical)
+    )
+      return physical;
   throw new Error("path follows a symlink outside the workspace or declared protected sources");
 }
 function integer(value: unknown, fallback: number, maximum: number, minimum = 0): number {

@@ -13,17 +13,19 @@ Export `agentAssert` from the assertions entry. Share component validation, temp
 
 ### Live read-only workspace, not a snapshot
 
-Inspect the published live directory through the existing delegate subprocess runner. A missing, non-directory or released path is an assertion error, never an answer-only fallback. Supply `metadata.fileChanges` when present, including its completeness status, as starting evidence rather than a substitute for inspection.
+Inspect the published live directory through the existing delegate subprocess runner. A missing, non-directory or released path is an assertion error, never an answer-only fallback. Supply only the captured changed-file paths, change kinds, file kinds and modes, deleted paths, unified diff and completeness/truncation/failure information as starting evidence. Never inline captured base64 file contents; the grader reads relevant files on demand.
 
 A snapshot would add potentially multi-gigabyte copies per assertion and complicate protected source links and their lease lifetime. The existing workspace lifetime is sufficient for normal assertions. Do not chmod the candidate's tree, copy it, or take ownership of its cleanup. The caller must not release or mutate it concurrently with assertions.
 
 Enforce filesystem read-only, shell denial and network-tool denial in each delegate's native policy, rejecting conflicting grader settings. Agent-tool network denial does not prevent model-service requests. Native SDK policy is a cooperative boundary, not a new OS sandbox against malicious same-user code or an SDK defect. The live workspace choice does not claim to protect against those threats; use a separately isolated runner for adversarial execution.
 
-Codex normally reads files through shell commands. Disabling execution therefore requires a replacement read surface: a bundled stdio MCP server offering only bounded `read_file` and `list_directory`. It rejects workspace escapes and undeclared external symlinks; declared protected source links remain readable. An authentication-only temporary Codex home excludes user configuration, and project configuration is untrusted. Claude exposes only Read/Glob/Grep with a denial callback; Copilot uses its existing permission callback. These policies prevent a grader from quietly regaining execution through discovered configuration.
+Codex normally reads files through shell commands. Disabling execution therefore requires a replacement read surface: a bundled stdio MCP server offering only bounded `read_file` and `list_directory`. It rejects workspace escapes and undeclared external symlinks; declared protected source links remain readable. Claude exposes only workspace/source-scoped Read/Glob/Grep with a path-checking denial callback; Copilot checks real paths before approving reads and disables workspace skill loading for graders. Candidate-written skills must never become judge instructions.
+
+The Codex grader supports API-key authentication only, through `grader.config.apiKey` or explicit `grader.env.OPENAI_API_KEY`. Its empty temporary Codex home excludes user configuration and ChatGPT login state; project configuration is untrusted. Do not copy `auth.json`: a refreshed single-use ChatGPT refresh token in a temporary copy would leave the original login broken. Copying it back introduces concurrent refresh/update races with other Codex sessions, so this assertion rejects login-only authentication instead. Other Codex provider uses retain their existing authentication contract.
 
 ### Time and cost bounds
 
-Use a 120,000 ms total assertion deadline, configurable via `timeoutMs` within the existing bounded timeout range. Queue wait and the single malformed-verdict retry consume that same deadline. This is independent of `workspaceTimeoutMs`: grading does not prepare a workspace, and preparation time says nothing about acceptable judge latency.
+Use a 120,000 ms grading execution deadline, configurable with `timeoutMs` from 1 to 3,600,000 ms. Start it only after acquiring the grader slot; the single malformed-verdict retry shares the execution deadline. Bound queue admission independently with `queueTimeoutMs`, default 900,000 ms and configurable from 1 to 3,600,000 ms. A queue timeout reports that the grader session could not start, not that grading ran out of time. Both are independent of `workspaceTimeoutMs`: grading does not prepare a workspace, and preparation time says nothing about acceptable judge latency.
 
 At most two delegate invocations bound protocol recovery, not the number of model requests inside an agent session. Report available native token usage, request counts and cost through assertion `tokensUsed`, including a discarded attempt. Do not invent measurements or claim a dollar ceiling: model pricing, usage completeness and agent-internal turns differ between delegates. A monetary budget requires external service/account controls. A timeout bounds wall time, not already incurred charges.
 
@@ -31,7 +33,7 @@ Promptfoo 0.122 aggregates assertion token counts but does not include a cost fi
 
 ### Concurrency
 
-Serialize agent graders within each evaluation process. The assertion entry is independent of provider instances, so it cannot honestly borrow a provider worker cap that it does not own. A process-local queue gives a conservative additional-session cap of one without coupling the public assertion contract to provider internals. Queue waits are bounded by the assertion deadline. Separate evaluation processes each have their own cap; deployment-wide limits remain the runner's responsibility.
+Serialize agent graders within each evaluation process. The assertion entry is independent of provider instances, so it cannot honestly borrow a provider worker cap that it does not own. A process-local queue gives a conservative additional-session cap of one without coupling the public assertion contract to provider internals. Queue admission has its own deadline so normal multi-row concurrency does not consume a waiting row's grading execution budget. Separate evaluation processes each have their own cap; deployment-wide limits remain the runner's responsibility.
 
 ## Consequences
 

@@ -124,7 +124,15 @@ try {
     value: "package:oh-my-promptfoo/assertions:agentAssert",
     config: {
       scoring: "binary",
-      grader: { id, config: id === "anthropic:claude-agent-sdk" ? { apiKeyRequired: false } : {} },
+      grader: {
+        id,
+        config:
+          id === "anthropic:claude-agent-sdk"
+            ? { apiKeyRequired: false }
+            : id === "openai:codex-sdk"
+              ? { apiKey: "fixture-api-key" }
+              : {},
+      },
       components: [
         {
           metric: "workspace-inspected",
@@ -201,16 +209,22 @@ try {
     `import {readdir,readFile,access} from 'node:fs/promises';import {join} from 'node:path';export default class Grader { id(){return 'fixture-grader';} async callApi(){const root=process.env.ALLAGENTS_WORKSPACE_ROOT;let live=false;for(const id of await readdir(root)){if(id.startsWith('.'))continue;for(const file of await readdir(join(root,id,'records'))){const row=JSON.parse(await readFile(join(root,id,'records',file),'utf8'));try{await access(join(row.path,'result.txt'));live=true;}catch{}}}return {output:JSON.stringify({pass:live,score:live?1:0,reason:'Deterministic grading checked live published workspace'})};}}`,
   );
   await writeFile(join(cwd, "promptfooconfig.json"), JSON.stringify(config, null, 2));
-  const output = run("node", [
-    join(cwd, "node_modules/promptfoo/dist/src/entrypoint.js"),
-    "eval",
-    "--config",
-    "promptfooconfig.json",
-    "--no-cache",
-    "--no-progress-bar",
-    "--output",
-    "results.json",
-  ]);
+  // Launch outside the consumer installation: package assertions must resolve
+  // peers beside their own module, not beside the invoking process cwd.
+  const output = run(
+    "node",
+    [
+      join(cwd, "node_modules/promptfoo/dist/src/entrypoint.js"),
+      "eval",
+      "--config",
+      join(cwd, "promptfooconfig.json"),
+      "--no-cache",
+      "--no-progress-bar",
+      "--output",
+      join(cwd, "results.json"),
+    ],
+    workspaceParent,
+  );
   const results = JSON.parse(await readFile(join(cwd, "results.json"), "utf8"));
   const stats = results.results?.stats ?? results.stats;
   if (stats?.successes !== 3 || stats?.failures !== 0 || stats?.errors !== 0)

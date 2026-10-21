@@ -177,13 +177,44 @@ export interface GraderUsage {
   cost?: unknown;
 }
 
-function parseGrades(text: string, components: RubricComponent[]): Map<string, Grade> {
-  let result: GraderResponse;
+function parseVerdict(text: string): GraderResponse {
   try {
-    result = JSON.parse(text) as GraderResponse;
+    return JSON.parse(text) as GraderResponse;
   } catch {
+    // Like Promptfoo's JSON grading prompts, accept a verdict wrapped in prose or fences.
+    let start = -1;
+    let depth = 0;
+    let quoted = false;
+    let escaped = false;
+    for (let index = 0; index < text.length; index++) {
+      const character = text[index];
+      if (start === -1) {
+        if (character === "{") {
+          start = index;
+          depth = 1;
+        }
+        continue;
+      }
+      if (quoted) {
+        if (escaped) escaped = false;
+        else if (character === "\\") escaped = true;
+        else if (character === '"') quoted = false;
+      } else if (character === '"') quoted = true;
+      else if (character === "{") depth++;
+      else if (character === "}" && --depth === 0) {
+        try {
+          return JSON.parse(text.slice(start, index + 1)) as GraderResponse;
+        } catch {
+          start = -1;
+        }
+      }
+    }
     throw new Error("LLM grader returned malformed JSON");
   }
+}
+
+function parseGrades(text: string, components: RubricComponent[]): Map<string, Grade> {
+  const result = parseVerdict(text);
   const grades = new Map<string, Grade>();
   if (!Array.isArray(result?.components) || result.components.length !== components.length)
     throw new Error("LLM grader did not score every component exactly once");
@@ -212,22 +243,46 @@ function parseGrades(text: string, components: RubricComponent[]): Map<string, G
 /** Retry only malformed verdicts; execution failures are not another paid attempt. */
 export async function gradeRubric(
   rubric: PreparedRubric,
-  request: () => Promise<{ text: string; usage?: GraderUsage }>,
+  request: () => Promise<{ text?: string; error?: string; usage?: GraderUsage }>,
 ) {
   const usages: GraderUsage[] = [];
   for (let attempt = 0; attempt < 2; attempt++) {
-    const response = await request();
+    let response: Awaited<ReturnType<typeof request>>;
+    try {
+      response = await request();
+    } catch (error) {
+      return gradingFailure(error, usages);
+    }
     if (response.usage) usages.push(response.usage);
+    if (response.error !== undefined) return gradingFailure(new Error(response.error), usages);
+    if (!response.text)
+      return gradingFailure(new Error("LLM grader returned no response text"), usages);
     let grades: Map<string, Grade>;
     try {
       grades = parseGrades(response.text, rubric.components);
     } catch (error) {
-      if (attempt === 1) throw error;
+      if (attempt === 1) return gradingFailure(error, usages);
       continue;
     }
     return rubricResult(rubric, grades, usages);
   }
-  throw new Error("LLM grader did not return a verdict");
+  return gradingFailure(new Error("LLM grader did not return a verdict"), usages);
+}
+
+function gradingFailure(error: unknown, usages: GraderUsage[]): ReturnType<typeof rubricResult> {
+  const tokensUsed = summarizeUsage(usages);
+  if (!tokensUsed) throw error;
+  // Promptfoo discards properties attached to thrown Errors. A billed failure must be an
+  // assertion result so its usage still reaches tokenUsage.assertions.
+  return {
+    pass: false,
+    score: 0,
+    reason: error instanceof Error ? error.message : String(error),
+    namedScores: {},
+    namedScoreWeights: {},
+    componentResults: [],
+    tokensUsed,
+  };
 }
 
 function rubricResult(
@@ -264,6 +319,19 @@ function rubricResult(
     };
   });
   const score = weightedScore / totalWeight;
+  const tokensUsed = summarizeUsage(usages);
+  return {
+    pass: allPassed,
+    score,
+    reason,
+    namedScores,
+    namedScoreWeights,
+    componentResults,
+    ...(tokensUsed ? { tokensUsed } : {}),
+  };
+}
+
+function summarizeUsage(usages: GraderUsage[]) {
   // Promptfoo bills grading separately from the agent under test, but only for calls it
   // makes itself. This assertion calls the grader directly, so without reporting usage the
   // judge's spend lands in no bucket: a suite batching ten criteria into one request shows
@@ -296,24 +364,13 @@ function rubricResult(
       measuredCost = true;
     }
   }
+  if (measuredRequests === 0 && !measuredCost) return undefined;
   return {
-    pass: allPassed,
-    score,
-    reason,
-    namedScores,
-    namedScoreWeights,
-    componentResults,
-    ...(measuredRequests === 0 && !measuredCost
-      ? {}
-      : {
-          tokensUsed: {
-            total: totalTokens,
-            prompt: promptTokens,
-            completion: completionTokens,
-            cached: cachedTokens,
-            numRequests: measuredRequests || usages.length,
-            ...(measuredCost ? { cost } : {}),
-          },
-        }),
+    total: totalTokens,
+    prompt: promptTokens,
+    completion: completionTokens,
+    cached: cachedTokens,
+    numRequests: measuredRequests || usages.length,
+    ...(measuredCost ? { cost } : {}),
   };
 }

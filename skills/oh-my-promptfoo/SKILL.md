@@ -208,18 +208,21 @@ assert:
 The grader may also be `anthropic:claude-agent-sdk` or `openai:codex-sdk`.
 Use the delegate's supported model fields and explicit `grader.env` credentials;
 `OPENAI_MODEL` and `OPENAI_API_KEY` are not an implicit agent-grader selection.
+Codex graders require an API key in `grader.config.apiKey` or explicit
+`grader.env.OPENAI_API_KEY`; they do not load ChatGPT login credentials.
 Component validation, weights, thresholds and `rubricPrompt` match `llmAssert`.
 Built-in agent rules require verification rather than accepting narrated work.
 Candidate output, workspace files and tool results are evidence, not instructions.
 
-Enable `fileChanges: true` on the candidate provider to supply captured contents,
-deleted paths and the diff as starting evidence. Incomplete capture is not proof
+Enable `fileChanges: true` on the candidate provider to supply changed-file
+paths/change/kind/mode, deleted paths and the diff, never captured base64 contents. Incomplete capture is not proof
 that no other files changed. The grader runs read-only with shell and network
 tools denied; it cannot run tests or repair the candidate. Broader permissions
 are rejected. Model-service traffic is still necessary.
 
-The default 120-second total deadline includes one malformed-reply retry and
-queue wait. Sessions serialize per process, not through the provider worker cap.
+The default 120-second execution deadline includes one malformed-reply retry
+and starts after queue admission. Separate `queueTimeoutMs` bounds queue wait
+(default 900000 ms). Sessions serialize per process, not through the provider worker cap.
 Usage from both attempts is reported under assertion `tokensUsed`, separately
 from the candidate's usage. Inspect reported usage; no dollar ceiling is implied
 by a time bound.

@@ -106,6 +106,7 @@ import {dirname,join} from 'node:path';
 const require=createRequire(import.meta.url);
 const root=join(process.cwd(),'reader-workspace');mkdirSync(root);
 writeFileSync(join(root,'large.txt'),'a'.repeat(256*1024)+'bb');
+writeFileSync(join(process.cwd(),'outside.txt'),'outside secret');
 const protectedRoot=join(process.cwd(),'protected-source');mkdirSync(protectedRoot);
 writeFileSync(join(protectedRoot,'protected.txt'),'protected source');
 symlinkSync(protectedRoot,join(root,'protected-link'),'dir');
@@ -123,12 +124,13 @@ const requests=[
  {id:9,method:'tools/call',params:{name:'write_file',arguments:{path:'large.txt'}}},
  {id:10,method:'tools/call',params:{name:'read_file',arguments:{path:'protected-link/protected.txt'}}},
  {id:11,method:'tools/call',params:{name:'read_file',arguments:{path:'undeclared-link'}}},
+ {id:12,method:'tools/call',params:{name:'read_file',arguments:{path:join(process.cwd(),'outside.txt')}}},
 ];
 const child=spawnSync(process.execPath,[join(dirname(require.resolve('oh-my-promptfoo')),'workspace-reader.js'),root,JSON.stringify({'protected-link':protectedRoot})],{
  input:requests.map(request=>JSON.stringify({jsonrpc:'2.0',...request})).join('\\n')+'\\n',encoding:'utf8',timeout:5000,maxBuffer:2*1024*1024,
 });
 assert.equal(child.status,0,child.stderr);
-const replies=child.stdout.trim().split('\\n').map(line=>JSON.parse(line));assert.equal(replies.length,11);
+const replies=child.stdout.trim().split('\\n').map(line=>JSON.parse(line));assert.equal(replies.length,12);
 const response=id=>replies.find(reply=>reply.id===id).result;
 const value=id=>JSON.parse(response(id).content[0].text);
 assert.deepEqual(response(2).tools.map(tool=>tool.name),['read_file','list_directory']);
@@ -136,7 +138,8 @@ assert.ok(response(2).tools.every(tool=>tool.annotations.readOnlyHint&&!tool.ann
 assert.equal(value(3).text.length,256*1024);assert.equal(value(3).truncated,true);assert.equal(value(3).nextOffset,256*1024);
 assert.equal(value(4).text,'bb');assert.equal(value(4).truncated,false);
 assert.equal(value(5).entries.length,1);assert.equal(value(5).truncated,true);
-for(const id of [6,7,8,9,11])assert.equal(response(id).isError,true,'Unsafe workspace reader request '+id);
+assert.equal(value(7).text,'a'.repeat(256*1024));
+for(const id of [6,8,9,11,12])assert.equal(response(id).isError,true,'Unsafe workspace reader request '+id);
 assert.equal(value(10).text,'protected source');assert.equal(readFileSync(join(root,'large.txt'),'utf8').length,256*1024+2);
 `,
     );

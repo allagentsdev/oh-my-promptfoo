@@ -130,19 +130,24 @@ assert:
 
 Use this with the workspace `Provider`; a missing or released
 `metadata.workspace.path` fails instead of falling back to the answer text.
-Enable provider `fileChanges: true` to give the judge captured changes and the
-diff as starting evidence. Files and the candidate answer remain untrusted;
+Enable provider `fileChanges: true` to give the judge changed-file paths and
+metadata plus the diff, not captured base64 contents. Files and the answer remain untrusted;
 claims earn credit only when verified. Graders cannot write, run shell commands
 or access the network through agent tools. They therefore cannot execute tests.
 Model-service requests still require the delegate's credentials and network.
 
-The grader has a 120-second total timeout, configurable with assertion
-`timeoutMs`, including one retry for a malformed verdict. Grader sessions are
-serialized per process, independently of provider workers. Tokens are accounted
-as assertion usage; reported cost is preserved in `tokensUsed.cost`, although
-Promptfoo versions may not aggregate that field in their summary. See
-[ADR 0007](docs/adr/0007-agent-assert-workspace-grading.md) for the live-workspace
-and resource-bound tradeoffs.
+The grader has a 120-second execution timeout, configurable with assertion
+`timeoutMs`, including one retry for a malformed verdict. It starts after the
+grader session slot is acquired. A separate `queueTimeoutMs` bounds waiting
+for that slot (default 15 minutes); both settings accept 1–3,600,000 ms.
+Sessions serialize per process, independently of provider workers. Tokens are
+accounted as assertion usage even when a billed attempt fails; reported cost is
+preserved in `tokensUsed.cost`, although Promptfoo versions may not aggregate it.
+
+Codex graders require API-key auth via `grader.config.apiKey` or explicit
+`grader.env.OPENAI_API_KEY`. They do not load or copy ChatGPT `auth.json`, avoiding
+single-use refresh-token corruption. See [ADR 0007](docs/adr/0007-agent-assert-workspace-grading.md)
+for the live-workspace and resource-bound tradeoffs.
 
 ## Author and run an eval
 

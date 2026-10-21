@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { readdir, realpath } from "node:fs/promises";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { type DelegateId, type JsonObject, validateDelegateConfig } from "./config.js";
 
@@ -79,15 +80,91 @@ export function graderConfig(id: DelegateId, input: JsonObject): JsonObject {
   const { append_allowed_tools: _append, ...rest } = config;
   return {
     ...rest,
-    permission_mode: "dontAsk",
+    permission_mode: "default",
     tools: [...READ_TOOLS],
-    custom_allowed_tools: [...READ_TOOLS],
+    // Explicitly empty: bare tool names auto-allow before can_use_tool runs.
+    custom_allowed_tools: [],
     allow_all_tools: false,
     allow_dangerously_skip_permissions: false,
     disallowed_tools: [
       ...new Set([...DENIED_TOOLS, ...((config.disallowed_tools ?? []) as string[])]),
     ],
   };
+}
+
+export function withinReadRoot(root: string, path: string): boolean {
+  const rel = relative(root, path);
+  return rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel);
+}
+
+/** The grader may read the live workspace and declared protected source targets only. */
+export async function graderReadScope(workingDir: string, sourceRoots: string[]) {
+  const roots = await Promise.all(
+    [workingDir, ...sourceRoots.map((source) => resolve(workingDir, source))].map((path) =>
+      realpath(path),
+    ),
+  );
+  return async (path: unknown): Promise<boolean> => {
+    if (typeof path !== "string" || !path || path.includes("\0")) return false;
+    try {
+      const physical = await realpath(resolve(workingDir, path));
+      return roots.some((root) => withinReadRoot(root, physical));
+    } catch {
+      return false;
+    }
+  };
+}
+
+export async function claudeReadAllowed(
+  tool: string,
+  input: unknown,
+  allowed: (path: unknown) => Promise<boolean>,
+): Promise<boolean> {
+  if (!READ_TOOLS.includes(tool) || !input || typeof input !== "object" || Array.isArray(input))
+    return false;
+  const args = input as JsonObject;
+  if (tool === "Read") return allowed(args.file_path);
+  // Glob patterns are relative to their search directory, not additional read roots.
+  if (
+    tool === "Glob" &&
+    (typeof args.pattern !== "string" ||
+      isAbsolute(args.pattern) ||
+      args.pattern.split(/[\\/]/).includes(".."))
+  )
+    return false;
+  return allowed(args.path === undefined ? "." : args.path);
+}
+
+/** Codex discovers skills even in untrusted projects; disable them by canonical file path. */
+export async function disabledWorkspaceSkills(workingDir: string) {
+  const disabled: { path: string; enabled: false }[] = [];
+  const visited = new Set<string>();
+  async function visit(path: string): Promise<void> {
+    let physical: string;
+    try {
+      physical = await realpath(path);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+      throw error;
+    }
+    if (visited.has(physical)) return;
+    visited.add(physical);
+    for (const entry of await readdir(physical, { withFileTypes: true })) {
+      const candidate = resolve(physical, entry.name);
+      if (entry.name === "SKILL.md" && (entry.isFile() || entry.isSymbolicLink()))
+        disabled.push({ path: await realpath(candidate), enabled: false });
+      else if (entry.isDirectory()) await visit(candidate);
+      else if (entry.isSymbolicLink()) {
+        try {
+          await visit(candidate);
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ENOTDIR") throw error;
+        }
+      }
+    }
+  }
+  for (const parent of [".agents", ".codex"]) await visit(resolve(workingDir, parent, "skills"));
+  return disabled;
 }
 
 export function workspaceReaderPath(): string {

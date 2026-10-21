@@ -24,8 +24,13 @@ export class CopilotClient {
       },
       async sendAndWait({ prompt }) {
         if (prompt.includes("AGENT_ASSERT_E2E:")) {
-          const requests = ["read", "write", "shell", "url", "mcp"].map((kind) =>
-            config.onPermissionRequest({ kind }),
+          const requests = await Promise.all(
+            ["read", "write", "shell", "url", "mcp"].map((kind) =>
+              config.onPermissionRequest({
+                kind,
+                path: join(config.workingDirectory, "result.txt"),
+              }),
+            ),
           );
           const denied =
             requests.map(({ kind }) => kind).join(",") ===
@@ -36,7 +41,7 @@ export class CopilotClient {
           const verified =
             denied &&
             prompt.includes(result) &&
-            evidence.fileChanges?.changedFiles?.includes("result.txt") &&
+            evidence.fileChanges?.changedFiles?.some((file) => file.path === "result.txt") &&
             input === "immutable input\n";
           const content = JSON.stringify({
             components: [

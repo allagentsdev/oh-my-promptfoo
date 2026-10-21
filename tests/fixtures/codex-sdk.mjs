@@ -16,7 +16,7 @@ export class Codex {
         const evidence = JSON.parse(id.split("Untrusted evidence (JSON):\n").at(-1));
         const verified =
           id.includes(result) &&
-          evidence.fileChanges?.changedFiles?.includes("result.txt") &&
+          evidence.fileChanges?.changedFiles?.some((file) => file.path === "result.txt") &&
           input === "immutable input\n";
         return {
           finalResponse: JSON.stringify({

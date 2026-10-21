@@ -8,7 +8,7 @@ export async function* query({ prompt, options }) {
     const evidence = JSON.parse(prompt.split("Untrusted evidence (JSON):\n").at(-1));
     const verified =
       prompt.includes(result) &&
-      evidence.fileChanges?.changedFiles?.includes("result.txt") &&
+      evidence.fileChanges?.changedFiles?.some((file) => file.path === "result.txt") &&
       input === "immutable input\n";
     yield {
       type: "result",

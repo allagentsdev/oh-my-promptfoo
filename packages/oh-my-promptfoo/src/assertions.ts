@@ -52,9 +52,8 @@ export async function llmAssert(
         : Array.isArray(content)
           ? content.map((part) => part.text || "").join("")
           : null;
-    if (!text) throw new Error("LLM grader returned no response text");
     return {
-      text,
+      ...(text ? { text } : { error: "LLM grader returned no response text" }),
       ...(responseBody.usage
         ? {
             usage: {
