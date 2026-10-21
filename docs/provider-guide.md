@@ -21,7 +21,8 @@ of agent edits.
 
 `package:oh-my-promptfoo/assertions:agentAssert` accepts the same `components`,
 `threshold`, `scoring`, `candidate` and `rubricPrompt` fields as `llmAssert`,
-plus required `grader: { id, config?, env? }` and optional `timeoutMs` and `queueTimeoutMs`.
+plus required `grader: { id, config?, env? }` and optional `timeoutMs`,
+`queueTimeoutMs` and `maxPromptBytes`.
 The grader IDs are the same three supported delegates as the workspace provider.
 Use explicit `grader.env` for credentials. The assertion consumes
 `context.providerResponse.metadata.workspace.path`; absent or released paths
@@ -33,6 +34,12 @@ while assertions are running. Optional `metadata.fileChanges` contributes only
 changed-file paths/change/kind/mode, deleted paths, the diff and completeness,
 truncation and failure information, never captured base64 contents. Files, tool
 output and candidate text cannot override grading instructions.
+
+`maxPromptBytes` defaults to 131,072 UTF-8 bytes (128 KiB), with an allowed
+integer range of 1–16,777,216. It measures the full assembled prompt, including
+rules, criteria and evidence. An oversized prompt drops the diff with a notice
+stating the omitted byte count; if still too large, the assertion fails before
+starting a grader and reports the measured size and budget.
 
 Agent tools are restricted to filesystem reads, with shell and network denied;
 conflicting native settings are rejected. Model-service network traffic is not

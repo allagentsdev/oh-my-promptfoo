@@ -124,19 +124,29 @@ export async function claudeReadAllowed(
     return false;
   const args = input as JsonObject;
   if (tool === "Read") return allowed(args.file_path);
-  // Glob patterns are relative to their search directory, not additional read roots.
-  if (
-    tool === "Glob" &&
-    (typeof args.pattern !== "string" ||
+  const searchRoot = args.path === undefined ? "." : args.path;
+  if (!(await allowed(searchRoot))) return false;
+  if (tool === "Glob") {
+    if (
+      typeof args.pattern !== "string" ||
+      args.pattern.includes("\0") ||
       isAbsolute(args.pattern) ||
-      args.pattern.split(/[\\/]/).includes(".."))
-  )
-    return false;
-  return allowed(args.path === undefined ? "." : args.path);
+      args.pattern.split(/[\\/]/).includes("..")
+    )
+      return false;
+    // Glob may make its literal directory prefix the search root. Checking only
+    // input.path would let `outside-link/**` choose an undeclared symlink target.
+    const directories = args.pattern.split(/[\\/]/).slice(0, -1);
+    const firstMagic = directories.findIndex((part) => /[*?[{}()!]/.test(part));
+    const literal = directories.slice(0, firstMagic < 0 ? directories.length : firstMagic);
+    if (literal.length && !(await allowed(join(searchRoot as string, ...literal)))) return false;
+  }
+  return true;
 }
 
 /** Codex discovers skills even in untrusted projects; disable them by canonical file path. */
-export async function disabledWorkspaceSkills(workingDir: string) {
+export async function disabledWorkspaceSkills(workingDir: string, sourceRoots: string[]) {
+  const allowed = await graderReadScope(workingDir, sourceRoots);
   const disabled: { path: string; enabled: false }[] = [];
   const visited = new Set<string>();
   async function visit(path: string): Promise<void> {
@@ -147,13 +157,21 @@ export async function disabledWorkspaceSkills(workingDir: string) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
       throw error;
     }
+    if (!(await allowed(physical)))
+      throw new Error(
+        "Codex workspace skills must stay inside the workspace or declared protected sources",
+      );
     if (visited.has(physical)) return;
     visited.add(physical);
     for (const entry of await readdir(physical, { withFileTypes: true })) {
       const candidate = resolve(physical, entry.name);
-      if (entry.name === "SKILL.md" && (entry.isFile() || entry.isSymbolicLink()))
+      if (entry.name === "SKILL.md" && (entry.isFile() || entry.isSymbolicLink())) {
+        if (!(await allowed(candidate)))
+          throw new Error(
+            "Codex workspace skills must stay inside the workspace or declared protected sources",
+          );
         disabled.push({ path: await realpath(candidate), enabled: false });
-      else if (entry.isDirectory()) await visit(candidate);
+      } else if (entry.isDirectory()) await visit(candidate);
       else if (entry.isSymbolicLink()) {
         try {
           await visit(candidate);

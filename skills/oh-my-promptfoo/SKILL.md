@@ -220,6 +220,12 @@ that no other files changed. The grader runs read-only with shell and network
 tools denied; it cannot run tests or repair the candidate. Broader permissions
 are rejected. Model-service traffic is still necessary.
 
+`maxPromptBytes` bounds the assembled prompt (default 131072 UTF-8 bytes).
+An oversized prompt omits the diff with an explicit omitted-byte notice. If
+rules, criteria and remaining evidence still exceed the budget, grading fails
+before a delegate starts. Inspect the files rather than increasing the budget
+to inline captured contents; base64 capture content is never sent.
+
 The default 120-second execution deadline includes one malformed-reply retry
 and starts after queue admission. Separate `queueTimeoutMs` bounds queue wait
 (default 900000 ms). Sessions serialize per process, not through the provider worker cap.

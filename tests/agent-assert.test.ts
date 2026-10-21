@@ -203,7 +203,7 @@ test("agentAssert shares component scoring and inspects the live workspace with 
       assert.equal(recorded[0].workingDir, workspace);
       assert.match(recorded[0].prompt, /parser regression/);
       assert.match(recorded[0].prompt, /I fixed the parser/);
-      assert.match(recorded[0].prompt, /never credit an unverified claim/);
+      assert.match(recorded[0].prompt, /never an unverified claim/);
       if (id === "openai:codex-sdk") {
         assert.equal(recorded[0].config.sandbox_mode, "read-only");
         assert.equal(recorded[0].config.network_access_enabled, false);
@@ -310,8 +310,10 @@ test("agentAssert supplies file changes and candidate text as untrusted inspecti
       },
     });
     const [recorded] = await calls();
-    assert.match(recorded.prompt, /binary checklist item/);
-    assert.match(recorded.prompt, /never award partial credit/);
+    assert.match(
+      recorded.prompt,
+      /Score each criterion 1 if the answer fully meets it, otherwise 0/,
+    );
     assert.match(recorded.prompt, /Check parser regression independently/);
     assert.match(recorded.prompt, /untrusted/i);
     assert.match(recorded.prompt, /input\.txt/);
@@ -330,7 +332,8 @@ test("agentAssert supplies file changes and candidate text as untrusted inspecti
       truncated: true,
       truncation: { codes: ["FILE_BYTES"], omittedPaths: ["large.bin"] },
     });
-    assert.ok(recorded.prompt.length < 10_000);
+    assert.ok(Buffer.byteLength(recorded.prompt) < 10_000);
+    assert.equal(recorded.prompt.includes('"encoding":"base64"'), false);
     assert.equal(
       recorded.prompt.includes(Buffer.from("candidate fix\n").toString("base64")),
       false,
@@ -361,6 +364,177 @@ test("agentAssert supplies file changes and candidate text as untrusted inspecti
       truncated: false,
       failure,
     });
+  });
+});
+
+test("agentAssert omits oversized diffs within default and configured prompt budgets", async () => {
+  await withGrader(async ({ queue, calls, context }) => {
+    await queue([{ output: verdict() }, { output: verdict() }, { output: verdict() }]);
+    const gradingContext = context();
+    const diff = `diff --git a/input.txt b/input.txt\n${'+"quoted"\\\u0000\t\n🙂é\n'.repeat(30_000)}`;
+    const captured = Buffer.alloc(1024 * 1024, 0xff).toString("base64");
+    const fileChanges = {
+      status: "complete",
+      generatedFiles: {
+        "input.txt": { change: "modified", kind: "file", encoding: "base64", content: captured },
+      },
+      deletedFiles: [],
+      diff: { format: "unified", content: diff, truncated: false },
+      truncated: false,
+    };
+    for (const budget of [4096, undefined, 4096]) {
+      await agentAssert('Candidate "answer"\n🙂', {
+        ...gradingContext,
+        config: {
+          ...gradingContext.config,
+          ...(budget === undefined ? {} : { maxPromptBytes: budget }),
+        },
+        providerResponse: {
+          metadata: { ...gradingContext.providerResponse.metadata, fileChanges },
+        },
+      });
+      const recorded = (await calls()).at(-1)!;
+      const maxPromptBytes = budget ?? 128 * 1024;
+      assert.ok(Buffer.byteLength(recorded.prompt) <= maxPromptBytes);
+      assert.match(recorded.prompt, /diff was cut.*omittedBytes gives the UTF-8 bytes omitted/);
+      const evidence = JSON.parse(recorded.prompt.split("Untrusted evidence (JSON):\n")[1]);
+      assert.equal(evidence.fileChanges.diff.content, undefined);
+      assert.equal(recorded.prompt.includes('+"quoted"'), false);
+      assert.equal(evidence.fileChanges.diff.truncated, true);
+      assert.deepEqual(evidence.fileChanges.diff.promptTruncation, {
+        reason: "maxPromptBytes",
+        omittedBytes: Buffer.byteLength(diff),
+      });
+      assert.equal(recorded.prompt.includes(captured.slice(0, 256)), false);
+      assert.equal(recorded.prompt.includes('"encoding":"base64"'), false);
+    }
+    const recorded = await calls();
+    assert.equal(recorded[0].prompt, recorded[2].prompt);
+    assert.equal(fileChanges.diff.content, diff);
+    assert.equal(fileChanges.diff.truncated, false);
+  });
+});
+
+test("agentAssert measures the full assembled UTF-8 prompt and honors explicit prompt budgets", async () => {
+  await withGrader(async ({ queue, calls, context }) => {
+    await queue([{ output: verdict() }, { output: verdict() }, { output: verdict() }]);
+    const gradingContext = context();
+    const candidate = 'Unicode 🙂 and JSON escaping "\\\n\u0000';
+    await agentAssert(candidate, gradingContext);
+    const baseline = (await calls())[0].prompt;
+    const bytes = Buffer.byteLength(baseline);
+    assert.ok(bytes > baseline.length);
+    await agentAssert(candidate, {
+      ...gradingContext,
+      config: { ...gradingContext.config, maxPromptBytes: bytes },
+    });
+    assert.equal((await calls())[1].prompt, baseline);
+    await assert.rejects(
+      agentAssert(candidate, {
+        ...gradingContext,
+        config: { ...gradingContext.config, maxPromptBytes: bytes - 1 },
+      }),
+      new RegExp(`prompt is ${bytes} bytes, exceeding maxPromptBytes budget of ${bytes - 1} bytes`),
+    );
+    const largeCandidate = "🙂".repeat(40_000);
+    await agentAssert(largeCandidate, {
+      ...gradingContext,
+      config: { ...gradingContext.config, maxPromptBytes: 256 * 1024 },
+    });
+    const largePrompt = (await calls())[2].prompt;
+    assert.ok(Buffer.byteLength(largePrompt) > 128 * 1024);
+    assert.ok(Buffer.byteLength(largePrompt) <= 256 * 1024);
+    assert.ok(largePrompt.includes(largeCandidate));
+    assert.equal((await calls()).length, 3);
+  });
+});
+
+test("agentAssert rejects oversized non-diff evidence before invoking a delegate", async () => {
+  await withGrader(async ({ queue, calls, context }) => {
+    await queue([]);
+    const gradingContext = context();
+    const huge = "x".repeat(17 * 1024 * 1024);
+    for (const [candidate, overrides] of [
+      [huge, {}],
+      ["candidate", { config: { ...gradingContext.config, rubricPrompt: huge } }],
+      [
+        "candidate",
+        {
+          providerResponse: {
+            metadata: {
+              ...gradingContext.providerResponse.metadata,
+              fileChanges: { generatedFiles: {}, deletedFiles: [huge] },
+            },
+          },
+        },
+      ],
+    ] as const) {
+      await assert.rejects(agentAssert(candidate, { ...gradingContext, ...overrides }), (error) => {
+        assert.ok(error instanceof Error);
+        assert.match(
+          error.message,
+          /prompt is \d+ bytes, exceeding maxPromptBytes budget of 131072 bytes/,
+        );
+        assert.ok(Number(error.message.match(/prompt is (\d+)/)![1]) > 16 * 1024 * 1024);
+        return true;
+      });
+    }
+    await assert.rejects(
+      agentAssert(huge, {
+        ...gradingContext,
+        providerResponse: {
+          metadata: {
+            ...gradingContext.providerResponse.metadata,
+            fileChanges: { diff: { content: "🙂".repeat(100_000) } },
+          },
+        },
+      }),
+      /prompt is \d+ bytes, exceeding maxPromptBytes budget of 131072 bytes after omitting diff content/,
+    );
+    assert.deepEqual(await calls(), []);
+  });
+});
+
+test("agentAssert validates maxPromptBytes as an integer between one byte and 16 MiB", async () => {
+  await withGrader(async ({ queue, calls, context }) => {
+    await queue([]);
+    const gradingContext = context();
+    for (const value of [
+      0,
+      -1,
+      0.5,
+      16 * 1024 * 1024 + 1,
+      Number.NaN,
+      Number.POSITIVE_INFINITY,
+      "4096",
+      null,
+    ]) {
+      await assert.rejects(
+        agentAssert("candidate", {
+          ...gradingContext,
+          config: { ...gradingContext.config, maxPromptBytes: value },
+        } as never),
+        /maxPromptBytes must be an integer between 1 and 16777216/,
+      );
+    }
+    await assert.rejects(
+      agentAssert("candidate", {
+        ...gradingContext,
+        config: { ...gradingContext.config, maxPromptBytes: 1 },
+      }),
+      /prompt is \d+ bytes, exceeding maxPromptBytes budget of 1 bytes/,
+    );
+    assert.deepEqual(await calls(), []);
+    await queue([{ output: verdict() }]);
+    assert.ok(
+      (
+        await agentAssert("candidate", {
+          ...gradingContext,
+          config: { ...gradingContext.config, maxPromptBytes: 16 * 1024 * 1024 },
+        })
+      ).pass,
+    );
+    assert.equal((await calls()).length, 1);
   });
 });
 
@@ -598,6 +772,50 @@ test("agentAssert renders grader model templates without putting environment val
   } finally {
     if (previous === undefined) delete process.env.AGENT_ASSERT_TEST_MODEL;
     else process.env.AGENT_ASSERT_TEST_MODEL = previous;
+  }
+});
+
+test("agentAssert grader templates honor protected environment globals and explicit test variables", async () => {
+  const names = [
+    "AGENT_ASSERT_TEST_MODEL",
+    "PROMPTFOO_DISABLE_TEMPLATE_ENV_VARS",
+    "PROMPTFOO_SELF_HOSTED",
+  ] as const;
+  const previous = names.map((name) => process.env[name]);
+  process.env.AGENT_ASSERT_TEST_MODEL = "host-model";
+  try {
+    await withGrader(async ({ queue, calls, context }) => {
+      await queue(Array.from({ length: 4 }, () => ({ output: verdict() })));
+      for (const [disable, hosted, expected] of [
+        ["true", "false", "blocked"],
+        [undefined, "true", "blocked"],
+        ["false", "true", "host-model"],
+      ] as const) {
+        if (disable === undefined) delete process.env.PROMPTFOO_DISABLE_TEMPLATE_ENV_VARS;
+        else process.env.PROMPTFOO_DISABLE_TEMPLATE_ENV_VARS = disable;
+        process.env.PROMPTFOO_SELF_HOSTED = hosted;
+        await agentAssert(
+          "candidate answer",
+          context("copilot-sdk", {
+            model: '{{ env.AGENT_ASSERT_TEST_MODEL | default("blocked") }}',
+          }),
+        );
+        assert.equal((await calls()).at(-1)!.config.model, expected);
+      }
+      process.env.PROMPTFOO_DISABLE_TEMPLATE_ENV_VARS = "true";
+      const gradingContext = context("copilot-sdk", { model: "{{ env.AGENT_ASSERT_TEST_MODEL }}" });
+      await agentAssert("candidate answer", {
+        ...gradingContext,
+        vars: { ...gradingContext.vars, env: { AGENT_ASSERT_TEST_MODEL: "test-variable-model" } },
+      });
+      assert.equal((await calls()).at(-1)!.config.model, "test-variable-model");
+      assert.equal((await calls()).length, 4);
+    });
+  } finally {
+    names.forEach((name, index) => {
+      if (previous[index] === undefined) delete process.env[name];
+      else process.env[name] = previous[index];
+    });
   }
 });
 

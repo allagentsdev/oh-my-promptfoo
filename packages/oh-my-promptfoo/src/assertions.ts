@@ -5,7 +5,6 @@ export type { BatchedRubricConfig, RubricComponent } from "./rubric-contract.js"
 
 const DEFAULT_BASE_URL = "https://api.openai.com/v1";
 
-
 /** Score all named criteria with one judge request; every criterion must pass. */
 export async function llmAssert(
   output: unknown,
@@ -17,7 +16,6 @@ export async function llmAssert(
   const apiKey = process.env.OPENAI_API_KEY;
   if (!model || !apiKey)
     throw new Error("OPENAI_MODEL and OPENAI_API_KEY are required for LLM grading");
-
 
   const baseUrl = (process.env.OPENAI_BASE_URL || DEFAULT_BASE_URL).replace(/\/+$/, "");
   const parsedBaseUrl = new URL(baseUrl);

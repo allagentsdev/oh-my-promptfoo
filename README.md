@@ -136,6 +136,14 @@ claims earn credit only when verified. Graders cannot write, run shell commands
 or access the network through agent tools. They therefore cannot execute tests.
 Model-service requests still require the delegate's credentials and network.
 
+`maxPromptBytes` bounds the full assembled grader prompt in UTF-8 bytes,
+including rules, criteria and evidence. The default is 131,072 bytes (128 KiB);
+it accepts integers from 1 to 16,777,216. If the prompt is too large, the diff
+is omitted with an explicit notice recording the omitted byte count. If the
+remaining prompt still exceeds the budget, grading fails before a delegate
+starts, naming both the measured size and budget. Files remain available for
+on-demand inspection; increasing the budget never sends captured base64 bytes.
+
 The grader has a 120-second execution timeout, configurable with assertion
 `timeoutMs`, including one retry for a malformed verdict. It starts after the
 grader session slot is acquired. A separate `queueTimeoutMs` bounds waiting

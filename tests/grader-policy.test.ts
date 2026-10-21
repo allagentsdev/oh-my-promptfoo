@@ -4,7 +4,12 @@ import { realpathSync } from "node:fs";
 import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { graderConfig } from "../packages/oh-my-promptfoo/src/grader-policy";
+import {
+  claudeReadAllowed,
+  disabledWorkspaceSkills,
+  graderConfig,
+  graderReadScope,
+} from "../packages/oh-my-promptfoo/src/grader-policy";
 import { type CallFrame, runDelegate } from "../packages/oh-my-promptfoo/src/protocol";
 
 async function withReadPolicy(
@@ -216,3 +221,29 @@ test("Copilot transport errors preserve already measured usage", async () => {
     assert.equal(response.cost, 0.01);
   });
 }, 20_000);
+
+test("Claude Glob checks literal symlink prefixes as well as the search directory", async () => {
+  await withReadPolicy(async ({ workspace }) => {
+    const allowed = await graderReadScope(workspace, ["source"]);
+    for (const pattern of ["escape/**", "source/escape/**"])
+      assert.equal(await claudeReadAllowed("Glob", { pattern }, allowed), false, pattern);
+    assert.equal(await claudeReadAllowed("Glob", { pattern: "source/**" }, allowed), true);
+    assert.equal(
+      await claudeReadAllowed("Glob", { path: ".", pattern: "source/**" }, allowed),
+      true,
+    );
+  });
+});
+
+test("Codex skill scanning never follows undeclared host links", async () => {
+  await withReadPolicy(async ({ workspace, outside, protectedRoot }) => {
+    const skill = join(protectedRoot, "safe-skill");
+    await mkdir(skill);
+    await writeFile(join(skill, "SKILL.md"), "Protected skill");
+    await symlink(skill, join(workspace, ".agents", "skills", "declared"), "dir");
+    const disabled = await disabledWorkspaceSkills(workspace, ["source"]);
+    assert.ok(disabled.some((entry) => entry.path === join(skill, "SKILL.md") && !entry.enabled));
+    await symlink(outside, join(workspace, ".agents", "skills", "host-link"), "dir");
+    await assert.rejects(disabledWorkspaceSkills(workspace, ["source"]), /skills must stay inside/);
+  });
+});

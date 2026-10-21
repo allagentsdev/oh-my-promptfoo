@@ -255,7 +255,7 @@ async function runNative(frame: CallFrame, signal: AbortSignal): Promise<JsonObj
           [`projects.${JSON.stringify(frame.workingDir)}.trust_level`]: "untrusted",
           skills: {
             include_instructions: false,
-            config: await disabledWorkspaceSkills(frame.workingDir),
+            config: await disabledWorkspaceSkills(frame.workingDir, frame.readOnly.sourceRoots),
           },
           features: {
             shell_tool: false,
