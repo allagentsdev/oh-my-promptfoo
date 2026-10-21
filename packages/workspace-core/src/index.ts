@@ -307,18 +307,32 @@ export class WorkspaceManager {
         );
       }
       await mkdir(path, { mode: 0o700 });
-      for (let sourceOffset = 0; sourceOffset < resolved.length; sourceOffset++) {
-        const source = resolved[sourceOffset];
+      // A destination owns exactly one view over one tree, even when several sources
+      // merged into it. `resolved` is sorted by destination, so members are adjacent.
+      const groups: { destination: string; sources: ResolvedSource[] }[] = [];
+      for (const source of resolved) {
+        const last = groups.at(-1);
+        if (last && last.destination === source.destination) last.sources.push(source);
+        else groups.push({ destination: source.destination, sources: [source] });
+      }
+      for (let groupOffset = 0; groupOffset < groups.length; groupOffset++) {
+        const { destination, sources: group } = groups[groupOffset];
+        const source = group[0];
         combined.throwIfAborted();
-        const dest = join(path, source.destination);
+        const dest = join(path, destination);
         contained(path, dest);
         await mkdir(dirname(dest), { recursive: true, mode: 0o700 });
-        if (source.type === "git" && prebuilt && preparedSources.has(source.destination)) {
+        if (
+          group.length === 1 &&
+          source.type === "git" &&
+          prebuilt &&
+          preparedSources.has(destination)
+        ) {
           const key = preparedKey(source);
           if (this.invalidPrebuilt.has(key))
             throw new Error("Prepared source checkout was invalidated");
           const view: SourceView = {
-            destination: source.destination,
+            destination,
             adapter: "read-only",
             seedSource: prebuilt.path(source),
             path: dest,
@@ -345,11 +359,11 @@ export class WorkspaceManager {
           await this.save(record);
           await symlink(view.seedSource, dest);
         } else if (source.permissions === "read-only") {
-          const key = protectedCheckoutKey(source, this.spec.viewMode);
+          const key = protectedCheckoutKey(group, this.spec.viewMode);
           const view: SourceView = {
-            destination: source.destination,
+            destination,
             adapter: "read-only",
-            seedSource: join(this.cache.seedPath(record.digest), source.destination),
+            seedSource: join(this.cache.seedPath(record.digest), destination),
             path: dest,
             checkoutKey: key,
           };
@@ -357,16 +371,16 @@ export class WorkspaceManager {
           await this.save(record);
           const prepared = await this.cache.protectedSource(
             record,
-            source,
+            group,
             combined,
             this.spec.viewMode,
             caseIndex,
-            sourceOffset + 1,
-            resolved.length,
+            groupOffset + 1,
+            groups.length,
           );
           await symlink(prepared.path, dest);
         } else {
-          const seedSource = join(this.cache.seedPath(record.digest), source.destination);
+          const seedSource = join(this.cache.seedPath(record.digest), destination);
           const adapter = await this.factory.selected(
             seedSource,
             join(this.root, "adapter-state", id),
@@ -374,10 +388,10 @@ export class WorkspaceManager {
               record.views.push(probe);
               await this.save(record);
             },
-            source.destination,
+            destination,
           );
           const view: SourceView = {
-            destination: source.destination,
+            destination,
             adapter,
             seedSource,
             path: dest,
@@ -436,6 +450,14 @@ export class WorkspaceManager {
       canonicalJson(marker.identity) !== canonicalJson(record.identity)
     )
       throw new Error("Workspace recovery ownership mismatch");
+    // Merging several sources into one destination must never produce two views that
+    // claim the same tree; recovery refuses a record that ever did.
+    const owned = new Set<string>();
+    for (const view of record.views) {
+      if (view.probe) continue;
+      if (owned.has(view.destination)) throw new Error("Duplicate view for one destination");
+      owned.add(view.destination);
+    }
     for (const view of record.views) {
       if ((view.adapter as string) === "overlay")
         throw new Error(

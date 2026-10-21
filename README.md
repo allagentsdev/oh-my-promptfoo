@@ -25,6 +25,12 @@ Set the agent credential through `delegate.env` in authored evals. Set
 require ORAS 1.x through `ALLAGENTS_ORAS_PATH`. A trusted runner must provide
 `ALLAGENTS_LOCAL_SOURCE_ROOT` before acquiring `type: local` sources.
 
+Several `type: local` sources may name the same `destination` and merge into one
+tree, so N plugins can stage their skills into a single `.agents/skills`. They
+must agree on `permissions`, and no two of them may contribute the same relative
+path; a collision names both sources and fails. Git and OCI sources keep
+exclusive destinations, and nested destinations remain rejected.
+
 `llmAssert` batches named criteria into one judge request. A component passes
 when its judge verdict is not false, and `config.threshold` adds a numeric bar
 on top of that verdict when you state one — the same contract as Promptfoo's

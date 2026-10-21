@@ -10,8 +10,16 @@ import { assertNoSymlinkAncestors } from "../fs.js";
 import type { LocalSource, ResolvedLocalSource, RuntimeChannels, SourceLimits } from "../types.js";
 import type { PhysicalWriter } from "./process.js";
 
-type Entry = { path: string; mode: number; size?: number; digest?: string };
+/** A directory entry has no `size`; a regular file always has one, even when empty. */
+export type LocalEntry = { path: string; mode: number; size?: number; digest?: string };
+type Entry = LocalEntry;
 const snapshots = new WeakMap<ResolvedLocalSource, Entry[]>();
+/** The inventory this provider hashed, used to decide whether merged sources collide. */
+export function localEntries(source: ResolvedLocalSource): readonly LocalEntry[] {
+  const entries = snapshots.get(source);
+  if (!entries) throw new Error("Local source snapshot is not available to this provider");
+  return entries;
+}
 const ordered = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 const READ_FLAGS = constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK;
 

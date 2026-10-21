@@ -102,7 +102,7 @@ export function validateWorkspace(value: unknown): WorkspaceSpec {
     }
   }
   if (config.sources.length > limits.maxSources) throw new Error("Too many workspace sources");
-  const seen: string[] = [];
+  const seen = new Map<string, { label: string; local: boolean; permissions: string }>();
   const sources = config.sources.map((raw, index) => {
     const source = object(raw, `source ${index}`);
     const type = source.type;
@@ -118,9 +118,10 @@ export function validateWorkspace(value: unknown): WorkspaceSpec {
       "source",
     );
     const dest = destination(source.destination);
-    if (seen.some((s) => s === dest || s.startsWith(`${dest}/`) || dest.startsWith(`${s}/`)))
-      throw new Error("Source destinations overlap");
-    seen.push(dest);
+    // Only exact repetition merges; a nested destination has no merged tree to own.
+    for (const other of seen.keys())
+      if (other !== dest && (other.startsWith(`${dest}/`) || dest.startsWith(`${other}/`)))
+        throw new Error("Source destinations overlap");
     if (
       source.permissions !== undefined &&
       source.permissions !== "all" &&
@@ -179,6 +180,26 @@ export function validateWorkspace(value: unknown): WorkspaceSpec {
           throw new Error("Invalid OCI tag");
       }
     }
+    // Several sources may name one destination and merge into a single tree, which
+    // still yields exactly one view, one seed subtree and one protected checkout.
+    // Only local sources merge: a Git destination carries the `.git` that governs
+    // that subtree, a prepared checkout is stamped as a whole external tree, and an
+    // OCI artifact tree is published as a unit. Mixed permissions have no coherent
+    // answer for a single tree. See docs/adr/0005-merge-shared-source-destinations.md.
+    const label = `source ${index} (${type} ${JSON.stringify(
+      type === "local" ? String(source.path) : String(source.repository),
+    )})`;
+    const permissions = String(source.permissions ?? "all");
+    const shared = seen.get(dest);
+    if (!shared) seen.set(dest, { label, local: type === "local", permissions });
+    else if (type !== "local" || !shared.local)
+      throw new Error(
+        `Only local sources may share destination ${JSON.stringify(dest)}: ${shared.label} and ${label}`,
+      );
+    else if (shared.permissions !== permissions)
+      throw new Error(
+        `Sources sharing destination ${JSON.stringify(dest)} must declare the same permissions: ${shared.label} is ${shared.permissions} and ${label} is ${permissions}`,
+      );
     return { ...source, destination: dest, permissions: source.permissions ?? "all" };
   });
   return { sources, limits, viewMode: config.viewMode ?? "auto" } as WorkspaceSpec;
