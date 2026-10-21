@@ -1,11 +1,11 @@
 {
   "schemaVersion": 1,
-  "date": "2026-10-07T04:22:06.096Z",
+  "date": "2026-10-21T22:58:09.129Z",
   "node": "v22.22.1",
   "promptfoo": "0.124.0",
-  "package": "1.7.2",
+  "package": "1.15.0",
   "surface": "npm-packed package loaded by stock promptfoo eval",
-  "sdkMode": "deterministic SDK fixtures; independently npm-installed Promptfoo, native Codex/Claude adapters and real integration runtime",
+  "sdkMode": "deterministic Codex/Claude/Copilot SDK fixtures; real Pi SDK against a local model-service endpoint; independently npm-installed Promptfoo and real integration runtime",
   "stats": {
     "successes": 3,
     "failures": 0,
@@ -24,11 +24,11 @@
         "cacheCreationInputTokens": 0
       },
       "assertions": {
-        "total": 0,
-        "prompt": 0,
-        "completion": 0,
-        "cached": 0,
-        "numRequests": 3,
+        "total": 54,
+        "prompt": 39,
+        "completion": 15,
+        "cached": 2,
+        "numRequests": 6,
         "completionDetails": {
           "reasoning": 0,
           "acceptedPrediction": 0,
@@ -38,8 +38,8 @@
         }
       }
     },
-    "durationMs": 14099,
-    "evaluationDurationMs": 14099
+    "durationMs": 13611,
+    "evaluationDurationMs": 13611
   },
   "verifiedAssertions": [
     "contains",
@@ -57,6 +57,30 @@
     "unfilteredRows": 3,
     "directCopilot": 1,
     "nativeErrors": 1,
+    "skillUsedWithoutTracing": {
+      "success": {
+        "successes": 3,
+        "failures": 0,
+        "errors": 0
+      },
+      "failed": {
+        "successes": 0,
+        "failures": 3,
+        "errors": 0
+      },
+      "text-only": {
+        "successes": 0,
+        "failures": 3,
+        "errors": 0
+      }
+    },
+    "piSdk": {
+      "successes": 1,
+      "failures": 2,
+      "errors": 0,
+      "toolTrajectory": true,
+      "graderVerified": true
+    },
     "normalCleanup": true,
     "skippedCleanupRecovery": true,
     "storageOutsideConsumer": true
@@ -76,5 +100,5 @@
     "trajectory:tool-sequence",
     "trajectory:step-count"
   ],
-  "stdout": "Cache is disabled.\n[OtelSdk] OpenTelemetry SDK initialized successfully\nStarting evaluation eval-YSb-2026-10-07T04:21:04\n[Evaluation] Starting 3 test cases...\nRunning 3 test cases (up to 4 at a time)...\n[Evaluation] ✓ Complete! 3/3 tests in 14s\n[OtelSdk] OpenTelemetry SDK shut down successfully\n\n┌────────────────────────┬────────────────────────┬────────────────────────┬────────────────────────┬────────────────────────┐\n│ task                   │ sessionId              │ [readonly] {{task}}    │ [writable] {{task}}    │ [claude] {{task}}      │\n├────────────────────────┼────────────────────────┼────────────────────────┼────────────────────────┴────────────────────────┤\n│ readonly-row           │ fixture-thread         │ [PASS]                 │                                                 │\n│                        │                        │ {\"task\":\"readonly-row… │                                                 │\n├────────────────────────┼────────────────────────┼────────────────────────┼────────────────────────┬────────────────────────┤\n│ writable-row           │                        │                        │ [PASS]                 │                        │\n│                        │                        │                        │ {\"task\":\"writable-row… │                        │\n├────────────────────────┼────────────────────────┼────────────────────────┼────────────────────────┼────────────────────────┤\n│ claude-row             │ fixture-claude         │                        │                        │ [PASS]                 │\n│                        │                        │                        │                        │ {\"task\":\"claude-row\",… │\n└────────────────────────┴────────────────────────┴────────────────────────┴────────────────────────┴────────────────────────┘\n✓ Eval complete (ID: eval-YSb-2026-10-07T04:21:04)\n\n» View results: promptfoo view\n» Share with your team: https://promptfoo.app\n» Feedback: https://promptfoo.dev/feedback\n\nTotal Tokens: 54\n  Provider: 54 (33 prompt, 21 completion, 2 cached)\n\nResults:\n  ✓ 3 passed (100%)\n  0 failed (0%)\n  0 errors (0%)\nDuration: 16s (concurrency: 4)\n\nWriting output to results.json\n"
+  "stdout": "Cache is disabled.\n[OtelSdk] OpenTelemetry SDK initialized successfully\nStarting evaluation eval-hHQ-2026-10-21T22:56:23\n[Evaluation] Starting 3 test cases...\nRunning 3 test cases (up to 4 at a time)...\n[Evaluation] ✓ Complete! 3/3 tests in 13s\n[OtelSdk] OpenTelemetry SDK shut down successfully\n\n┌────────────────────────┬────────────────────────┬────────────────────────┬────────────────────────┬────────────────────────┐\n│ task                   │ sessionId              │ [readonly] {{task}}    │ [writable] {{task}}    │ [claude] {{task}}      │\n├────────────────────────┼────────────────────────┼────────────────────────┼────────────────────────┴────────────────────────┤\n│ readonly-row           │ fixture-thread         │ [PASS]                 │                                                 │\n│                        │                        │ {\"task\":\"readonly-row… │                                                 │\n├────────────────────────┼────────────────────────┼────────────────────────┼────────────────────────┬────────────────────────┤\n│ writable-row           │                        │                        │ [PASS]                 │                        │\n│                        │                        │                        │ {\"task\":\"writable-row… │                        │\n├────────────────────────┼────────────────────────┼────────────────────────┼────────────────────────┼────────────────────────┤\n│ claude-row             │ fixture-claude         │                        │                        │ [PASS]                 │\n│                        │                        │                        │                        │ {\"task\":\"claude-row\",… │\n└────────────────────────┴────────────────────────┴────────────────────────┴────────────────────────┴────────────────────────┘\n✓ Eval complete (ID: eval-hHQ-2026-10-21T22:56:23)\n\n» View results: promptfoo view\n» Share with your team: https://promptfoo.app\n» Feedback: https://promptfoo.dev/feedback\n\nTotal Tokens: 108\n  Provider: 54 (33 prompt, 21 completion, 2 cached)\n  Grading: 54 (39 prompt, 15 completion, 2 cached)\n\nResults:\n  ✓ 3 passed (100%)\n  0 failed (0%)\n  0 errors (0%)\nDuration: 14s (concurrency: 4)\n\nWriting output to <temporary-consumer>/results.json\n"
 }

@@ -39,8 +39,12 @@ export class Codex {
       } catch (e) {
         if (e.code !== "ENOENT") throw e;
       }
+      const skillRead = id.startsWith("read:") ? JSON.parse(id.slice(5)) : undefined;
+      if (skillRead && !["failed", "text-only"].includes(skillRead.mode))
+        await readFile(join(options.workingDirectory, skillRead.path), "utf8");
       return {
-        finalResponse: JSON.stringify({ task: id, ok: true }),
+        finalResponse:
+          skillRead?.mode === "text-only" ? "I used demo" : JSON.stringify({ task: id, ok: true }),
         usage: { input_tokens: 11, output_tokens: 7, cached_input_tokens: 2 },
         items: [
           {
@@ -52,14 +56,18 @@ export class Codex {
             result: { ok: true },
             status: "completed",
           },
-          {
-            id: "tool1",
-            type: "command_execution",
-            command: "cat .agents/skills/demo/SKILL.md",
-            aggregated_output: "demo",
-            exit_code: 0,
-            status: "completed",
-          },
+          ...(skillRead?.mode === "text-only"
+            ? []
+            : [
+                {
+                  id: "tool1",
+                  type: "command_execution",
+                  command: "cat .agents/skills/demo/SKILL.md",
+                  aggregated_output: skillRead?.mode === "failed" ? "load failed" : "demo",
+                  exit_code: skillRead?.mode === "failed" ? 1 : 0,
+                  status: skillRead?.mode === "failed" ? "failed" : "completed",
+                },
+              ]),
         ],
       };
     };

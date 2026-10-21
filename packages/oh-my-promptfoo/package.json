@@ -41,10 +41,14 @@
   },
   "peerDependencies": {
     "promptfoo": "0.122.x || 0.124.x",
-    "@github/copilot-sdk": "1.0.17"
+    "@github/copilot-sdk": "1.0.17",
+    "@earendil-works/pi-coding-agent": "1.3.0"
   },
   "peerDependenciesMeta": {
     "@github/copilot-sdk": {
+      "optional": true
+    },
+    "@earendil-works/pi-coding-agent": {
       "optional": true
     }
   }

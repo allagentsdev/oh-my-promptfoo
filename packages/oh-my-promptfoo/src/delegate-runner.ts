@@ -1,6 +1,6 @@
-import { lstatSync, readFileSync, statSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { lstat, realpath, stat } from "node:fs/promises";
-import { basename, dirname, isAbsolute, resolve } from "node:path";
+import { isAbsolute, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { context as otelContext, propagation, trace } from "@opentelemetry/api";
 import { AsyncLocalStorageContextManager } from "@opentelemetry/context-async-hooks";
@@ -15,6 +15,7 @@ import {
   graderReadScope,
   workspaceReaderPath,
 } from "./grader-policy.js";
+import { runPi } from "./pi-runner.js";
 import {
   type CallFrame,
   jsonSafe,
@@ -23,6 +24,7 @@ import {
   resolvePeer,
   secrets,
 } from "./protocol.js";
+import { observedSkillRead, type SkillCall, workspaceSkillDirectories } from "./skill-evidence.js";
 
 // Reserve stdout for protocol even if a peer logs during import or execution.
 const protocolWrite = process.stdout.write.bind(process.stdout);
@@ -147,7 +149,7 @@ async function execute(input: JsonObject): Promise<void> {
       "call",
     );
     if (
-      !["openai:codex-sdk", "anthropic:claude-agent-sdk", "copilot-sdk"].includes(
+      !["openai:codex-sdk", "anthropic:claude-agent-sdk", "copilot-sdk", "pi-sdk"].includes(
         input.delegate as string,
       )
     )
@@ -200,9 +202,11 @@ async function execute(input: JsonObject): Promise<void> {
       if (typeof frame.context[key] === "string") carrier[key] = frame.context[key] as string;
     const extracted = propagation.extract(otelContext.active(), carrier);
     response = await otelContext.with(extracted, () =>
-      frame.delegate === "copilot-sdk"
-        ? runCopilot(frame, controller.signal)
-        : runNative(frame, controller.signal),
+      frame.delegate === "pi-sdk"
+        ? runPi(frame, controller.signal, emit, sensitive)
+        : frame.delegate === "copilot-sdk"
+          ? runCopilot(frame, controller.signal)
+          : runNative(frame, controller.signal),
     );
     jsonSafe(response);
   } catch (e) {
@@ -360,74 +364,6 @@ interface ClientLike {
   createSession(config: JsonObject): Promise<SessionLike>;
   stop(): Promise<unknown>;
   forceStop(): Promise<unknown>;
-}
-interface SkillCall {
-  name: string;
-  path: string;
-  source: "read-tool" | "sdk-skill-loader";
-}
-const skillParentDirectories: readonly string[] = [".agents", ".claude", ".github"];
-
-function workspaceSkillDirectories(workingDir: string): string[] {
-  const directories: string[] = [];
-  for (const name of skillParentDirectories) {
-    const parent = resolve(workingDir, name);
-    const skills = resolve(parent, "skills");
-    try {
-      if (lstatSync(parent).isDirectory() && lstatSync(skills).isDirectory())
-        directories.push(skills);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-    }
-  }
-  return directories;
-}
-
-function observedSkillRead(
-  toolName: string,
-  args: unknown,
-  workingDir: string,
-): SkillCall | undefined {
-  if (
-    !["read", "read_file", "view"].includes(toolName) ||
-    !args ||
-    typeof args !== "object" ||
-    Array.isArray(args)
-  )
-    return;
-  const fields = args as JsonObject;
-  const path = fields.path ?? fields.file_path ?? fields.filePath;
-  if (typeof path !== "string" || !path || basename(path) !== "SKILL.md") return;
-  const candidate = resolve(workingDir, path);
-  const skillDirectory = dirname(candidate);
-  const skillsDirectory = dirname(skillDirectory);
-  if (
-    basename(skillsDirectory) !== "skills" ||
-    !skillParentDirectories.includes(basename(dirname(skillsDirectory)))
-  )
-    return;
-  try {
-    const rootPath = resolve(workingDir);
-    const root = statSync(rootPath, { bigint: true });
-    if (root.ino === 0n) return;
-    let cursor = candidate;
-    let file = true;
-    while (true) {
-      const info = lstatSync(cursor, { bigint: true });
-      // Workspace Provider may bind its verified working directory to a protected source link.
-      const allowedAlias = info.isSymbolicLink() && cursor === rootPath;
-      if ((info.isSymbolicLink() && !allowedAlias) || (file && !info.isFile())) return;
-      const physical = allowedAlias ? statSync(cursor, { bigint: true }) : info;
-      if (physical.dev === root.dev && physical.ino === root.ino)
-        return { name: basename(skillDirectory), path: candidate, source: "read-tool" };
-      const parent = dirname(cursor);
-      if (parent === cursor) return;
-      cursor = parent;
-      file = false;
-    }
-  } catch {
-    return;
-  }
 }
 
 function verifiedSkillLoaderRecord(entry: unknown, workingDir: string): SkillCall | undefined {

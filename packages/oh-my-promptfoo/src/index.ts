@@ -42,6 +42,8 @@ export type {
   CopilotDelegate,
   CopilotSdkProviderConfig,
   Delegate,
+  DelegateId,
+  PiDelegate,
   ProviderConfig,
   ProviderOptions,
 } from "./config.js";

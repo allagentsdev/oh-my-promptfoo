@@ -17,13 +17,37 @@ staged directory, including scripts and untracked files. It hashes sorted
 relative paths, modes, and file bytes. This is input provenance, not a record
 of agent edits.
 
+### Skill-use assertions
+
+Stock Promptfoo's `skill-used` assertion reads `metadata.skillCalls` from the
+provider response. It works with all four delegates without changing skill
+files or assertion syntax. No OpenTelemetry collector, OTLP endpoint, or
+`tracing.enabled: true` setting is required for this assertion.
+
+| Delegate | Skill-use evidence |
+| --- | --- |
+| `anthropic:claude-agent-sdk` | Promptfoo derives calls from the native `Skill` tool's `input.skill`, with `source: "tool"`. Calls marked `is_error: true` do not satisfy `skill-used`. |
+| `openai:codex-sdk` | Promptfoo derives calls from successful commands referencing recognized skill paths, with `source: "heuristic"`. Failed commands can appear in `attemptedSkillCalls` without satisfying `skill-used`. |
+| `copilot-sdk` | The adapter records successful contained skill-file reads or verified SDK skill-loader records. See [Direct Copilot configuration](#direct-copilot-configuration). |
+| `pi-sdk` | Successful guarded `read` tool calls to contained, non-symlink `SKILL.md` files produce `source: "read-tool"`. Discovery, failed reads and assistant claims do not count. |
+
+Claude and Codex use the consumer's native Promptfoo providers; the wrapper
+preserves their metadata and provenance rather than deriving skills again.
+Assistant text claiming skill use is not evidence. Missing `skillCalls` is
+treated by Promptfoo as no observed use, so a failing gate alone cannot
+distinguish missing reporting from a genuine miss.
+
+Delegate-specific provider configuration still differs. Use explicit labeled
+provider entries to select a delegate, not one templated delegate ID sharing
+incompatible config fields. Skill staging is unchanged.
+
 ### Agent workspace grading
 
 `package:oh-my-promptfoo/assertions:agentAssert` accepts the same `components`,
 `threshold`, `scoring`, `candidate` and `rubricPrompt` fields as `llmAssert`,
 plus required `grader: { id, config?, env? }` and optional `timeoutMs`,
 `queueTimeoutMs` and `maxPromptBytes`.
-The grader IDs are the same three supported delegates as the workspace provider.
+The grader IDs are the same four supported delegates as the workspace provider.
 Use explicit `grader.env` for credentials. The assertion consumes
 `context.providerResponse.metadata.workspace.path`; absent or released paths
 are errors even when a candidate answer or durable file changes are available.
@@ -65,12 +89,12 @@ provider authentication.
 
 ## Workspace provider configuration
 
-Provider config is closed: only `delegate`, `workspace`, `workspaceTimeoutMs`, `workingDir`, `fileChanges`, and `timeoutMs` are accepted. The delegates are exactly `openai:codex-sdk`, `anthropic:claude-agent-sdk`, and `copilot-sdk`. Prompt-level config can change allowed `delegate.config` fields only. Delegate-level working directories, sessions, executable overrides, discovery, arbitrary native passthroughs, environment inheritance, acquisition variables, and cache controls are rejected. The wrapper forces execution and rejects cached responses. Use explicit `delegate.env` for model credentials.
+Provider config is closed: only `delegate`, `workspace`, `workspaceTimeoutMs`, `workingDir`, `fileChanges`, and `timeoutMs` are accepted. The delegates are exactly `openai:codex-sdk`, `anthropic:claude-agent-sdk`, `copilot-sdk`, and `pi-sdk`. Prompt-level config can change allowed `delegate.config` fields only. Delegate-level working directories, sessions, executable overrides, discovery, arbitrary native passthroughs, environment inheritance, acquisition variables, and cache controls are rejected. The wrapper forces execution and rejects cached responses. Use explicit `delegate.env` for model credentials.
 
 | Field | Required | Purpose |
 | --- | --- | --- |
-| `delegate.id` | Yes | Selects one of the three supported agents |
-| `delegate.config` | No | Sets options allowed by that agent's Promptfoo provider |
+| `delegate.id` | Yes | Selects one of the four supported agents |
+| `delegate.config` | Pi only | Sets allowed agent options; Pi requires nonempty `provider` and `model` |
 | `delegate.env` | No | Passes only the named environment values to the agent |
 | `workspace.sources` | Yes | Lists Git, OCI, or host-local inputs; `[]` starts with an empty workspace |
 | `workspace.limits` | No | Narrows source count and download/extraction byte budgets |
@@ -212,6 +236,60 @@ allagents-promptfoo cache prune --all
 ```
 
 Both commands report removed/retained entries and allocated bytes and return nonzero on failure. They do not run evaluations or delete runtime roots or the external prebuilt root. Unmarked and symlinked configured roots are refused. `ALLAGENTS_CACHE_ROOT`, `ALLAGENTS_WORKSPACE_ROOT`, and `ALLAGENTS_PREBUILT_ROOT` must be distinct and non-overlapping. Acquisition channels are `ALLAGENTS_GIT_USERNAME`, `ALLAGENTS_GIT_TOKEN`, `ALLAGENTS_ORAS_PATH`, and `ALLAGENTS_ORAS_AUTH_FILE`; prepared sources use `ALLAGENTS_PREBUILT_ROOT`, and local directory sources use `ALLAGENTS_LOCAL_SOURCE_ROOT`. `ALLAGENTS_WORKSPACE_TIMEOUT_MS` supplies a bounded preparation deadline. Provider loader `options.env` takes precedence over process environment. These channels never reach delegates.
+
+## Pi configuration
+
+Install the optional maintained SDK peer with
+`npm install --save-dev @earendil-works/pi-coding-agent@1.3.0`.
+Select Pi using the same labeled workspace-provider pattern:
+
+```yaml
+providers:
+  - id: package:oh-my-promptfoo:Provider
+    label: pi
+    config:
+      delegate:
+        id: pi-sdk
+        config:
+          provider: openai
+          model: gpt-4o-mini
+          permissions: { filesystem: read, shell: deny }
+        env:
+          OPENAI_API_KEY: '{{env.OPENAI_API_KEY}}'
+      workspace:
+        sources: []
+```
+
+Stage skills in `.agents/skills`, `.claude/skills`, or `.github/skills` with
+the existing workspace sources; skill files and stock `skill-used` assertions
+are unchanged. Pi also reads the workspace root `AGENTS.md`. Only successful
+contained, non-symlink skill-body reads count as skill use, not discovery.
+
+Pi requires `provider` and `model`. Optional `apiKey` supplies a credential
+directly; otherwise pass the provider's credential explicitly in `delegate.env`.
+Global login credentials are not imported. Optional `baseUrl` accepts an absolute
+HTTP(S) endpoint without embedded credentials, including local compatible model
+servers; it overrides the selected provider's endpoint, not its model catalog.
+`provider` and `model` must identify a built-in chat model in the pinned SDK.
+`thinkingLevel` accepts `off`, `minimal`, `low`, `medium`, `high`, or `xhigh`.
+Permissions default to `{ filesystem: read, shell: deny }`, exposing `read` and
+`ls` for file inspection and directory discovery. Filesystem `write` and shell
+`allow` are explicit opt-ins. These tool restrictions are not an OS sandbox.
+
+Each call uses in-memory sessions, settings, credentials and model catalogs,
+plus a private temporary agent directory removed after execution. Pi loads no global/project
+extensions, hooks, settings, model files, or global auth, and discovers no
+resources beyond the staged skill roots and workspace root `AGENTS.md`.
+Prompts are submitted as raw text with prompt-template expansion disabled,
+so eval text cannot dispatch slash commands. Output, cached and uncached token
+usage, request count, cost and tool start/end traces remain available.
+`metadata.pi` identifies SDK `1.3.0`, provider, model and skill support.
+
+For `agentAssert`, choose `grader.id: pi-sdk` with the same model and credential
+fields. The grader enables guarded `read` and `ls` tools, with no skill/context
+discovery. Read preserves image attachments; both tools reject paths outside
+the workspace and declared protected sources. Explicit filesystem `write` or
+shell `allow` is rejected rather than silently weakened.
 
 ## Direct Copilot configuration
 

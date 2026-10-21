@@ -111,7 +111,12 @@ describe("closed configuration", () => {
     expect(() =>
       validateProviderConfig({ delegate: { id: "allagents:workspace" }, workspace }),
     ).toThrow();
-    for (const id of ["openai:codex-sdk", "anthropic:claude-agent-sdk", "copilot-sdk"] as const) {
+    for (const id of [
+      "openai:codex-sdk",
+      "anthropic:claude-agent-sdk",
+      "copilot-sdk",
+      "pi-sdk",
+    ] as const) {
       for (const key of [
         "working_dir",
         "bustCache",
@@ -177,6 +182,61 @@ describe("closed configuration", () => {
     expect(() =>
       validateCopilotConfig({ working_dir: ".", permissions: { filesystem: "all" } }),
     ).toThrow();
+  });
+  test("Pi requires a complete model selection but accepts partial prompt overrides", () => {
+    const config = {
+      provider: "openai",
+      model: "gpt-4o-mini",
+      baseUrl: "http://localhost:8080/v1",
+    };
+    expect(
+      validateProviderConfig({
+        delegate: { id: "pi-sdk", config },
+        workspace: { sources: [] },
+      }).delegate.config,
+    ).toEqual(config);
+    for (const partial of [
+      {},
+      { provider: "openai" },
+      { model: "model" },
+      { provider: " ", model: "model" },
+    ])
+      expect(() =>
+        validateProviderConfig({
+          delegate: { id: "pi-sdk", config: partial },
+          workspace: { sources: [] },
+        }),
+      ).toThrow();
+    expect(validateDelegateConfig("pi-sdk", { model: "replacement" })).toEqual({
+      model: "replacement",
+    });
+    expect(
+      promptConfig(
+        { prompt: { config: { delegate: { config: { model: "replacement" } } } } },
+        "pi-sdk",
+        config,
+      ),
+    ).toEqual({ ...config, model: "replacement" });
+  });
+  test("Pi rejects dynamic SDK injection, unsafe endpoints and invalid permissions", () => {
+    for (const key of [
+      "cwd",
+      "extensions",
+      "resourceLoader",
+      "tools",
+      "sessionDir",
+      "agentDir",
+      "inheritEnv",
+    ])
+      expect(() => validateDelegateConfig("pi-sdk", { [key]: {} })).toThrow();
+    for (const baseUrl of ["relative", "file:///tmp/model", "https://user:pass@example.test", ""])
+      expect(() => validateDelegateConfig("pi-sdk", { baseUrl })).toThrow();
+    for (const permissions of [{ filesystem: "all" }, { shell: "yes" }, { network: "allow" }])
+      expect(() => validateDelegateConfig("pi-sdk", { permissions })).toThrow();
+    expect(() => validateDelegateConfig("pi-sdk", { thinkingLevel: "max" })).toThrow();
+    expect(
+      validateDelegateConfig("pi-sdk", { permissions: { filesystem: "read", shell: "deny" } }),
+    ).toEqual({ permissions: { filesystem: "read", shell: "deny" } });
   });
   test("merges only delegate config overrides", () => {
     expect(

@@ -13,18 +13,27 @@ independent assertion for named semantic criteria.
 
 ## Install
 
-Node 22.22+ and Promptfoo 0.122.x or 0.124.x are required. The Copilot SDK is
-an optional peer; install it when using either Copilot provider.
+Node 22.22+ and Promptfoo 0.122.x or 0.124.x are required. Copilot and Pi SDKs
+are optional peers; install the one used by your delegate.
 
 ```sh
 npm install --save-dev promptfoo@0.124.0 oh-my-promptfoo
 npm install --save-dev @github/copilot-sdk@1.0.17 # Copilot only
+npm install --save-dev @earendil-works/pi-coding-agent@1.3.0 # Pi only
 ```
 
 Set the agent credential through `delegate.env` in authored evals. Set
 `OPENAI_API_KEY` and `OPENAI_MODEL` separately when using `llmAssert`. OCI inputs
 require ORAS 1.x through `ALLAGENTS_ORAS_PATH`. A trusted runner must provide
 `ALLAGENTS_LOCAL_SOURCE_ROOT` before acquiring `type: local` sources.
+
+The workspace provider supports `openai:codex-sdk`, `anthropic:claude-agent-sdk`,
+`copilot-sdk`, and `pi-sdk`. Select each with a labeled provider entry.
+Pi requires `delegate.config.provider` and `model`, plus an explicit API key
+or credential in `delegate.env`; `baseUrl` also supports local model endpoints.
+See the [Pi configuration example](https://github.com/allagentsdev/oh-my-promptfoo/blob/main/docs/provider-guide.md#pi-configuration).
+Existing skill files and stock `skill-used` assertions work unchanged; Pi
+reports successful contained skill-file reads, without an OpenTelemetry collector.
 
 Several `type: local` sources may name the same `destination` and merge into one
 tree, so N plugins can stage their skills into a single `.agents/skills`. They
