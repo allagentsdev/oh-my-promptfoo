@@ -22,6 +22,7 @@
 ### Bug Fixes
 
 * **deps:** remediate audits and maintain bun dependencies ([#110](https://github.com/allagentsdev/oh-my-promptfoo/issues/110)) ([0f94061](https://github.com/allagentsdev/oh-my-promptfoo/commit/0f940614c4cfb256c4e864485902f1d120649ade))
+* **deps:** resolve `ip-address` to `10.7.4` within existing ranges for [GHSA-rxp7-6hxx-x8q5](https://github.com/advisories/GHSA-rxp7-6hxx-x8q5), retaining the reviewed FTP and Forge overrides ([#114](https://github.com/allagentsdev/oh-my-promptfoo/pull/114)).
 
 ## [1.20.1](https://github.com/allagentsdev/oh-my-promptfoo/compare/v1.20.0...v1.20.1) (2026-10-22)
 
