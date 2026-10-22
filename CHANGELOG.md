@@ -15,6 +15,19 @@
 * Verify `skill-used` with tracing disabled for Claude, Codex, and Copilot, including failed skill loads and text-only claims. Document native skill metadata preservation and that no OpenTelemetry collector is required.
 * Exercise the real Pi SDK with local model-service responses, including chunked streaming, bounded output, guarded directory and screenshot reads, credential errors, cancellation, skill evidence, and retained billing. Verify native Codex skill gates with two live SDK sessions, without tracing.
 
+## [1.17.0](https://github.com/allagentsdev/oh-my-promptfoo/compare/v1.16.0...v1.17.0) (2026-10-22)
+
+
+### Features
+
+* **provider:** run skill-gated evaluations with Pi ([#90](https://github.com/allagentsdev/oh-my-promptfoo/issues/90)) ([536c1d2](https://github.com/allagentsdev/oh-my-promptfoo/commit/536c1d289a0ebfbb9a6034ae7f9f7e4c2d2f2b7b))
+
+
+### Bug Fixes
+
+* **assertions:** frame llmAssert's answer in &lt;Output&gt; like llm-rubric ([#96](https://github.com/allagentsdev/oh-my-promptfoo/issues/96)) ([84e1e40](https://github.com/allagentsdev/oh-my-promptfoo/commit/84e1e401118553bf2e5771f45ba5584ea33f005c)), closes [#93](https://github.com/allagentsdev/oh-my-promptfoo/issues/93)
+* **workspace:** remove half-made runtime roots and name unmarked leftovers ([#97](https://github.com/allagentsdev/oh-my-promptfoo/issues/97)) ([f08e1e1](https://github.com/allagentsdev/oh-my-promptfoo/commit/f08e1e1831693ad136bf09f27b888a75a30f18fb))
+
 ## [1.16.0](https://github.com/allagentsdev/oh-my-promptfoo/compare/v1.15.0...v1.16.0) (2026-10-21)
 
 

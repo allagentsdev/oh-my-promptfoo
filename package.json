@@ -1,6 +1,6 @@
 {
   "name": "oh-my-promptfoo",
-  "version": "1.16.0",
+  "version": "1.17.0",
   "private": true,
   "type": "module",
   "packageManager": "bun@1.4.0",
