@@ -88,8 +88,12 @@ export async function loadJudge(
   );
 }
 
-/** The name a result uses for a judge: its label when it has one, as Promptfoo shows it. */
+/**
+ * The name a result uses for a judge: its label when it has one, as Promptfoo shows it.
+ * The loaded provider's label comes first, because Promptfoo renders `{{ env.* }}` in it.
+ */
 export function judgeName(spec: unknown, judge: Judge): string {
+  if (judge.label) return judge.label;
   if (
     typeof spec === "object" &&
     spec !== null &&
@@ -99,5 +103,5 @@ export function judgeName(spec: unknown, judge: Judge): string {
     spec.label
   )
     return spec.label;
-  return judge.label || judge.id();
+  return judge.id();
 }

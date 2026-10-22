@@ -941,12 +941,13 @@ test("an assertion's config.provider judges it in every judge shape", async () =
   assert.deepEqual(byId.metadata.fixture, { id: fixtureJudge, config: {}, label: "llmAssert" });
   assert.equal(byId.metadata.judge, fixtureJudge);
 
-  // A provider object: its config, label and env reach the provider Promptfoo constructs.
+  // A provider object: its config, label and env reach the provider Promptfoo constructs,
+  // and the result names the judge by the label Promptfoo rendered.
   const byOptions = await own({
     id: fixtureJudge,
-    label: "assertion-judge",
+    label: "{{ env.JUDGE_NAME }}",
     config: { scores: { accuracy: 0.5, clarity: 1 }, reason: "{{ env.JUDGE_REASON }}" },
-    env: { JUDGE_REASON: "From env" },
+    env: { JUDGE_REASON: "From env", JUDGE_NAME: "assertion-judge" },
   });
   assert.equal(byOptions.score, 0.625);
   assert.equal(byOptions.componentResults[0].reason, "From env graded accuracy");
