@@ -78,13 +78,17 @@ the same test, put it in that assertion's `config.provider`:
     components: [...]
 ```
 
-It takes every shape a suite judge takes, including a `FallbackProvider`
-chain, and it beats the test's `options.provider`, `--grader` and
-`defaultTest.options.provider`, the way an assertion's `provider:` does for
-`llm-rubric`. It lives in `config` because Promptfoo doesn't pass an
-assertion's own `provider:` to package functions. Writing `provider:` beside
-`config:` on an `llmAssert` assertion is a configuration error, and the row is
-an ERROR:
+It takes an id, a provider object or a `{ text: … }` map, including a
+`FallbackProvider` chain, and it beats the test's `options.provider`,
+`--grader` and `defaultTest.options.provider`, the way an assertion's
+`provider:` does for `llm-rubric`. An empty value (`provider:` with nothing
+after it, or `""`) counts as unset, as it does for `llm-rubric`. A provider
+instance works only when you call `llmAssert` yourself: Promptfoo copies an
+assertion's `config` with `structuredClone` before a package function sees it,
+which drops the instance's methods. It lives in `config` because Promptfoo
+doesn't pass an assertion's own `provider:` to package functions. Writing
+`provider:` beside `config:` on an `llmAssert` assertion is a configuration
+error, and the row is an ERROR:
 
 > llmAssert does not see provider: beside config: (Promptfoo does not pass it
 > to package assertions): move it into this assertion's config.provider, or

@@ -47,10 +47,10 @@ function misplacedProvider(assertions: unknown): boolean {
  */
 function judgeSpec(context: LlmAssertionContext | undefined): unknown {
   if (misplacedProvider(context?.test?.assert)) throw new Error(MISPLACED_PROVIDER_ERROR);
-  // An empty or malformed config.provider is a mistake, not a request for the test's
-  // judge: loadJudge rejects it, and a list, by name.
+  // Absent when falsy, as llm-rubric's `assertion.provider || test?.options?.provider`
+  // reads it; any other malformed value, or a list, is rejected by loadJudge by name.
   const own = context?.config?.provider;
-  if (own !== undefined) return own;
+  if (own) return own;
   const spec = context?.test?.options?.provider;
   if (spec === undefined || spec === null || spec === "")
     throw new Error(

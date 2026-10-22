@@ -876,12 +876,21 @@ test("llmAssert names a missing, listed or misplaced judge before any request", 
       llmAssert("answer", context),
       /A list of judges is not a provider.*FallbackProvider with config\.providers/,
     );
-  // An empty config.provider is a mistake, not a request for the test's judge.
-  for (const provider of [null, "", {}])
-    await assert.rejects(
-      llmAssert("answer", { ...judgedBy(shared.provider), config: { components, provider } }),
-      /A judge must be a provider id, a provider object with an id, or a \{ text: … \} map/,
-    );
+  // An empty config.provider is absent, as llm-rubric's `assertion.provider ||` reads it;
+  // any other malformed one is refused.
+  const fallthrough = stub([{ output: verdict() }, { output: verdict() }], "test-judge");
+  for (const provider of [null, ""]) {
+    const graded = await llmAssert("answer", {
+      ...judgedBy(fallthrough.provider),
+      config: { components, provider },
+    });
+    assert.equal(graded.metadata.judge, "test-judge");
+  }
+  assert.equal(fallthrough.calls.length, 2);
+  await assert.rejects(
+    llmAssert("answer", { ...judgedBy(shared.provider), config: { components, provider: {} } }),
+    /A judge must be a provider id, a provider object with an id, or a \{ text: … \} map/,
+  );
 
   // provider: beside config: is invisible to a package assertion, so it is refused and
   // pointed at config.provider, with or without a config.provider or test judge beside it.
@@ -943,6 +952,8 @@ test("an assertion's config.provider judges it in every judge shape", async () =
   assert.equal(byOptions.componentResults[0].reason, "From env graded accuracy");
   assert.equal(byOptions.metadata.judge, "assertion-judge");
 
+  // An instance reaches llmAssert only when it is called directly: Promptfoo
+  // structuredClones an assertion's config before a package function sees it.
   const instance = stub([{ output: verdict() }, { output: verdict() }], "assertion-instance");
   const byInstance = await own(instance.provider);
   assert.equal(byInstance.pass, true);

@@ -998,7 +998,13 @@ try {
         tests: [{ assert: [judged(), judged(levelJudge("assertion"))] }],
       },
       [0],
-      { ...judgeEnvironment, OPENAI_BASE_URL: `${base}/grader/v1`, OPENAI_API_KEY: "local-only" },
+      {
+        ...judgeEnvironment,
+        // Promptfoo reads OPENAI_API_BASE_URL first, so an inherited one must not win.
+        OPENAI_API_BASE_URL: `${base}/grader/v1`,
+        OPENAI_BASE_URL: `${base}/grader/v1`,
+        OPENAI_API_KEY: "local-only",
+      },
       ["--grader", "openai:chat:fake-grader"],
     );
     if (
