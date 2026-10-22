@@ -553,6 +553,126 @@ test("binary scoring states the checklist rule to the judge and fixes the bar at
   }
 });
 
+// Each llm-rubric assertion carries its own threshold, so a batch of them must too.
+test("a component threshold sets that component's bar in place of config.threshold", async () => {
+  const previous = Object.fromEntries(environmentKeys.map((name) => [name, process.env[name]]));
+  const responses: unknown[] = [];
+  const server = createServer(async (request, response) => {
+    request.resume();
+    await once(request, "end");
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(
+      JSON.stringify({ choices: [{ message: { content: JSON.stringify(responses.shift()) } }] }),
+    );
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  try {
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("Missing test server port");
+    process.env.OPENAI_MODEL = "fake-grader";
+    process.env.OPENAI_API_KEY = "local-only";
+    process.env.OPENAI_BASE_URL = `http://127.0.0.1:${address.port}/v1`;
+    const grade = async (config: object, accuracy: number, clarity: number) => {
+      responses.push({
+        components: [
+          { metric: "accuracy", score: accuracy, reason: "Graded" },
+          { metric: "clarity", score: clarity, reason: "Graded" },
+        ],
+      });
+      return llmAssert("candidate answer", { config: config as never });
+    };
+
+    // Stricter than config.threshold: 0.75 clears the shared 0.7 but not accuracy's own 0.9,
+    // while clarity, with no bar of its own, still takes the shared one.
+    const stricter = {
+      threshold: 0.7,
+      components: [{ ...components[0], threshold: 0.9 }, components[1]],
+    };
+    const strictResult = await grade(stricter, 0.75, 0.75);
+    assert.deepEqual(
+      strictResult.componentResults.map(({ pass, assertion }) => [pass, assertion.threshold]),
+      [
+        [false, 0.9],
+        [true, 0.7],
+      ],
+    );
+    assert.equal(strictResult.pass, false);
+    // Weighted scoring and named scores are untouched by the bars.
+    assert.equal(strictResult.score, 0.75);
+    assert.deepEqual(strictResult.namedScores, { accuracy: 0.75, clarity: 0.75 });
+    assert.deepEqual(strictResult.namedScoreWeights, { accuracy: 3, clarity: 1 });
+
+    // Looser than config.threshold: clarity at 0.4 fails the shared 0.7 but meets its own 0.3.
+    const looser = {
+      threshold: 0.7,
+      components: [components[0], { ...components[1], threshold: 0.3 }],
+    };
+    const looseResult = await grade(looser, 0.7, 0.4);
+    assert.deepEqual(
+      looseResult.componentResults.map(({ pass, assertion }) => [pass, assertion.threshold]),
+      [
+        [true, 0.7],
+        [true, 0.3],
+      ],
+    );
+    assert.equal(looseResult.pass, true);
+
+    // Without config.threshold, only the component that states a bar has one.
+    const alone = { components: [{ ...components[0], threshold: 0.6 }, components[1]] };
+    const aloneResult = await grade(alone, 0.5, 0.1);
+    assert.equal(aloneResult.componentResults[0].pass, false);
+    assert.equal(aloneResult.componentResults[0].assertion.threshold, 0.6);
+    assert.equal(aloneResult.componentResults[1].pass, true);
+    assert.equal("threshold" in aloneResult.componentResults[1].assertion, false);
+
+    // A score equal to the bar meets it; one just below does not.
+    assert.equal((await grade(alone, 0.6, 0)).componentResults[0].pass, true);
+    assert.equal((await grade(alone, 0.59, 0)).componentResults[0].pass, false);
+
+    // The judge's own verdict still gates beneath a component bar.
+    responses.push({
+      components: [
+        { metric: "accuracy", score: 1, reason: "Wrong claim", pass: false },
+        { metric: "clarity", score: 1, reason: "Plain" },
+      ],
+    });
+    assert.equal((await llmAssert("candidate answer", { config: alone })).pass, false);
+
+    for (const threshold of [-0.1, 1.1, Number.NaN, Number.POSITIVE_INFINITY, "0.5", null]) {
+      await assert.rejects(
+        llmAssert("candidate answer", {
+          config: { components: [{ ...components[0], threshold: threshold as number }] },
+        }),
+        /component thresholds between 0 and 1/,
+      );
+    }
+
+    // Binary fixes every bar at 1: a component that states another conflicts with it.
+    await assert.rejects(
+      llmAssert("candidate answer", {
+        config: { scoring: "binary", components: [{ ...components[0], threshold: 0.5 }] },
+      }),
+      /without a conflicting config.threshold or component threshold/,
+    );
+    const binary = {
+      scoring: "binary",
+      components: [{ ...components[0], threshold: 1 }, components[1]],
+    };
+    const binaryResult = await grade(binary, 1, 0.9);
+    assert.deepEqual(
+      binaryResult.componentResults.map(({ pass, assertion }) => [pass, assertion.threshold]),
+      [
+        [true, 1],
+        [false, 1],
+      ],
+    );
+  } finally {
+    server.close();
+    restoreEnvironment(previous);
+  }
+});
+
 test("llmAssert adds no hidden agent rule; a suite states it in rubricPrompt", async () => {
   const previous = Object.fromEntries(environmentKeys.map((name) => [name, process.env[name]]));
   const prompts: string[] = [];

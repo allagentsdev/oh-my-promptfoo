@@ -153,11 +153,15 @@ assert:
 
 A component passes when the judge's verdict is not false. `threshold` adds a
 numeric bar on top of that verdict, per component rather than as an aggregate,
-and there is no default — the same contract as Promptfoo's `llm-rubric`. The
+and there is no default — the same contract as Promptfoo's `llm-rubric`.
+`config.threshold` sets the bar for every component; a component's own
+`threshold` (0 to 1) replaces it for that component, which is how an
+`llm-rubric` assertion's `threshold:` carries over when you batch it. The
 assertion passes only when every component passes. For a checklist, where a
 criterion is either met or not, set `scoring: binary` rather than a threshold:
 the judge is told to score exactly 1 or 0, to keep each criterion's scope and
-polarity, and the bar becomes a full score, so none of that has to be repeated
+polarity, and the bar becomes a full score (a config or component threshold
+other than 1 is rejected), so none of that has to be repeated
 in each suite's `rubricPrompt`. Keep `rubricPrompt` for instructions only this
 suite needs, such as which claims its domain counts as unverified. It is added
 beneath the built-in rules and cannot replace them or the reply format, so do
