@@ -4,6 +4,8 @@ export interface RubricComponent {
   metric: string;
   value: string;
   weight?: number;
+  /** This component's numeric bar; overrides `config.threshold` for it alone. */
+  threshold?: number;
 }
 
 export interface BatchedRubricConfig {
@@ -100,8 +102,8 @@ export function render(source: string, vars: Record<string, unknown>, label: str
 }
 
 export interface PreparedRubric {
+  /** Each component's `threshold` is its effective bar, if it has one. */
   components: RubricComponent[];
-  threshold?: number;
   totalWeight: number;
   /** Grading rules, reply format and suite instructions. */
   system: string;
@@ -122,7 +124,9 @@ export function prepareRubric(
   // drop-in replacement quietly stricter than the assertion it replaces, so an unstated
   // threshold stays unstated. `binary` is the exception and says so: a checklist item is
   // met or it is not, so the bar is a full score and a conflicting one is rejected.
-  const threshold = scoring === "binary" ? 1 : config?.threshold;
+  // A component's own threshold is the batched form of an llm-rubric assertion's
+  // `threshold:`, so rubrics with different bars can share one judge request. It is held
+  // to the same range and the same binary rule as `config.threshold`.
   if (config && Object.hasOwn(config, "rubric")) {
     throw new Error("LLM assertion config.rubric was renamed to config.rubricPrompt");
   }
@@ -153,17 +157,20 @@ export function prepareRubric(
             component.weight > 0)),
     ) ||
     new Set(components.map(({ metric }) => metric)).size !== components.length ||
-    (threshold !== undefined &&
-      (typeof threshold !== "number" ||
-        !Number.isFinite(threshold) ||
-        threshold < 0 ||
-        threshold > 1)) ||
+    ![config.threshold, ...components.map(({ threshold }) => threshold)].every(
+      (threshold) =>
+        threshold === undefined ||
+        (typeof threshold === "number" &&
+          Number.isFinite(threshold) &&
+          threshold >= 0 &&
+          threshold <= 1 &&
+          (scoring !== "binary" || threshold === 1)),
+    ) ||
     (config.rubricPrompt !== undefined && !config.rubricPrompt.trim()) ||
-    (config.scoring !== undefined && config.scoring !== "graded" && config.scoring !== "binary") ||
-    (scoring === "binary" && config.threshold !== undefined && config.threshold !== 1)
+    (config.scoring !== undefined && config.scoring !== "graded" && config.scoring !== "binary")
   ) {
     throw new Error(
-      "LLM assertion requires unique named components with nonempty criteria, positive weights, a threshold between 0 and 1, a nonempty string rubricPrompt, and scoring of 'graded' or 'binary' without a conflicting threshold",
+      "LLM assertion requires unique named components with nonempty criteria, positive weights, a config.threshold and component thresholds between 0 and 1, a nonempty string rubricPrompt, and scoring of 'graded' or 'binary' without a conflicting config.threshold or component threshold",
     );
   }
   if (components.some(({ metric }) => Object.hasOwn(Object.prototype, metric))) {
@@ -208,7 +215,15 @@ export function prepareRubric(
   // rubric. Like Promptfoo, the answer is not escaped: the judge sees it verbatim.
   const answer = typeof output === "string" ? output : (JSON.stringify(output) ?? "undefined");
   const user = `<Output>\n${answer}\n</Output>\n<Rubric>\n${criteria.map(({ metric, value }) => `- ${metric}: ${value}`).join("\n")}\n</Rubric>`;
-  return { components, threshold, totalWeight, system, user };
+  return {
+    components: components.map((component) => ({
+      ...component,
+      threshold: scoring === "binary" ? 1 : (component.threshold ?? config.threshold),
+    })),
+    totalWeight,
+    system,
+    user,
+  };
 }
 
 export interface GraderUsage {
@@ -370,7 +385,7 @@ function gradingFailure(error: unknown, usages: GraderUsage[]): RubricResult {
 }
 
 function rubricResult(
-  { components, threshold, totalWeight }: PreparedRubric,
+  { components, totalWeight }: PreparedRubric,
   grades: Map<string, Grade>,
   usages: GraderUsage[],
   renderedGradingPrompt: string,
@@ -380,7 +395,7 @@ function rubricResult(
   let weightedScore = 0;
   let allPassed = true;
   let reason = "";
-  const componentResults = components.map(({ metric, value, weight }) => {
+  const componentResults = components.map(({ metric, value, weight, threshold }) => {
     const grade = grades.get(metric);
     if (!grade) throw new Error(`LLM grader did not score component: ${metric}`);
     const effectiveWeight = weight ?? 1;

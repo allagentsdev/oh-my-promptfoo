@@ -60,3 +60,7 @@ These remaining differences from `llm-rubric` are not batching. They are open qu
 - a judge failure that reports no usage throws, so Promptfoo records an ERROR row instead of a failed assertion;
 - an assertion-level `threshold:` is never applied to this result;
 - images and audio in the provider response are not attached to the judge request.
+
+## Amendment: per-component thresholds (2026-10-22)
+
+Batching had cost a parity point. Each `llm-rubric` assertion carries its own `threshold:`, but `llmAssert` applied one `config.threshold` to every component, so rubrics with different bars could not share a request without losing them. Each component now takes an optional `threshold` from 0 to 1, validated like `config.threshold`. A component's bar is its own `threshold`, otherwise `config.threshold`, otherwise none. With no bar, the judge's verdict alone decides, as before. The pass rule is unchanged, `(grade.pass ?? true) && (bar === undefined || score >= bar)`, and the component result reports the bar it applied. `scoring: binary` still fixes every bar at 1, so a component `threshold` other than 1 is rejected, the same as a conflicting `config.threshold`. Weighted scoring, named scores and the overall pass are unchanged, and `agentAssert` gets the same behaviour through the shared contract. The assertion-level `threshold:` listed above is still not applied. The component `threshold` is the batched form of each `llm-rubric` assertion's own `threshold:`.

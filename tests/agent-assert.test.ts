@@ -251,6 +251,46 @@ test("agentAssert shares component scoring and inspects the live workspace with 
   });
 }, 30_000);
 
+test("agentAssert applies a component threshold in place of config.threshold", async () => {
+  await withGrader(async ({ queue, context }) => {
+    const reply = (accuracy: number, scope: number) => ({
+      output: JSON.stringify({
+        components: [
+          { metric: "accuracy", score: accuracy, reason: "Inspected input.txt" },
+          { metric: "scope", score: scope, reason: "Inspected the changed paths" },
+        ],
+      }),
+    });
+    await queue([reply(0.8, 0.4), reply(0.9, 0.3)]);
+    const gradingContext = context();
+    const barred = {
+      ...gradingContext,
+      config: {
+        ...gradingContext.config,
+        threshold: 0.7,
+        components: [
+          { ...components[0], threshold: 0.9 },
+          { ...components[1], threshold: 0.4 },
+        ],
+      },
+    };
+    const failed = await agentAssert("I fixed the parser", barred);
+    assert.deepEqual(
+      failed.componentResults.map(({ pass, assertion }) => [pass, assertion.threshold]),
+      [
+        [false, 0.9],
+        [true, 0.4],
+      ],
+    );
+    assert.equal(failed.pass, false);
+    const passed = await agentAssert("I fixed the parser", barred);
+    assert.deepEqual(
+      passed.componentResults.map(({ pass }) => pass),
+      [true, false],
+    );
+  });
+});
+
 test("agentAssert rejects absent, released, and non-directory workspaces without invoking a grader", async () => {
   await withGrader(async ({ workspace, queue, calls, context }) => {
     await queue([]);
@@ -677,6 +717,8 @@ test("agentAssert uses llmAssert validation and component error messages", async
       { components: [{ metric: "constructor", value: "Unsafe metric" }] },
       { components: [{ metric: "m", value: "Criterion", weight: 0 }] },
       { scoring: "binary", threshold: 0.5 },
+      { components: [{ metric: "m", value: "Criterion", threshold: 1.5 }] },
+      { scoring: "binary", components: [{ metric: "m", value: "Criterion", threshold: 0.5 }] },
       { candidate: "agent" },
       { candidate: "text" },
       { rubricPrompt: "Grade {{ output }}" },

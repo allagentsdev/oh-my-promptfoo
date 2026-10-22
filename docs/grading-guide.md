@@ -15,21 +15,56 @@ endpoint) in the environment that runs Promptfoo.
 ## llmAssert
 
 `llmAssert` batches named criteria into one judge request. A component passes
-when its judge verdict is not false, and `config.threshold` adds a numeric bar
-on top of that verdict when you state one — the same contract as Promptfoo's
-own `llm-rubric`, which applies a threshold only when the assertion carries
-one. There is no default bar. When batching equally weighted rubrics alongside
-other assertions, set the outer Promptfoo `weight` to the number of components
-to preserve the test's weighted score.
+when its judge verdict is not false, and a threshold adds a numeric bar on top
+of that verdict when you state one — the same contract as Promptfoo's own
+`llm-rubric`, which applies a threshold only when the assertion carries one.
+There is no default bar. `config.threshold` sets the bar for every component; a
+component's own `threshold` (0 to 1) replaces it for that component alone, so
+rubrics with different bars can share one request. When batching equally
+weighted rubrics alongside other assertions, set the outer Promptfoo `weight` to
+the number of components to preserve the test's weighted score.
+
+Each `llm-rubric` assertion's `threshold:` becomes that component's `threshold`:
+
+```yaml
+# One judge request per rubric
+assert:
+  - type: llm-rubric
+    metric: accuracy
+    value: States the refund window correctly.
+    threshold: 0.9
+  - type: llm-rubric
+    metric: tone
+    value: Stays polite.
+    threshold: 0.5
+```
+
+```yaml
+# The same bars in one batched request
+assert:
+  - type: javascript
+    value: package:oh-my-promptfoo/assertions:llmAssert
+    config:
+      components:
+        - metric: accuracy
+          value: States the refund window correctly.
+          threshold: 0.9
+        - metric: tone
+          value: Stays polite.
+          threshold: 0.5
+```
+
+A component without its own `threshold` takes `config.threshold`, if any. Each
+component result reports the bar it was held to as `assertion.threshold`.
 
 Set `config.scoring: binary` for a checklist, where a criterion is either met or
 not. The judge is told to score 1 if the answer fully meets a criterion and 0
 otherwise, to keep its subject, condition, polarity and scope rather than accept
 a weaker promise, and to treat a criterion whose condition the answer never
 reaches as met if the answer does nothing it forbids. The pass mark
-becomes a full score, so a `threshold` beside the mode that is not 1
-contradicts it and is rejected. Stating the mode replaces writing those rules
-into every rubric by hand.
+becomes a full score, so a `config.threshold` or component `threshold` beside
+the mode that is not 1 contradicts it and is rejected. Stating the mode replaces
+writing those rules into every rubric by hand.
 
 The default, `graded`, trusts the judge's verdict, adds no bar unless you state
 one, and says nothing about how to score. Partial credit for a near miss is
