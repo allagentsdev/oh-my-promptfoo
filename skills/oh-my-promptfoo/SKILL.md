@@ -161,7 +161,11 @@ polarity, and the bar becomes a full score, so none of that has to be repeated
 in each suite's `rubricPrompt`. Keep `rubricPrompt` for instructions only this
 suite needs, such as which claims its domain counts as unverified. It is added
 beneath the built-in rules and cannot replace them or the reply format, so do
-not paste an `llm-rubric` template that uses `{{ output }}` or `{{ rubric }}`.
+not paste an `llm-rubric` template that uses `{{ output }}` or `{{ rubric }}`:
+as in `llm-rubric`, the judge already receives the answer in an `<Output>` block
+and the criteria in a `<Rubric>` block. If a grade claims the answer is missing
+or misreads it, inspect the assertion's `metadata.renderedGradingPrompt`, which
+records exactly what the judge was sent.
 Only assertion `config.rubricPrompt` is read; `options.rubricPrompt` is ignored.
 To share these instructions, define a YAML anchor as above and use
 `rubricPrompt: *suiteGuidance` in another assertion's `config` in the same YAML
@@ -193,7 +197,9 @@ However, Promptfoo's config-load pass can render `{{ env.NAME }}` using merged
 config `env:` before `llmAssert` sees the text. Assertion rendering flags cannot
 undo that preprocessing. Use test variables for assertion-time inputs.
 See [ADR 0006](../../docs/adr/0006-llm-assert-rubric-prompt.md)
-for versioned upstream sources and the strict-unset/literal-disable safeguards.
+for versioned upstream sources and the strict-unset/literal-disable safeguards,
+and [ADR 0011](../../docs/adr/0011-llm-assert-is-batched-llm-rubric.md) for
+parity with `llm-rubric`.
 
 ## Grading an agent's answer
 

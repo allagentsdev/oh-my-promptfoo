@@ -19,7 +19,7 @@ test("rubric grading accepts prose and fenced JSON without a paid retry", async 
     `Inspection notes {not JSON}.\n\`\`\`json\n${verdict}\n\`\`\`\nDone.`,
   ]) {
     let attempts = 0;
-    const result = await gradeRubric(rubric(), async () => {
+    const result = await gradeRubric(rubric(), "sent prompt", async () => {
       attempts++;
       return { text };
     });
@@ -36,7 +36,7 @@ test("failed verdict retries return the billed usage from both replies", async (
     ['{"components":[]}', /did not score every component/],
   ] as const) {
     let attempts = 0;
-    const result = await gradeRubric(rubric(), async () => ({
+    const result = await gradeRubric(rubric(), "sent prompt", async () => ({
       text,
       usage:
         ++attempts === 1
@@ -61,7 +61,7 @@ test("failed verdict retries return the billed usage from both replies", async (
 
 test("retry execution failures retain the malformed first reply's usage", async () => {
   let attempts = 0;
-  const result = await gradeRubric(rubric(), async () => {
+  const result = await gradeRubric(rubric(), "sent prompt", async () => {
     if (++attempts === 1) return { text: "not JSON", usage: { prompt: 10, completion: 2 } };
     throw new Error("Grader session disconnected");
   });
@@ -69,6 +69,8 @@ test("retry execution failures retain the malformed first reply's usage", async 
   assert.equal(result.pass, false);
   assert.equal(result.score, 0);
   assert.equal(result.reason, "Grader session disconnected");
+  // Marked the way Promptfoo's llm-rubric marks a judge failure in its results.
+  assert.deepEqual(result.metadata, { graderError: true });
   assert.deepEqual(result.tokensUsed, {
     prompt: 10,
     completion: 2,
@@ -80,7 +82,7 @@ test("retry execution failures retain the malformed first reply's usage", async 
 
 test("execution error responses preserve billed usage without retrying", async () => {
   let attempts = 0;
-  const result = await gradeRubric(rubric(), async () => {
+  const result = await gradeRubric(rubric(), "sent prompt", async () => {
     attempts++;
     return {
       error: "Agent grading failed: session.error after a billed turn",
@@ -104,18 +106,18 @@ test("execution error responses preserve billed usage without retrying", async (
 test("unmeasured grading failures keep their existing thrown error behavior", async () => {
   const executionError = new Error("Grader could not start");
   await assert.rejects(
-    gradeRubric(rubric(), async () => {
+    gradeRubric(rubric(), "sent prompt", async () => {
       throw executionError;
     }),
     (error) => error === executionError,
   );
   await assert.rejects(
-    gradeRubric(rubric(), async () => ({ error: "Grader session failed" })),
+    gradeRubric(rubric(), "sent prompt", async () => ({ error: "Grader session failed" })),
     /Grader session failed/,
   );
   let attempts = 0;
   await assert.rejects(
-    gradeRubric(rubric(), async () => {
+    gradeRubric(rubric(), "sent prompt", async () => {
       attempts++;
       return { text: "not JSON", usage: { prompt: -1, completion: "unknown" } };
     }),

@@ -768,13 +768,13 @@ try {
       !judgeRequests[0].body.messages[0].content.includes(
         'Environment packed environment; object {"subject":"packed object"}; loaded loaded JSON.',
       ) ||
-      !judgeRequests[0].body.messages[0].content.includes(
-        "- accuracy: Ground claims about the packaged build; environment packed environment; loaded loaded JSON; nested packed object",
+      judgeRequests[0].body.messages[1].content !==
+        "<Output>\nreview\n</Output>\n<Rubric>\n- accuracy: Ground claims about the packaged build; environment packed environment; loaded loaded JSON; nested packed object\n- clarity: Explain packed object clearly\n</Rubric>" ||
+      // What the judge was sent reaches Promptfoo's results, as llm-rubric reports it.
+      ![grade, ...(grade?.componentResults ?? [])].some(
+        (part: { metadata?: { renderedGradingPrompt?: unknown } } | undefined) =>
+          part?.metadata?.renderedGradingPrompt === JSON.stringify(judgeRequests[0].body.messages),
       ) ||
-      !judgeRequests[0].body.messages[0].content.includes(
-        "- clarity: Explain packed object clearly",
-      ) ||
-      judgeRequests[0].body.messages[1].content !== "review" ||
       grade?.score !== 0.925 ||
       grade?.namedScores?.accuracy !== 1 ||
       grade?.namedScores?.clarity !== 0.7 ||

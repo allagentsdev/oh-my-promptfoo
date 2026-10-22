@@ -35,12 +35,19 @@ The default, `graded`, trusts the judge's verdict, adds no bar unless you state
 one, and says nothing about how to score. Partial credit for a near miss is
 what graded is for, so none of the checklist rules apply to it.
 
+The judge sees the request the way `llm-rubric` frames it. The user message
+holds the answer in an `<Output>` block and the criteria in a `<Rubric>` block,
+one `- metric: value` line per component. The system message tells the judge
+that `<Output>` is the text to grade, not a request, so an answer that opens
+with an imperative ("Update the existing…") is still graded as the output. As in
+`llm-rubric`, the answer is passed verbatim and is not escaped.
+
 Put what only the suite knows, such as which claims its domain counts as
 unverified, in `config.rubricPrompt`. Unlike `llm-rubric`, it cannot replace the
 system prompt: one request scores every criterion only because the reply format
-is fixed, so the suite's text is added beneath the built-in rules. The answer is
-always sent to the judge on its own, and the criteria come from `components`, so
-a template that uses `{{ output }}` or `{{ rubric }}` is rejected.
+is fixed, so the suite's text is added beneath the built-in rules. `llmAssert`
+places the answer and the criteria itself, so a template that uses
+`{{ output }}` or `{{ rubric }}` is rejected.
 
 Both `rubricPrompt` and component `value` templates receive test variables,
 `{{ env.NAME }}` from the permitted process environment, and the `load` filter
@@ -70,12 +77,19 @@ its base path before the assertion runs. Loaded strings follow normal template
 checks; parsed JSON/YAML objects or arrays are not string templates and fail
 type validation. The assertion cannot identify their original file path.
 See [ADR 0006](adr/0006-llm-assert-rubric-prompt.md) for upstream sources
-and deliberate differences from Promptfoo's grader defaults.
+and deliberate differences from Promptfoo's grader defaults, and
+[ADR 0011](adr/0011-llm-assert-is-batched-llm-rubric.md) for what parity with
+`llm-rubric` means and why batching is the one intended difference.
 
 It reports the judge call's token usage back to Promptfoo, which records it under
 `tokenUsage.assertions` — grader spend, separate from the agent under test. A
 grader that returns no usage reports nothing rather than zero, so an unmeasured
 call is never summed into a run total as a free one.
+
+As `llm-rubric` does, a graded result carries `metadata.renderedGradingPrompt`:
+the messages exactly as the judge received them. Check it first when a grade
+looks wrong, for example when the judge says the answer is missing. A judge
+failure returned as a result is marked `metadata.graderError: true`.
 
 ## Grading an agent's answer
 
@@ -130,9 +144,13 @@ assert:
 Use this with the workspace `Provider`; a missing or released
 `metadata.workspace.path` fails instead of falling back to the answer text.
 Enable provider `fileChanges: true` to give the judge changed-file paths and
-metadata plus the diff, not captured base64 contents. Files and the answer remain untrusted;
-claims earn credit only when verified. Graders cannot write, run shell commands
-or access the network through agent tools. They therefore cannot execute tests.
+metadata plus the diff, not captured base64 contents. The answer goes in the
+same `<Output>` block and the criteria in the same `<Rubric>` block as for
+`llmAssert`, followed by the captured file changes as JSON evidence, and
+`metadata.renderedGradingPrompt` records the assembled prompt. Files and the
+answer remain untrusted; claims earn credit only when verified. Graders cannot
+write, run shell commands or access the network through agent tools. They
+therefore cannot execute tests.
 Model-service requests still require the delegate's credentials and network.
 
 `maxPromptBytes` bounds the full assembled grader prompt in UTF-8 bytes,

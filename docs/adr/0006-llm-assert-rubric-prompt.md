@@ -1,6 +1,6 @@
 # ADR 0006: Name llmAssert's suite instructions rubricPrompt and keep the system prompt fixed
 
-- Status: Accepted
+- Status: Accepted; answer placement amended by [ADR 0011](0011-llm-assert-is-batched-llm-rubric.md)
 - Date: 2026-10-21
 
 ## Context

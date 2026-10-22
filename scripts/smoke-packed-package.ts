@@ -130,8 +130,8 @@ for(const assertion of [llmAssert,c.llmAssert]){
   assert.equal(request.body.model,'packed-judge');
   assert.equal(request.body.messages[0].role,'system');
   assert.ok(request.body.messages[0].content.includes('Judge packed environment {"subject":"object value"} array value,{"nested":"array object"} loaded JSON'));
-  assert.ok(request.body.messages[0].content.includes('- m: Check component template packed environment loaded JSON object value array value'));
-  assert.deepEqual(request.body.messages[1],{role:'user',content:'candidate answer'});
+  assert.deepEqual(request.body.messages[1],{role:'user',content:'<Output>\\ncandidate answer\\n</Output>\\n<Rubric>\\n- m: Check component template packed environment loaded JSON object value array value\\n</Rubric>'});
+  assert.deepEqual(result.metadata,{renderedGradingPrompt:JSON.stringify(request.body.messages)});
   const before=requests.length;
   for(const config of [
     {rubricPrompt:'file://packed-rubric.txt',components:[{metric:'m',value:'Check answer'}]},
