@@ -252,11 +252,70 @@ describe("closed configuration", () => {
     );
     expect(
       promptConfig(
-        { prompt: { config: { delegate: { config: { model: "override" } } } } },
+        {
+          prompt: {
+            config: {
+              provider: "openai:grader-model",
+              delegate: { config: { model: "override" } },
+            },
+          },
+        },
         "openai:codex-sdk",
         { model: "base", sandbox_mode: "workspace-write" },
       ),
     ).toEqual({ model: "override", sandbox_mode: "workspace-write" });
+  });
+  test("ignores live grading metadata without inspecting or mutating it", () => {
+    const unexpected = () => {
+      throw new Error("grader methods must not run during generation validation");
+    };
+    const grader = { id: unexpected, callApi: unexpected, toJSON: unexpected, self: null as unknown };
+    grader.self = grader;
+    Object.freeze(grader);
+    const original = Object.freeze({ model: "base" });
+    const config = Object.freeze({ provider: grader });
+    const context = Object.freeze({
+      prompt: Object.freeze({ config }),
+      test: Object.freeze({ options: Object.freeze({ provider: grader }) }),
+    });
+    expect(promptConfig(context, "openai:codex-sdk", original)).toBe(original);
+    expect(context.prompt.config).toBe(config);
+    expect(context.prompt.config.provider).toBe(grader);
+    expect(context.test.options.provider).toBe(grader);
+    expect(grader.self).toBe(grader);
+  });
+  test("grading metadata does not admit unsupported generation overrides", () => {
+    for (const override of [
+      { model: "unsupported-root-model" },
+      { workspace: { sources: [] } },
+      { permissions: {} },
+      { env: {} },
+      { delegate: { id: "copilot-sdk" } },
+      { delegate: { permissions: {} } },
+      { delegate: { env: {} } },
+      { delegate: { config: { env: {} } } },
+    ])
+      expect(() =>
+        promptConfig(
+          { prompt: { config: { provider: "openai:grader-model", ...override } } },
+          "openai:codex-sdk",
+          {},
+        ),
+      ).toThrow();
+    expect(() =>
+      promptConfig(
+        {
+          prompt: {
+            config: {
+              provider: "openai:grader-model",
+              delegate: { config: { timeoutMs: 1000 } },
+            },
+          },
+        },
+        "openai:codex-sdk",
+        {},
+      ),
+    ).toThrow("prompt.config.delegate.config.timeoutMs is constructor-only");
   });
   test("resolves only relative source paths against the loader basePath", () => {
     const spec = resolveSourcePaths(
@@ -827,11 +886,21 @@ describe("workspace provider publication and lifetime", () => {
     for (const readOnly of [false, true]) {
       const { provider } = await workspaceProvider(false, readOnly, "repo");
       try {
-        const result = await provider.callApi(readOnly ? "success" : "write");
+        const grader = "openai:grader-model";
+        const context = {
+          prompt: { config: { provider: grader, delegate: { config: { model: "override" } } } },
+          test: { options: { provider: grader } },
+        };
+        const result = await provider.callApi(readOnly ? "success" : "write", context);
+        expect(result.error).toBeUndefined();
+        expect(context.prompt.config.provider).toBe(grader);
+        expect(context.test.options.provider).toBe(grader);
+        expect((result.metadata as any).options.options.config.model).toBe("override");
         const root = (result.metadata as any).workspace.path as string;
         expect((result.metadata as any).options.options.config.working_dir).toBe(
           join(root, "repo"),
         );
+        expect(await readFile(join(root, "repo", "input.txt"), "utf8")).toBe("immutable source");
         if (!readOnly) {
           expect(await readFile(join(root, "repo", "generated.txt"), "utf8")).toBe(
             "generated durable content",
