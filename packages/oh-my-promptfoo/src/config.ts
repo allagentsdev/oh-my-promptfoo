@@ -426,10 +426,12 @@ export function validateCopilotConfig(value: unknown): CopilotSdkProviderConfig 
 export function promptConfig(context: unknown, id: DelegateId, original: JsonObject): JsonObject {
   const ctx = context as { prompt?: { config?: unknown } } | undefined;
   if (ctx?.prompt?.config === undefined) return original;
-  // Stock Promptfoo adds absent test options as undefined own properties.
+  // Stock Promptfoo adds absent options as undefined and provider as grading metadata.
   const supplied = object(ctx.prompt.config, "prompt.config");
   const p = closed(
-    Object.fromEntries(Object.entries(supplied).filter(([, value]) => value !== undefined)),
+    Object.fromEntries(
+      Object.entries(supplied).filter(([key, value]) => key !== "provider" && value !== undefined),
+    ),
     ["delegate"],
     "prompt.config",
   );
