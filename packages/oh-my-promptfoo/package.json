@@ -16,6 +16,11 @@
       "types": "./dist/assertions.d.ts",
       "import": "./dist/assertions.js",
       "require": "./dist/assertions.cjs"
+    },
+    "./providers": {
+      "types": "./dist/providers.d.ts",
+      "import": "./dist/providers.js",
+      "require": "./dist/providers.cjs"
     }
   },
   "bin": {

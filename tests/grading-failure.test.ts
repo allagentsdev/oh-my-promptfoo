@@ -1,8 +1,7 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
-import { once } from "node:events";
-import { createServer } from "node:http";
 import { llmAssert } from "../packages/oh-my-promptfoo/src/assertions";
+import type { JudgeResponse } from "../packages/oh-my-promptfoo/src/judge";
 import { gradeRubric, prepareRubric } from "../packages/oh-my-promptfoo/src/rubric-contract";
 
 const components = [{ metric: "accuracy", value: "Ground every claim" }];
@@ -59,13 +58,15 @@ test("failed verdict retries return the billed usage from both replies", async (
   }
 });
 
-test("retry execution failures retain the malformed first reply's usage", async () => {
-  let attempts = 0;
-  const result = await gradeRubric(rubric(), "sent prompt", async () => {
-    if (++attempts === 1) return { text: "not JSON", usage: { prompt: 10, completion: 2 } };
-    throw new Error("Grader session disconnected");
+test("the malformed-verdict retry is attempt 1, and its failure keeps the first reply's usage", async () => {
+  const attempts: number[] = [];
+  const result = await gradeRubric(rubric(), "sent prompt", async (attempt) => {
+    attempts.push(attempt);
+    return attempt === 0
+      ? { text: "not JSON", usage: { prompt: 10, completion: 2 } }
+      : { error: "Grader session disconnected" };
   });
-  assert.equal(attempts, 2);
+  assert.deepEqual(attempts, [0, 1]);
   assert.equal(result.pass, false);
   assert.equal(result.score, 0);
   assert.equal(result.reason, "Grader session disconnected");
@@ -76,8 +77,18 @@ test("retry execution failures retain the malformed first reply's usage", async 
     completion: 2,
     total: 12,
     cached: 0,
-    numRequests: 1,
+    numRequests: 2,
   });
+
+  // A judge that throws on the retry is not a judge failure to record but a row error.
+  const disconnected = new Error("Grader session disconnected");
+  await assert.rejects(
+    gradeRubric(rubric(), "sent prompt", async (attempt) => {
+      if (attempt === 0) return { text: "not JSON" };
+      throw disconnected;
+    }),
+    (error) => error === disconnected,
+  );
 });
 
 test("execution error responses preserve billed usage without retrying", async () => {
@@ -103,7 +114,7 @@ test("execution error responses preserve billed usage without retrying", async (
   });
 });
 
-test("unmeasured grading failures keep their existing thrown error behavior", async () => {
+test("unmeasured judge failures are grader errors that still count their requests", async () => {
   const executionError = new Error("Grader could not start");
   await assert.rejects(
     gradeRubric(rubric(), "sent prompt", async () => {
@@ -111,96 +122,118 @@ test("unmeasured grading failures keep their existing thrown error behavior", as
     }),
     (error) => error === executionError,
   );
-  await assert.rejects(
-    gradeRubric(rubric(), "sent prompt", async () => ({ error: "Grader session failed" })),
-    /Grader session failed/,
+  const unmeasured = (numRequests: number) => ({
+    total: 0,
+    prompt: 0,
+    completion: 0,
+    cached: 0,
+    numRequests,
+  });
+  assert.deepEqual(
+    await gradeRubric(rubric(), "sent prompt", async () => ({ error: "Grader session failed" })),
+    {
+      pass: false,
+      score: 0,
+      reason: "Grader session failed",
+      namedScores: {},
+      namedScoreWeights: {},
+      componentResults: [],
+      tokensUsed: unmeasured(1),
+      metadata: { graderError: true },
+    },
   );
+  const silent = await gradeRubric(rubric(), "sent prompt", async () => ({}));
+  assert.equal(silent.reason, "LLM grader returned no response text");
+  assert.deepEqual(silent.tokensUsed, unmeasured(1));
+  assert.deepEqual(silent.metadata, { graderError: true });
+
   let attempts = 0;
-  await assert.rejects(
-    gradeRubric(rubric(), "sent prompt", async () => {
-      attempts++;
-      return { text: "not JSON", usage: { prompt: -1, completion: "unknown" } };
-    }),
-    /malformed JSON/,
-  );
+  const malformed = await gradeRubric(rubric(), "sent prompt", async () => {
+    attempts++;
+    return { text: "not JSON", usage: { prompt: -1, completion: "unknown" } };
+  });
   assert.equal(attempts, 2);
+  assert.match(malformed.reason, /malformed JSON/);
+  assert.deepEqual(malformed.tokensUsed, unmeasured(2));
+  assert.equal(malformed.metadata.graderError, true);
+
+  // A reply the response cache served made no request; a provider's own count stands.
+  const cached = await gradeRubric(rubric(), "sent prompt", async () => ({
+    error: "Cached failure",
+    cached: true,
+  }));
+  assert.deepEqual(cached.tokensUsed, unmeasured(0));
+  assert.deepEqual(cached.metadata, { graderError: true, cachedResponse: true });
+  const counted = await gradeRubric(rubric(), "sent prompt", async () => ({
+    error: "All 3 judges failed",
+    usage: { numRequests: 3 },
+  }));
+  assert.deepEqual(counted.tokensUsed, unmeasured(3));
 });
 
-test("llmAssert reports usage for retry HTTP failures and empty billed replies", async () => {
-  const environmentKeys = ["OPENAI_MODEL", "OPENAI_API_KEY", "OPENAI_BASE_URL"] as const;
-  const previous = Object.fromEntries(environmentKeys.map((name) => [name, process.env[name]]));
-  const replies = [
-    {
-      status: 200,
-      body: { choices: [{ message: { content: `The verdict:\n\`\`\`json\n${verdict}\n\`\`\`` } }] },
-    },
-    {
-      status: 200,
-      body: {
-        choices: [{ message: { content: "not JSON" } }],
-        usage: { prompt_tokens: 5, completion_tokens: 1 },
-      },
-    },
-    { status: 503, body: {} },
-    {
-      status: 200,
-      body: { choices: [], usage: { prompt_tokens: 3, completion_tokens: 1 } },
-    },
-    { status: 503, body: {} },
+test("llmAssert reports usage for HTTP failures and empty billed replies", async () => {
+  // Replies shaped as Promptfoo's OpenAI chat provider returns them.
+  const unavailable = {
+    error: "API error: 503 Service Unavailable\n{}",
+    metadata: { http: { status: 503, statusText: "Service Unavailable", headers: {} } },
+  };
+  const replies: JudgeResponse[] = [
+    { output: `The verdict:\n\`\`\`json\n${verdict}\n\`\`\`` },
+    { output: "not JSON", tokenUsage: { prompt: 5, completion: 1, numRequests: 1 } },
+    unavailable,
+    { output: "", tokenUsage: { prompt: 3, completion: 1, numRequests: 1 } },
+    unavailable,
   ];
   let attempts = 0;
-  const server = createServer(async (request, response) => {
-    for await (const chunk of request) void chunk;
-    const next = replies[attempts++];
-    response.writeHead(next?.status ?? 500, { "content-type": "application/json" });
-    response.end(JSON.stringify(next?.body ?? {}));
+  const provider = {
+    id: () => "openai:chat:fake-grader",
+    async callApi(): Promise<JudgeResponse> {
+      const next = replies[attempts++];
+      if (!next) throw new Error("Unexpected extra judge call");
+      return next;
+    },
+  };
+  const context = { config: { components }, test: { options: { provider } } };
+  const wrapped = await llmAssert("candidate answer", context);
+  assert.equal(wrapped.pass, true);
+  assert.equal(attempts, 1);
+
+  const retryFailure = await llmAssert("candidate answer", context);
+  assert.equal(retryFailure.pass, false);
+  assert.equal(retryFailure.score, 0);
+  assert.equal(retryFailure.metadata.graderError, true);
+  assert.match(retryFailure.reason, /API error: 503/);
+  assert.deepEqual(retryFailure.tokensUsed, {
+    prompt: 5,
+    completion: 1,
+    total: 6,
+    cached: 0,
+    numRequests: 2,
   });
-  server.listen(0, "127.0.0.1");
-  await once(server, "listening");
-  try {
-    const address = server.address();
-    if (!address || typeof address === "string") throw new Error("Missing test server port");
-    process.env.OPENAI_MODEL = "fake-grader";
-    process.env.OPENAI_API_KEY = "local-only";
-    process.env.OPENAI_BASE_URL = `http://127.0.0.1:${address.port}/v1`;
-    const context = { config: { components } };
-    const wrapped = await llmAssert("candidate answer", context);
-    assert.equal(wrapped.pass, true);
-    assert.equal(attempts, 1);
+  assert.equal(attempts, 3);
 
-    const retryFailure = await llmAssert("candidate answer", context);
-    assert.equal(retryFailure.pass, false);
-    assert.equal(retryFailure.score, 0);
-    assert.match(retryFailure.reason, /LLM grading failed with HTTP 503/);
-    assert.deepEqual(retryFailure.tokensUsed, {
-      prompt: 5,
-      completion: 1,
-      total: 6,
-      cached: 0,
-      numRequests: 1,
-    });
-    assert.equal(attempts, 3);
+  const emptyReply = await llmAssert("candidate answer", context);
+  assert.equal(emptyReply.pass, false);
+  assert.equal(emptyReply.score, 0);
+  assert.match(emptyReply.reason, /LLM grader returned no response text/);
+  assert.deepEqual(emptyReply.tokensUsed, {
+    prompt: 3,
+    completion: 1,
+    total: 4,
+    cached: 0,
+    numRequests: 1,
+  });
+  assert.equal(attempts, 4);
 
-    const emptyReply = await llmAssert("candidate answer", context);
-    assert.equal(emptyReply.pass, false);
-    assert.equal(emptyReply.score, 0);
-    assert.match(emptyReply.reason, /LLM grader returned no response text/);
-    assert.deepEqual(emptyReply.tokensUsed, {
-      prompt: 3,
-      completion: 1,
-      total: 4,
-      cached: 0,
-      numRequests: 1,
-    });
-    assert.equal(attempts, 4);
-
-    await assert.rejects(llmAssert("candidate answer", context), /HTTP 503/);
-    assert.equal(attempts, 5);
-  } finally {
-    server.close();
-    for (const name of environmentKeys) {
-      if (previous[name] === undefined) delete process.env[name];
-      else process.env[name] = previous[name];
-    }
-  }
+  const unanswered = await llmAssert("candidate answer", context);
+  assert.equal(unanswered.metadata.graderError, true);
+  assert.match(unanswered.reason, /API error: 503/);
+  assert.deepEqual(unanswered.tokensUsed, {
+    total: 0,
+    prompt: 0,
+    completion: 0,
+    cached: 0,
+    numRequests: 1,
+  });
+  assert.equal(attempts, 5);
 });

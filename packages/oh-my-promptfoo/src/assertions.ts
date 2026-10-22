@@ -1,67 +1,88 @@
+import { JUDGE_LIST_ERROR, loadJudge } from "./judge.js";
 import { type BatchedRubricConfig, gradeRubric, prepareRubric } from "./rubric-contract.js";
 
 export { type AgentRubricConfig, agentAssert } from "./agent-assert.js";
 export type { BatchedRubricConfig, RubricComponent } from "./rubric-contract.js";
 
-const DEFAULT_BASE_URL = "https://api.openai.com/v1";
+interface LlmAssertionContext {
+  config?: BatchedRubricConfig;
+  vars?: Record<string, unknown>;
+  /** Promptfoo merges test `options.provider`, `--grader` and `defaultTest` into this. */
+  test?: { options?: { provider?: unknown }; assert?: unknown };
+}
+
+const SELF = /^package:oh-my-promptfoo\/assertions:llmAssert$/;
+
+const PER_ASSERTION_JUDGE_ERROR =
+  "llmAssert takes no per-assertion judge: remove provider from this assertion and set the judge in defaultTest.options.provider for the suite, in a test's options.provider, or with --grader for the run";
+
+/** Whether any llmAssert entry in these assertions carries `provider:` beside `config:`. */
+function misplacedProvider(assertions: unknown): boolean {
+  if (!Array.isArray(assertions)) return false;
+  return assertions.some(
+    (entry) =>
+      typeof entry === "object" &&
+      entry !== null &&
+      (("value" in entry &&
+        typeof entry.value === "string" &&
+        SELF.test(entry.value) &&
+        "provider" in entry &&
+        entry.provider !== undefined) ||
+        ("assert" in entry && misplacedProvider(entry.assert))),
+  );
+}
+
+/**
+ * The judge comes from suite, test or run config only, read the way Promptfoo reads it:
+ * the test's `options.provider`, which Promptfoo has already merged over `--grader` and
+ * `defaultTest.options.provider`. A per-assertion judge is rejected in either spelling:
+ * Promptfoo does not pass `provider:` to package assertions, and `config.provider` would
+ * be a second way to say the same thing.
+ */
+function judgeSpec(context: LlmAssertionContext | undefined): unknown {
+  if (
+    (context?.config && Object.hasOwn(context.config, "provider")) ||
+    misplacedProvider(context?.test?.assert)
+  )
+    throw new Error(PER_ASSERTION_JUDGE_ERROR);
+  const spec = context?.test?.options?.provider;
+  if (spec === undefined || spec === null || spec === "")
+    throw new Error(
+      "llmAssert has no judge. Set defaultTest.options.provider for the suite, a test's options.provider, or pass --grader.",
+    );
+  if (Array.isArray(spec)) throw new Error(JUDGE_LIST_ERROR);
+  return spec;
+}
 
 /** Score all named criteria with one judge request; every criterion must pass. */
-export async function llmAssert(
-  output: unknown,
-  context?: { config?: BatchedRubricConfig; vars?: Record<string, unknown> },
-) {
+export async function llmAssert(output: unknown, context?: LlmAssertionContext) {
   const rubric = prepareRubric(output, context);
-
-  const model = process.env.OPENAI_MODEL;
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!model || !apiKey)
-    throw new Error("OPENAI_MODEL and OPENAI_API_KEY are required for LLM grading");
-
-  const baseUrl = (process.env.OPENAI_BASE_URL || DEFAULT_BASE_URL).replace(/\/+$/, "");
-  const parsedBaseUrl = new URL(baseUrl);
-  const azureOpenAI = parsedBaseUrl.hostname.endsWith(".openai.azure.com");
-  const prefix = azureOpenAI && parsedBaseUrl.pathname === "/" ? "/openai/v1" : "";
-  const messages = [
+  const judge = await loadJudge(judgeSpec(context));
+  const prompt = JSON.stringify([
     { role: "system", content: rubric.system },
     { role: "user", content: rubric.user },
-  ];
-  return gradeRubric(rubric, JSON.stringify(messages), async () => {
-    const response = await fetch(`${baseUrl}${prefix}/chat/completions`, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        [azureOpenAI ? "api-key" : "authorization"]: azureOpenAI ? apiKey : `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model,
-        messages,
-        response_format: { type: "json_object" },
-      }),
-      signal: AbortSignal.timeout(120_000),
+  ]);
+  return gradeRubric(rubric, prompt, async (attempt) => {
+    // A provider that throws (no API key, unknown id) fails the row, as in llm-rubric.
+    const response = await judge.callApi(prompt, {
+      prompt: { raw: prompt, label: "llmAssert" },
+      vars: context?.vars ?? {},
+      // The malformed-verdict retry must not replay the cached bad reply.
+      ...(attempt > 0 ? { bustCache: true } : {}),
     });
-    if (!response.ok) throw new Error(`LLM grading failed with HTTP ${response.status}`);
-    const responseBody = (await response.json()) as {
-      choices?: { message?: { content?: string | { text?: string }[] } }[];
-      usage?: { prompt_tokens?: unknown; completion_tokens?: unknown; total_tokens?: unknown };
-    };
-    const content = responseBody.choices?.[0]?.message?.content;
     const text =
-      typeof content === "string"
-        ? content
-        : Array.isArray(content)
-          ? content.map((part) => part.text || "").join("")
-          : null;
+      typeof response.output === "string"
+        ? response.output
+        : response.output === undefined || response.output === null
+          ? undefined
+          : JSON.stringify(response.output);
     return {
-      ...(text ? { text } : { error: "LLM grader returned no response text" }),
-      ...(responseBody.usage
-        ? {
-            usage: {
-              prompt: responseBody.usage.prompt_tokens,
-              completion: responseBody.usage.completion_tokens,
-              total: responseBody.usage.total_tokens,
-            },
-          }
+      ...(response.error ? { error: response.error } : { text }),
+      ...(response.tokenUsage || response.cost !== undefined
+        ? { usage: { ...response.tokenUsage, cost: response.cost } }
         : {}),
+      cached: response.cached === true,
+      metadata: response.metadata,
     };
   });
 }

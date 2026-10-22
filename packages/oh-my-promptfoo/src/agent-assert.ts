@@ -216,54 +216,62 @@ ${rubric.user}${fileChanges === undefined ? "" : "\n\nUntrusted evidence (JSON):
           codexHome = await mkdtemp(join(tmpdir(), "oh-my-promptfoo-grader-"));
         }
         return await gradeRubric(rubric, redact(prompt, sensitive), async () => {
-          const current = await liveWorkspace();
-          if (current.dev !== original.dev || current.ino !== original.ino)
-            throw new Error("Agent assertion workspace is missing or already released");
-          const remaining = Math.floor(deadline - performance.now());
-          if (remaining <= 0) throw new Error("Agent grading exceeded execution timeoutMs");
-          const response = await runDelegate(
-            {
-              version: 1,
-              type: "call",
-              delegate: grader.id,
-              basePath,
-              workingDir: path,
-              config: safeConfig,
-              prompt,
-              context: delegateContext,
-              readOnly: { sourceRoots, ...(codexHome ? { codexHome } : {}) },
-            },
-            { ...env, ...(codexHome ? { CODEX_HOME: codexHome } : {}) },
-            remaining,
-          );
-          const after = await liveWorkspace();
-          if (after.dev !== original.dev || after.ino !== original.ino)
-            throw new Error("Agent assertion workspace is missing or already released");
-          if (performance.now() > deadline)
-            throw new Error("Agent grading exceeded execution timeoutMs");
-          const usage =
-            response.tokenUsage &&
-            typeof response.tokenUsage === "object" &&
-            !Array.isArray(response.tokenUsage)
-              ? (response.tokenUsage as JsonObject)
-              : {};
-          return {
-            ...(response.error !== undefined
-              ? { error: `Agent grading failed: ${redact(String(response.error), sensitive)}` }
-              : { text: typeof response.output === "string" ? response.output : undefined }),
-            ...(response.tokenUsage === undefined && response.cost === undefined
-              ? {}
-              : {
-                  usage: {
-                    prompt: usage.prompt,
-                    completion: usage.completion,
-                    total: usage.total,
-                    cached: usage.cached,
-                    numRequests: usage.numRequests,
-                    cost: response.cost,
-                  },
-                }),
-          };
+          // A delegate that fails to run is a judge failure, reported as a graderError
+          // result like llm-rubric's, so the row keeps its other assertion results.
+          try {
+            const current = await liveWorkspace();
+            if (current.dev !== original.dev || current.ino !== original.ino)
+              throw new Error("Agent assertion workspace is missing or already released");
+            const remaining = Math.floor(deadline - performance.now());
+            if (remaining <= 0) throw new Error("Agent grading exceeded execution timeoutMs");
+            const response = await runDelegate(
+              {
+                version: 1,
+                type: "call",
+                delegate: grader.id,
+                basePath,
+                workingDir: path,
+                config: safeConfig,
+                prompt,
+                context: delegateContext,
+                readOnly: { sourceRoots, ...(codexHome ? { codexHome } : {}) },
+              },
+              { ...env, ...(codexHome ? { CODEX_HOME: codexHome } : {}) },
+              remaining,
+            );
+            const after = await liveWorkspace();
+            if (after.dev !== original.dev || after.ino !== original.ino)
+              throw new Error("Agent assertion workspace is missing or already released");
+            if (performance.now() > deadline)
+              throw new Error("Agent grading exceeded execution timeoutMs");
+            const usage =
+              response.tokenUsage &&
+              typeof response.tokenUsage === "object" &&
+              !Array.isArray(response.tokenUsage)
+                ? (response.tokenUsage as JsonObject)
+                : {};
+            return {
+              ...(response.error !== undefined
+                ? { error: `Agent grading failed: ${redact(String(response.error), sensitive)}` }
+                : { text: typeof response.output === "string" ? response.output : undefined }),
+              ...(response.tokenUsage === undefined && response.cost === undefined
+                ? {}
+                : {
+                    usage: {
+                      prompt: usage.prompt,
+                      completion: usage.completion,
+                      total: usage.total,
+                      cached: usage.cached,
+                      numRequests: usage.numRequests,
+                      cost: response.cost,
+                    },
+                  }),
+            };
+          } catch (error) {
+            return {
+              error: redact(error instanceof Error ? error.message : String(error), sensitive),
+            };
+          }
         });
       } finally {
         if (codexHome) await rm(codexHome, { recursive: true, force: true });

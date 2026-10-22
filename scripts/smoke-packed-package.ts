@@ -37,6 +37,9 @@ try {
     "dist/assertions.js",
     "dist/assertions.cjs",
     "dist/assertions.d.ts",
+    "dist/providers.js",
+    "dist/providers.cjs",
+    "dist/providers.d.ts",
     "dist/delegate-runner.js",
     "dist/workspace-reader.js",
     "dist/cli.js",
@@ -49,7 +52,7 @@ try {
   const manifest = JSON.parse(await readFile("packages/oh-my-promptfoo/package.json", "utf8"));
   if (
     manifest.dependencies?.["@allagents/workspace-core"] ||
-    Object.keys(manifest.exports).join() !== ".,./assertions" ||
+    Object.keys(manifest.exports).join() !== ".,./assertions,./providers" ||
     Object.keys(manifest.bin).length !== 1
   )
     throw new Error("Public manifest contract mismatch");
@@ -96,8 +99,10 @@ try {
       `import assert from 'node:assert/strict';
 import {createRequire} from 'node:module';
 import {llmAssert,agentAssert} from 'oh-my-promptfoo/assertions';
+import {FallbackProvider} from 'oh-my-promptfoo/providers';
 const require=createRequire(import.meta.url);
 const c=require('oh-my-promptfoo/assertions');
+const cp=require('oh-my-promptfoo/providers');
 assert.equal(typeof llmAssert,'function');assert.equal(typeof c.llmAssert,'function');
 assert.equal(typeof agentAssert,'function');assert.equal(typeof c.agentAssert,'function');
 const invalidAgent={config:{components:[],grader:{id:'copilot-sdk'}}};
@@ -105,38 +110,51 @@ for(const assertion of [agentAssert,c.agentAssert])await assert.rejects(assertio
 process.env.PROMPTFOO_DISABLE_TEMPLATING='false';
 process.env.PROMPTFOO_DISABLE_OBJECT_STRINGIFY='false';
 process.env.PACKED_ASSERTION_SUBJECT='packed environment';
-process.env.OPENAI_API_KEY='local-only';
-process.env.OPENAI_MODEL='packed-judge';
-process.env.OPENAI_BASE_URL='http://127.0.0.1:1/v1';
 const requests=[];
-globalThis.fetch=async (url,options)=>{
-  requests.push({url:String(url),body:JSON.parse(options.body)});
-  return new Response(JSON.stringify({choices:[{message:{content:JSON.stringify({components:[{metric:'m',score:1,reason:'Captured packed template'}]})}}]}),{headers:{'content-type':'application/json'}});
+const judge={
+  id:()=>'packed-judge',
+  callApi:async (prompt)=>{
+    requests.push(JSON.parse(prompt));
+    return {output:JSON.stringify({components:[{metric:'m',score:1,reason:'Captured packed template'}]})};
+  },
 };
+const withJudge=context=>({...context,test:{options:{provider:judge}}});
+const stub=(name,reply)=>({id:()=>name,callApi:async ()=>reply});
+for(const Fallback of [FallbackProvider,cp.FallbackProvider]){
+  assert.equal(typeof Fallback,'function');
+  const provider=new Fallback({config:{cooldownMs:0,providers:[
+    stub('down',{error:'API error: 500',metadata:{http:{status:500}}}),
+    stub('up',{output:'judged'}),
+  ]}});
+  assert.equal(provider.handlesOwnRetries,true);
+  const reply=await provider.callApi('prompt');
+  assert.equal(reply.error,undefined);
+  assert.equal(reply.output,'judged');
+  assert.equal(reply.metadata.fallback.answeredBy,'up');
+}
 for(const assertion of [llmAssert,c.llmAssert]){
   await assert.rejects(assertion('answer',{config:{components:[]}}),/unique named components/);
-  const unset={config:{components:[{metric:'m',value:'{{ missing }}'}]},vars:{}};
+  await assert.rejects(assertion('answer',{config:{components:[{metric:'m',value:'Check answer'}]}}),/llmAssert has no judge/);
+  const unset=withJudge({config:{components:[{metric:'m',value:'{{ missing }}'}]},vars:{}});
   await assert.rejects(assertion('answer',unset),/attempted to output null or undefined value/);
-  const result=await assertion('candidate answer',{
+  const result=await assertion('candidate answer',withJudge({
     config:{
       rubricPrompt:'Judge {{ env.PACKED_ASSERTION_SUBJECT }} {{ object }} {{ array }} {% set parsed = encoded | load %}{{ parsed.subject }}',
       components:[{metric:'m',value:'Check {{ subject }} {{ env.PACKED_ASSERTION_SUBJECT }} {% set parsed = encoded | load %}{{ parsed.subject }} {{ object.subject }} {{ array[0] }}'}],
     },
     vars:{subject:'component template',object:{subject:'object value'},array:['array value',{nested:'array object'}],encoded:JSON.stringify({subject:'loaded JSON'})},
-  });
+  }));
   assert.equal(result.pass,true);
-  const request=requests.at(-1);
-  assert.equal(request.url,'http://127.0.0.1:1/v1/chat/completions');
-  assert.equal(request.body.model,'packed-judge');
-  assert.equal(request.body.messages[0].role,'system');
-  assert.ok(request.body.messages[0].content.includes('Judge packed environment {"subject":"object value"} array value,{"nested":"array object"} loaded JSON'));
-  assert.deepEqual(request.body.messages[1],{role:'user',content:'<Output>\\ncandidate answer\\n</Output>\\n<Rubric>\\n- m: Check component template packed environment loaded JSON object value array value\\n</Rubric>'});
-  assert.deepEqual(result.metadata,{renderedGradingPrompt:JSON.stringify(request.body.messages)});
+  const messages=requests.at(-1);
+  assert.equal(messages[0].role,'system');
+  assert.ok(messages[0].content.includes('Judge packed environment {"subject":"object value"} array value,{"nested":"array object"} loaded JSON'));
+  assert.deepEqual(messages[1],{role:'user',content:'<Output>\\ncandidate answer\\n</Output>\\n<Rubric>\\n- m: Check component template packed environment loaded JSON object value array value\\n</Rubric>'});
+  assert.deepEqual(result.metadata,{renderedGradingPrompt:JSON.stringify(messages)});
   const before=requests.length;
   for(const config of [
     {rubricPrompt:'file://packed-rubric.txt',components:[{metric:'m',value:'Check answer'}]},
     {components:[{metric:'m',value:'file://packed-criteria.txt'}]},
-  ]) await assert.rejects(assertion('answer',{config}),/config.*director|director.*config/i);
+  ]) await assert.rejects(assertion('answer',withJudge({config})),/config.*director|director.*config/i);
   assert.equal(requests.length,before,'file templates must fail before requesting a judge');
 }
 assert.equal(requests.length,2);
