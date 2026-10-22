@@ -21,3 +21,13 @@ After the initial stable release, Release Please prepares version and changelog 
 npm trusted publishers for organization `allagentsdev`, repository `oh-my-promptfoo`, GitHub environment `npm` are configured for `release-please.yml` (`next` previews) and `publish.yml` (stable `latest`), each with direct `npm publish` allowed. Both jobs need `id-token: write` and npm 11.6.2; no npm token is stored in GitHub. See [npm's trusted-publishing setup](https://docs.npmjs.com/trusted-publishers/).
 
 The initial `1.0.0-rc.1` was published manually without provenance. `1.0.0` was the first stable OIDC release from commit `e10a9d3`; an immediate npm indexing read failed, and the successful rerun verified the accepted package without republishing. `1.0.1-next.11` became the first automatic `next` preview, and merging Release Please PR #13 published `1.0.1` under `latest` from its reviewed merge commit. Those three OIDC-published versions have signed provenance; the manual `rc.1` does not. Published version bytes and metadata cannot be changed retroactively.
+
+## Dependency maintenance
+
+Development and CI use Bun and the root `bun.lock`; publishing to npm does not change the package manager. Dependabot uses the `bun` ecosystem for workspace dependencies and `github-actions` for workflow actions. Updates arrive weekly, with minor/patch package updates grouped and major package updates left separate. Node types stay on major 22 until the runtime floor changes.
+
+The [Dependency Audit workflow](../.github/workflows/dependency-audit.yml) runs daily, on dependency-changing pull requests, and manually. It runs `bun audit --audit-level=moderate` against the lockfile without installing or executing dependency scripts. Moderate, high, or critical advisories fail the job; a registry or network error also fails rather than reporting a clean audit.
+
+GitHub currently supports Bun version-update PRs but not Bun security-update PRs ([supported ecosystems](https://docs.github.com/en/code-security/reference/supply-chain-security/supported-ecosystems-and-repositories)). Zero Dependabot alerts is not evidence that the Bun dependency tree is clean. Scheduled audits detect newly published advisories even when no code changes.
+
+Before merging a dependency update, run the audit and the normal validation checks. Review SDK peer requirements in `packages/oh-my-promptfoo/package.json` alongside root development pins and packed-package compatibility. `bun audit fix --dry-run` shows compatible fixes and parent ranges that block them; do not force major upgrades or add advisory exceptions just to make CI green. An advisory with no published fix remains a merge blocker until a reviewed remediation or explicit risk decision is available.
