@@ -145,9 +145,11 @@ defaultTest:
 
 Or pass `--grader openai:chat:gpt-6-sol`, which replaces
 `defaultTest.options.provider`; a test's `options.provider` overrides both.
-There is no per-assertion judge: `config.provider` or `provider:` on an
-`llmAssert` assertion is rejected, unlike `llm-rubric`. Put criteria that need
-a different judge in a test with its own `options.provider`.
+Prefer one judge per suite. When one assertion needs its own judge, set
+`config.provider` on that `llmAssert` assertion (any judge shape, including
+`FallbackProvider`); it overrides the test's judge, `--grader` and
+`defaultTest`. `provider:` beside `config:` is rejected, because Promptfoo does
+not pass it to package assertions. `metadata.judge` names the judge that graded.
 For Azure OpenAI v1, set the full
 `OPENAI_BASE_URL=https://<resource>.openai.azure.com/openai/v1` and use
 `openai:chat:<deployment>`. To fail over between judges on 429s and outages,

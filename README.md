@@ -75,7 +75,8 @@ in `defaultTest.options.provider` as above, or with
 `OPENAI_BASE_URL` to the full `https://<resource>.openai.azure.com/openai/v1`
 address and use `openai:chat:<deployment>`. The
 [grading guide](https://github.com/allagentsdev/oh-my-promptfoo/blob/main/docs/grading-guide.md#choosing-llmasserts-judge)
-covers per-test judges and falling back to another judge during an outage.
+covers per-test and per-assertion judges and falling back to another judge
+during an outage.
 
 The [examples](https://github.com/allagentsdev/oh-my-promptfoo/tree/main/examples) include configs for Codex, Claude Code, Copilot,
 pinned Git and OCI sources, and larger runs.

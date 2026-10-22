@@ -21,8 +21,8 @@ const agentAnswerRule =
 const fixtureJudge = pathToFileURL(join(import.meta.dir, "fixtures", "judge-provider.mjs")).href;
 const noJudge =
   "llmAssert has no judge. Set defaultTest.options.provider for the suite, a test's options.provider, or pass --grader.";
-const perAssertionJudge =
-  "llmAssert takes no per-assertion judge: remove provider from this assertion and set the judge in defaultTest.options.provider for the suite, in a test's options.provider, or with --grader for the run";
+const misplacedProvider =
+  "llmAssert does not see provider: beside config: (Promptfoo does not pass it to package assertions): move it into this assertion's config.provider, or set the judge for the suite in defaultTest.options.provider, for a test in its options.provider, or for the run with --grader";
 
 type Context = Parameters<typeof llmAssert>[1];
 type Message = { role: string; content: string };
@@ -854,7 +854,7 @@ test("a judge may be an id, provider options, a provider instance or a { text } 
   assert.equal(byMappedOptions.componentResults[0].reason, "Configured graded accuracy");
 });
 
-test("llmAssert names a missing, listed or per-assertion judge before any request", async () => {
+test("llmAssert names a missing, listed or misplaced judge before any request", async () => {
   for (const context of [
     { config: { components } },
     { config: { components }, test: {} },
@@ -867,27 +867,26 @@ test("llmAssert names a missing, listed or per-assertion judge before any reques
   }
 
   const listed = stub([]);
-  await assert.rejects(
-    llmAssert("answer", judgedBy([listed.provider])),
-    /A list of judges is not a provider.*FallbackProvider with config\.providers/,
-  );
-  assert.equal(listed.calls.length, 0);
-
-  // A judge on the assertion itself is refused in either spelling, even beside a test
-  // judge: Promptfoo does not pass provider: to a package assertion, and config.provider
-  // would be a second place to name the same thing.
   const shared = stub([{ output: verdict() }]);
-  const own = stub([{ output: verdict() }]);
-  const refused = (error: unknown) => error instanceof Error && error.message === perAssertionJudge;
-  for (const provider of [own.provider, "openai:chat:gpt-4.1", undefined]) {
+  for (const context of [
+    judgedBy([listed.provider]),
+    { ...judgedBy(shared.provider), config: { components, provider: [listed.provider] } },
+  ])
     await assert.rejects(
-      llmAssert("answer", {
-        ...judgedBy(shared.provider),
-        config: { components, provider } as never,
-      }),
-      refused,
+      llmAssert("answer", context),
+      /A list of judges is not a provider.*FallbackProvider with config\.providers/,
     );
-  }
+  // An empty config.provider is a mistake, not a request for the test's judge.
+  for (const provider of [null, "", {}])
+    await assert.rejects(
+      llmAssert("answer", { ...judgedBy(shared.provider), config: { components, provider } }),
+      /A judge must be a provider id, a provider object with an id, or a \{ text: … \} map/,
+    );
+
+  // provider: beside config: is invisible to a package assertion, so it is refused and
+  // pointed at config.provider, with or without a config.provider or test judge beside it.
+  const own = stub([{ output: verdict() }]);
+  const refused = (error: unknown) => error instanceof Error && error.message === misplacedProvider;
   const llmAssertEntry = {
     type: "javascript",
     value: "package:oh-my-promptfoo/assertions:llmAssert",
@@ -898,14 +897,16 @@ test("llmAssert names a missing, listed or per-assertion judge before any reques
     [llmAssertEntry],
     [{ type: "assert-set", assert: [{ type: "contains", value: "x" }, llmAssertEntry] }],
   ]) {
-    await assert.rejects(
-      llmAssert("answer", {
-        config: { components },
-        test: { options: { provider: shared.provider }, assert: assertions },
-      }),
-      refused,
-    );
+    for (const config of [{ components }, { components, provider: own.provider }])
+      await assert.rejects(
+        llmAssert("answer", {
+          config,
+          test: { options: { provider: shared.provider }, assert: assertions },
+        }),
+        refused,
+      );
   }
+  assert.equal(listed.calls.length, 0);
   assert.equal(shared.calls.length, 0);
   assert.equal(own.calls.length, 0);
   // provider: on another assertion, such as llm-rubric, is that assertion's own business.
@@ -918,6 +919,90 @@ test("llmAssert names a missing, listed or per-assertion judge before any reques
   });
   assert.equal(graded.pass, true);
   assert.equal(shared.calls.length, 1);
+});
+
+test("an assertion's config.provider judges it in every judge shape", async () => {
+  // The test's judge, however Promptfoo resolved it, must not be asked.
+  const testJudge = stub([], "test-judge");
+  const own = (provider: unknown) =>
+    llmAssert("answer", { ...judgedBy(testJudge.provider), config: { components, provider } });
+
+  const byId = await own(fixtureJudge);
+  assert.equal(byId.pass, true);
+  assert.deepEqual(byId.metadata.fixture, { id: fixtureJudge, config: {}, label: "llmAssert" });
+  assert.equal(byId.metadata.judge, fixtureJudge);
+
+  // A provider object: its config, label and env reach the provider Promptfoo constructs.
+  const byOptions = await own({
+    id: fixtureJudge,
+    label: "assertion-judge",
+    config: { scores: { accuracy: 0.5, clarity: 1 }, reason: "{{ env.JUDGE_REASON }}" },
+    env: { JUDGE_REASON: "From env" },
+  });
+  assert.equal(byOptions.score, 0.625);
+  assert.equal(byOptions.componentResults[0].reason, "From env graded accuracy");
+  assert.equal(byOptions.metadata.judge, "assertion-judge");
+
+  const instance = stub([{ output: verdict() }, { output: verdict() }], "assertion-instance");
+  const byInstance = await own(instance.provider);
+  assert.equal(byInstance.pass, true);
+  assert.equal(byInstance.metadata.judge, "assertion-instance");
+
+  const byMap = await own({ text: instance.provider, embedding: testJudge.provider });
+  assert.equal(byMap.pass, true);
+  assert.equal(byMap.metadata.judge, "assertion-instance");
+  assert.equal(instance.calls.length, 2);
+  assert.equal(testJudge.calls.length, 0);
+});
+
+test("config.provider beats the test's judge, whichever level Promptfoo resolved it from", async () => {
+  // Promptfoo merges a test's options.provider over --grader, which replaced
+  // defaultTest.options.provider, into the one value llmAssert receives. --grader arrives
+  // as an id, defaultTest as a provider object, and a test judge in any shape.
+  const assertionJudge = stub(
+    [{ output: verdict() }, { output: verdict() }, { output: verdict() }],
+    "assertion-judge",
+  );
+  const testJudge = stub([{ output: verdict() }], "test-judge");
+  for (const [level, resolved] of [
+    ["test options.provider", testJudge.provider],
+    ["--grader", "openai:chat:grader-from-cli"],
+    ["defaultTest.options.provider", { id: "openai:chat:suite-judge", label: "suite-judge" }],
+  ] as const) {
+    const graded = await llmAssert("answer", {
+      config: { components, provider: assertionJudge.provider },
+      test: { options: { provider: resolved } },
+    });
+    assert.equal(graded.metadata.judge, "assertion-judge", level);
+  }
+  assert.equal(assertionJudge.calls.length, 3);
+  // Without config.provider, the resolved judge grades, and the result names it.
+  const fromTest = await llmAssert("answer", judgedBy(testJudge.provider));
+  assert.equal(fromTest.metadata.judge, "test-judge");
+  assert.equal(testJudge.calls.length, 1);
+});
+
+test("a FallbackProvider in config.provider fails over for that assertion only", async () => {
+  const testJudge = stub([], "test-judge");
+  const down = stub(
+    [{ error: "Rate limit exceeded: HTTP 429", metadata: { http: { status: 429 } } }],
+    "assertion-primary",
+  );
+  const up = stub([{ output: verdict() }], "assertion-backup");
+  const chain = new FallbackProvider({
+    label: "assertion-chain",
+    config: { providers: [down.provider, up.provider], cooldownMs: 0 },
+  });
+  const rescued = await llmAssert("answer", {
+    ...judgedBy(testJudge.provider),
+    config: { components, provider: chain },
+  });
+  assert.equal(rescued.pass, true);
+  assert.equal(rescued.metadata.judge, "assertion-chain");
+  const fallback = rescued.metadata.fallback as { answeredBy: string };
+  assert.equal(fallback.answeredBy, "assertion-backup");
+  assert.equal(rescued.tokensUsed?.numRequests, 2);
+  assert.equal(testJudge.calls.length, 0);
 });
 
 test("a judge that replies with an HTTP error or nothing records a grader error", async () => {
@@ -1056,6 +1141,7 @@ test("a verdict keeps the judge's metadata and reports only the provider's own c
     model: "fixture-model",
     trace: { id: "t-1" },
     renderedGradingPrompt: custom.calls[0].prompt,
+    judge: "stub",
   });
 
   const cached = stub([{ output: verdict(), cached: true, tokenUsage: { cached: 40, total: 40 } }]);

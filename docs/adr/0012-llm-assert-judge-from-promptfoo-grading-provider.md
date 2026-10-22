@@ -1,6 +1,6 @@
 # ADR 0012: llmAssert's judge comes from Promptfoo's grading provider
 
-- Status: Accepted
+- Status: Accepted; the per-assertion judge amended below ([#102](https://github.com/allagentsdev/oh-my-promptfoo/issues/102))
 - Date: 2026-10-22
 - Resolves: the first two open differences from `llm-rubric` listed in [ADR 0011](0011-llm-assert-is-batched-llm-rubric.md)
 
@@ -94,3 +94,12 @@ A malformed verdict is retried once, as before, with `bustCache: true` in the ca
 - **Reusing `assertions.matchesLlmRubric` with a batched prompt.** It keeps only one `pass`, `score` and `reason`, so the per-component verdicts are lost.
 - **Keeping `OPENAI_*` as the no-config default, or deprecating it for a release.** That keeps a second, uncached judge path with no retries, the root cause of the ERROR rows.
 - **Turning provider throws into `graderError` as well.** It drifts from upstream and hides misconfiguration as FAIL rows that `--retry-errors` skips.
+
+## Amendment: a per-assertion judge in `config.provider` (2026-10-22)
+
+[#102](https://github.com/allagentsdev/oh-my-promptfoo/issues/102) reverses "No per-assertion judge". Some suites need two judges in one test, for example a second opinion next to the suite's judge, and splitting the test to give each its own `options.provider` duplicates the target call. `llmAssert` now takes an optional `config.provider` in every shape a suite judge takes, `FallbackProvider` included.
+
+- **Precedence** is `llm-rubric`'s: the assertion's `config.provider`, then the test's `options.provider`, then `--grader`, then `defaultTest.options.provider`, then the no-judge error. Promptfoo 0.124.0 reads an assertion's `provider:` first (`getFinalTest`: `assertion.provider || test?.options?.provider`), so the assertion beats `--grader` as it does there.
+- **It lives in `config`** because that is the only part of the assertion Promptfoo passes to a `package:` function; the reasons under "No per-assertion judge" for not reading `provider:` from `context.test.assert` still hold. `provider:` beside `config:` stays a configuration error, and the message now points to `config.provider`.
+- **The judge stays visible.** The result's `metadata.judge` names the judge that graded it (its label, or its id), so a judge set on an assertion shows in the results. The docs keep the suite, test or run as the normal place to name the judge.
+- `agentAssert` is unchanged: its judge is the explicit `config.grader` delegate.

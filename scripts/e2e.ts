@@ -281,6 +281,7 @@ try {
     suite: unknown,
     accepted = [0],
     env: NodeJS.ProcessEnv = testEnvironment,
+    args: string[] = [],
   ) {
     await writeFile(join(cwd, `${name}.json`), JSON.stringify(suite));
     const child = spawn(
@@ -294,6 +295,7 @@ try {
         "--no-progress-bar",
         "--output",
         `${name}-results.json`,
+        ...args,
       ],
       { cwd, env, stdio: ["ignore", "pipe", "pipe"] },
     );
@@ -905,6 +907,110 @@ try {
       throw Error(
         `A judge outage did not fail the row while keeping its other results: ${JSON.stringify(outageRow?.gradingResult)}`,
       );
+    // Each level's judge answers at its own path, so the requests show who was asked.
+    const levelJudge = (level: string) => ({
+      id: "openai:chat:fake-grader",
+      label: `${level}-judge`,
+      config: { apiBaseUrl: `${base}/${level}/v1`, apiKey: "local-only" },
+    });
+    const judged = (provider?: unknown) => ({
+      type: "javascript",
+      value: "package:oh-my-promptfoo/assertions:llmAssert",
+      config: {
+        components: [
+          { metric: "accuracy", value: "Grounded" },
+          { metric: "clarity", value: "Clear" },
+        ],
+        ...(provider ? { provider } : {}),
+      },
+    });
+    type JudgedPart = {
+      pass: boolean;
+      assertion?: { type?: string; config?: { provider?: unknown } };
+      metadata?: { judge?: string; fallback?: { answeredBy?: string } };
+    };
+    // [row][assertion] as "who: judge" (and who answered inside a fallback chain).
+    const judges = (rows: { gradingResult?: { componentResults?: JudgedPart[] } }[]) =>
+      rows.map((row) =>
+        (row.gradingResult?.componentResults ?? [])
+          .filter((part) => part.assertion?.type === "javascript")
+          .map(
+            (part) =>
+              `${part.assertion?.config?.provider ? "assertion" : "test"}: ${part.metadata?.judge}${
+                part.metadata?.fallback ? ` via ${part.metadata.fallback.answeredBy}` : ""
+              }${part.pass ? "" : " FAILED"}`,
+          ),
+      );
+    const levelRequests = (from: number) =>
+      judgeRequests
+        .slice(from)
+        .map((request) => request.url?.split("/")[1])
+        .filter((level) => level !== "fail")
+        .sort();
+    const precedenceStart = judgeRequests.length;
+    const precedence = await evaluateFixture(
+      "packaged-assertion-judge",
+      {
+        prompts: ["precedence"],
+        providers: ["echo"],
+        defaultTest: { options: { provider: levelJudge("suite") } },
+        tests: [
+          { assert: [judged(), judged(levelJudge("assertion"))] },
+          {
+            options: { provider: levelJudge("test") },
+            assert: [
+              judged(),
+              judged({
+                id: "package:oh-my-promptfoo/providers:FallbackProvider",
+                config: { providers: [failingJudge, levelJudge("assertion")] },
+              }),
+            ],
+          },
+        ],
+      },
+      [0],
+      judgeEnvironment,
+    );
+    const expectedPrecedence = [
+      ["test: suite-judge", "assertion: assertion-judge"],
+      [
+        "test: test-judge",
+        "assertion: package:oh-my-promptfoo/providers:FallbackProvider via assertion-judge",
+      ],
+    ];
+    if (
+      precedence.stats.successes !== 2 ||
+      JSON.stringify(judges(precedence.results)) !== JSON.stringify(expectedPrecedence) ||
+      JSON.stringify(levelRequests(precedenceStart)) !==
+        JSON.stringify(["assertion", "assertion", "suite", "test"])
+    )
+      throw Error(
+        `An assertion's config.provider did not take precedence over the test and suite judges: ${JSON.stringify(judges(precedence.results))}`,
+      );
+    // --grader replaces the suite judge, and an assertion's config.provider still beats it.
+    const graderStart = judgeRequests.length;
+    const overGrader = await evaluateFixture(
+      "packaged-assertion-judge-over-grader",
+      {
+        prompts: ["precedence"],
+        providers: ["echo"],
+        defaultTest: { options: { provider: levelJudge("suite") } },
+        tests: [{ assert: [judged(), judged(levelJudge("assertion"))] }],
+      },
+      [0],
+      { ...judgeEnvironment, OPENAI_BASE_URL: `${base}/grader/v1`, OPENAI_API_KEY: "local-only" },
+      ["--grader", "openai:chat:fake-grader"],
+    );
+    if (
+      overGrader.stats.successes !== 1 ||
+      // Promptfoo's OpenAI chat provider names itself openai:<model>.
+      JSON.stringify(judges(overGrader.results)) !==
+        JSON.stringify([["test: openai:fake-grader", "assertion: assertion-judge"]]) ||
+      JSON.stringify(levelRequests(graderStart)) !== JSON.stringify(["assertion", "grader"])
+    )
+      throw Error(
+        `An assertion's config.provider did not take precedence over --grader: ${JSON.stringify(judges(overGrader.results))}`,
+      );
   } finally {
     const closed = once(judge, "close");
     judge.close();
@@ -997,6 +1103,7 @@ try {
           "packaged llmAssert with defaultTest judge",
           "llm-rubric and llmAssert through FallbackProvider",
           "llmAssert judge outage keeps row results",
+          "llmAssert config.provider over test, --grader and defaultTest judges",
         ],
         stdout: output
           .replaceAll(cwd, "<temporary-consumer>")

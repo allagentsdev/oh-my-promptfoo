@@ -1,11 +1,17 @@
-import { JUDGE_LIST_ERROR, loadJudge } from "./judge.js";
+import { JUDGE_LIST_ERROR, judgeName, loadJudge } from "./judge.js";
 import { type BatchedRubricConfig, gradeRubric, prepareRubric } from "./rubric-contract.js";
 
 export { type AgentRubricConfig, agentAssert } from "./agent-assert.js";
 export type { BatchedRubricConfig, RubricComponent } from "./rubric-contract.js";
 
+/** llmAssert's config: the rubric, and optionally this assertion's own judge. */
+export interface LlmAssertConfig extends BatchedRubricConfig {
+  /** A judge for this assertion only, in any shape `options.provider` takes. */
+  provider?: unknown;
+}
+
 interface LlmAssertionContext {
-  config?: BatchedRubricConfig;
+  config?: LlmAssertConfig;
   vars?: Record<string, unknown>;
   /** Promptfoo merges test `options.provider`, `--grader` and `defaultTest` into this. */
   test?: { options?: { provider?: unknown }; assert?: unknown };
@@ -13,8 +19,8 @@ interface LlmAssertionContext {
 
 const SELF = /^package:oh-my-promptfoo\/assertions:llmAssert$/;
 
-const PER_ASSERTION_JUDGE_ERROR =
-  "llmAssert takes no per-assertion judge: remove provider from this assertion and set the judge in defaultTest.options.provider for the suite, in a test's options.provider, or with --grader for the run";
+const MISPLACED_PROVIDER_ERROR =
+  "llmAssert does not see provider: beside config: (Promptfoo does not pass it to package assertions): move it into this assertion's config.provider, or set the judge for the suite in defaultTest.options.provider, for a test in its options.provider, or for the run with --grader";
 
 /** Whether any llmAssert entry in these assertions carries `provider:` beside `config:`. */
 function misplacedProvider(assertions: unknown): boolean {
@@ -33,18 +39,18 @@ function misplacedProvider(assertions: unknown): boolean {
 }
 
 /**
- * The judge comes from suite, test or run config only, read the way Promptfoo reads it:
- * the test's `options.provider`, which Promptfoo has already merged over `--grader` and
- * `defaultTest.options.provider`. A per-assertion judge is rejected in either spelling:
- * Promptfoo does not pass `provider:` to package assertions, and `config.provider` would
- * be a second way to say the same thing.
+ * The judge, first match wins, as `llm-rubric` picks its grader: this assertion's
+ * `config.provider`, then the test's `options.provider`, which Promptfoo has already
+ * merged over `--grader` and `defaultTest.options.provider`. The per-assertion judge sits
+ * in `config` because Promptfoo does not pass an assertion's own `provider:` to package
+ * functions, so that spelling is detected only to reject it.
  */
 function judgeSpec(context: LlmAssertionContext | undefined): unknown {
-  if (
-    (context?.config && Object.hasOwn(context.config, "provider")) ||
-    misplacedProvider(context?.test?.assert)
-  )
-    throw new Error(PER_ASSERTION_JUDGE_ERROR);
+  if (misplacedProvider(context?.test?.assert)) throw new Error(MISPLACED_PROVIDER_ERROR);
+  // An empty or malformed config.provider is a mistake, not a request for the test's
+  // judge: loadJudge rejects it, and a list, by name.
+  const own = context?.config?.provider;
+  if (own !== undefined) return own;
   const spec = context?.test?.options?.provider;
   if (spec === undefined || spec === null || spec === "")
     throw new Error(
@@ -57,12 +63,13 @@ function judgeSpec(context: LlmAssertionContext | undefined): unknown {
 /** Score all named criteria with one judge request; every criterion must pass. */
 export async function llmAssert(output: unknown, context?: LlmAssertionContext) {
   const rubric = prepareRubric(output, context);
-  const judge = await loadJudge(judgeSpec(context));
+  const spec = judgeSpec(context);
+  const judge = await loadJudge(spec);
   const prompt = JSON.stringify([
     { role: "system", content: rubric.system },
     { role: "user", content: rubric.user },
   ]);
-  return gradeRubric(rubric, prompt, async (attempt) => {
+  const result = await gradeRubric(rubric, prompt, async (attempt) => {
     // A provider that throws (no API key, unknown id) fails the row, as in llm-rubric.
     const response = await judge.callApi(prompt, {
       prompt: { raw: prompt, label: "llmAssert" },
@@ -85,4 +92,7 @@ export async function llmAssert(output: unknown, context?: LlmAssertionContext) 
       metadata: response.metadata,
     };
   });
+  // With judges set at four levels, the result says which one graded it.
+  result.metadata.judge = judgeName(spec, judge);
+  return result;
 }
