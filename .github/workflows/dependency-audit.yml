@@ -11,6 +11,7 @@ on:
       - bun.lock
       - .github/dependabot.yml
       - .github/workflows/dependency-audit.yml
+      - tests/dependency-security.test.ts
   workflow_dispatch:
 
 concurrency:
@@ -31,3 +32,7 @@ jobs:
         with:
           bun-version-file: package.json
       - run: bun audit --audit-level=moderate
+      - name: Install reviewed dependencies without scripts
+        run: bun install --frozen-lockfile --ignore-scripts
+      - name: Verify pinned Forge rejects malformed signatures
+        run: bun test tests/dependency-security.test.ts
