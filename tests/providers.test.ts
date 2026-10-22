@@ -269,7 +269,12 @@ describe("closed configuration", () => {
     const unexpected = () => {
       throw new Error("grader methods must not run during generation validation");
     };
-    const grader = { id: unexpected, callApi: unexpected, toJSON: unexpected, self: null as unknown };
+    const grader = {
+      id: unexpected,
+      callApi: unexpected,
+      toJSON: unexpected,
+      self: null as unknown,
+    };
     grader.self = grader;
     Object.freeze(grader);
     const original = Object.freeze({ model: "base" });
