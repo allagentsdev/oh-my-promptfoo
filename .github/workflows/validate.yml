@@ -22,6 +22,26 @@ jobs:
       - run: bun test
       - run: bun run build
       - run: bun run pack:check
+  # Runs beside `validate`: it installs the packed package and stock Promptfoo into a
+  # clean folder, so its time is mostly npm downloads, which the cache below reuses.
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .node-version
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+      - uses: actions/cache@v6
+        with:
+          path: ~/.npm
+          # The e2e script pins the Promptfoo and Pi versions it installs.
+          key: npm-e2e-${{ runner.os }}-${{ hashFiles('scripts/e2e.ts') }}
+          restore-keys: npm-e2e-${{ runner.os }}-
+      - run: bun install --frozen-lockfile
+      - run: bun run build
       - run: bun run e2e
   linux-acquisition:
     runs-on: ubuntu-latest
