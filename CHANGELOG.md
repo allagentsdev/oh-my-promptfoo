@@ -15,6 +15,17 @@
 * Verify `skill-used` with tracing disabled for Claude, Codex, and Copilot, including failed skill loads and text-only claims. Document native skill metadata preservation and that no OpenTelemetry collector is required.
 * Exercise the real Pi SDK with local model-service responses, including chunked streaming, bounded output, guarded directory and screenshot reads, credential errors, cancellation, skill evidence, and retained billing. Verify native Codex skill gates with two live SDK sessions, without tracing.
 
+## [1.19.0](https://github.com/allagentsdev/oh-my-promptfoo/compare/v1.18.0...v1.19.0) (2026-10-22)
+
+
+### ⚠ BREAKING CHANGES
+
+* **assertions:** llmAssert no longer reads OPENAI_MODEL, OPENAI_API_KEY or OPENAI_BASE_URL, and no longer rewrites an Azure resource root to /openai/v1 or sends an api-key header. Name the judge with defaultTest.options.provider, a test's options.provider or --grader (for example --grader openai:chat:<model>); Promptfoo's OpenAI provider reads OPENAI_API_KEY and OPENAI_BASE_URL as given, so Azure users set OPENAI_BASE_URL=https://<resource>.openai.azure.com/openai/v1. Judge outages are now FAIL rows with graderError instead of ERROR rows, so --retry-errors no longer re-runs them; use --filter-failing <evalId>.
+
+### Features
+
+* **assertions:** take llmAssert's judge from Promptfoo's grading provider ([#103](https://github.com/allagentsdev/oh-my-promptfoo/issues/103)) ([b56ca83](https://github.com/allagentsdev/oh-my-promptfoo/commit/b56ca83d8cf5ce419c88089a68e68ac136e74179))
+
 ## [1.18.0](https://github.com/allagentsdev/oh-my-promptfoo/compare/v1.17.0...v1.18.0) (2026-10-22)
 
 
