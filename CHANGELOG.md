@@ -6,6 +6,10 @@
 
 * Add `pi-sdk` workspace and read-only agent-grader delegates using the maintained optional `@earendil-works/pi-coding-agent@1.3.0` peer, explicit model/credentials and local endpoint support. Isolated in-memory sessions report successful skill-file reads to stock `skill-used` without changing skill authoring.
 
+### Bug Fixes
+
+* **workspace:** remove a half-made runtime root when initialization fails after creating it, so later runs no longer refuse it. Recovery now names an unmarked runtime root and says it is a leftover from an interrupted run that is safe to delete when no eval is running, instead of a bare `ENOENT` ([#95](https://github.com/allagentsdev/oh-my-promptfoo/issues/95)).
+
 ### Tests and documentation
 
 * Verify `skill-used` with tracing disabled for Claude, Codex, and Copilot, including failed skill loads and text-only claims. Document native skill metadata preservation and that no OpenTelemetry collector is required.
