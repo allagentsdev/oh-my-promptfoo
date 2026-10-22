@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { execFileSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { subscribe, unsubscribe } from "node:diagnostics_channel";
@@ -22,6 +22,7 @@ import { pathToFileURL } from "node:url";
 import { withLock } from "../packages/workspace-core/src/cache-lock.ts";
 import { CheckoutFactory } from "../packages/workspace-core/src/checkout.ts";
 import { resolveWorkspaceTimeoutMs } from "../packages/workspace-core/src/config.ts";
+import * as workspaceFs from "../packages/workspace-core/src/fs.ts";
 import {
   alive,
   allocated,
@@ -653,6 +654,55 @@ describe("workspace lifecycle", () => {
     await Promise.all(owners.map((owner) => owner.cleanup()));
     expect(await readdir(join(root, "runtime"))).toEqual([MARKER]);
   }, 15_000);
+  test("a failed runtime marker write removes the half-made root so the next manager initializes", async () => {
+    const root = await mkdtemp(join(realpathSync(tmpdir()), "allagents-runtime-marker-"));
+    temporary.push(root);
+    const runtime = join(root, "runtime");
+    const channels: RuntimeChannels = {
+      ALLAGENTS_CACHE_ROOT: join(root, "cache"),
+      ALLAGENTS_WORKSPACE_ROOT: runtime,
+    };
+    const write = workspaceFs.atomicJson;
+    const spy = spyOn(workspaceFs, "atomicJson").mockImplementation((path, value, maxBytes) => {
+      if (basename(path) === MARKER && dirname(dirname(path)) === runtime)
+        return Promise.reject(new Error("injected runtime marker failure"));
+      return write(path, value, maxBytes);
+    });
+    try {
+      await expect(manager({ sources: [] }, channels).prepare()).rejects.toThrow(
+        "injected runtime marker failure",
+      );
+    } finally {
+      spy.mockRestore();
+    }
+    expect(await readdir(runtime)).toEqual([MARKER]);
+    const next = manager({ sources: [] }, channels);
+    await next.prepare();
+    await next.cleanup();
+    expect(await readdir(runtime)).toEqual([MARKER]);
+  });
+  test("recovery refuses an unmarked runtime root with an error naming its path", async () => {
+    const root = await mkdtemp(join(realpathSync(tmpdir()), "allagents-runtime-leftover-"));
+    temporary.push(root);
+    const runtime = join(root, "runtime");
+    const channels: RuntimeChannels = {
+      ALLAGENTS_CACHE_ROOT: join(root, "cache"),
+      ALLAGENTS_WORKSPACE_ROOT: runtime,
+    };
+    await manager({ sources: [] }, channels).cleanup();
+    const leftover = join(runtime, "6c52a585-18df-40ad-8ce4-329bf1737724");
+    await mkdir(leftover, { mode: 0o700 });
+    await writeFile(join(leftover, `${MARKER}.594255bf-3655-401e-b18e-dad47d5eef85.tmp`), "");
+    const message = `Runtime root ${leftover} has no runtime provider ownership marker. It is a leftover from an interrupted run and is safe to delete when no eval is running.`;
+    await expect(manager({ sources: [] }, channels).prepare()).rejects.toThrow(message);
+    await atomicJson(join(leftover, MARKER), {
+      schemaVersion: 1,
+      package: "@allagents/promptfoo-integration",
+      kind: "seed-cache",
+    });
+    await expect(manager({ sources: [] }, channels).prepare()).rejects.toThrow(message);
+    expect(await exists(leftover)).toBe(true);
+  });
   test("parallel rows isolate file content, metadata, Git index and writable roots while retaining reusable seeds", async () => {
     const f = await fixture();
     const owner = manager(f.spec, f.channels);

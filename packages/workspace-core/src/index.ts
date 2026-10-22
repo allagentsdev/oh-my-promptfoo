@@ -146,15 +146,25 @@ export class WorkspaceManager {
         await this.recoverAbandoned(locations.runtime);
         this.root = join(locations.runtime, randomUUID());
         await mkdir(this.root, { mode: 0o700 });
-        await atomicJson(join(this.root, MARKER), {
-          schemaVersion: 1,
-          package: PACKAGE,
-          kind: "runtime-provider",
-          identity: this.identity,
-        });
-        await mkdir(join(this.root, "records"), { mode: 0o700 });
-        await mkdir(join(this.root, "workspaces"), { mode: 0o700 });
-        await mkdir(join(this.root, "adapter-state"), { mode: 0o700 });
+        try {
+          await atomicJson(join(this.root, MARKER), {
+            schemaVersion: 1,
+            package: PACKAGE,
+            kind: "runtime-provider",
+            identity: this.identity,
+          });
+          await mkdir(join(this.root, "records"), { mode: 0o700 });
+          await mkdir(join(this.root, "workspaces"), { mode: 0o700 });
+          await mkdir(join(this.root, "adapter-state"), { mode: 0o700 });
+        } catch (error) {
+          // A root without a marker would make every later recovery refuse this parent.
+          await removeTree(this.root).catch((cleanup: unknown) =>
+            process.emitWarning(
+              `Failed to remove partially initialized runtime root ${this.root}: ${String(cleanup).slice(0, 2048)}`,
+            ),
+          );
+          throw error;
+        }
       },
       undefined,
       this.acquisitionLockTimeoutMs,
@@ -642,9 +652,19 @@ export class WorkspaceManager {
       if ((await lstat(root)).isSymbolicLink()) throw new Error("Symlink runtime root refused");
       if (process.platform === "win32") await assertNoSymlinkAncestors(root);
       else if ((await realpath(root)) !== root) throw new Error("Symlink runtime root refused");
-      const marker = await json<Ownership>(join(root, MARKER));
+      const leftover = new Error(
+        `Runtime root ${root} has no runtime provider ownership marker. It is a leftover from an interrupted run and is safe to delete when no eval is running.`,
+      );
+      let marker: Ownership;
+      try {
+        marker = await json<Ownership>(join(root, MARKER));
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT" || error instanceof SyntaxError)
+          throw leftover;
+        throw error;
+      }
       if (marker.package !== PACKAGE || marker.kind !== "runtime-provider" || !marker.identity)
-        throw new Error("Unmarked runtime provider root");
+        throw leftover;
       if (await alive(marker.identity)) continue;
       const records = join(root, "records");
       if (!(await exists(records))) {
