@@ -17,6 +17,7 @@
 ### Tests and documentation
 
 * Verify Copilot transport failures retain measured tokens and premium-request multipliers without inventing monetary cost when session usage metrics are unavailable.
+* Verify packed ESM/CJS assertion metadata remains extensible while retaining unknown native judge-attempt accounting without inventing monetary totals.
 * Verify `skill-used` with tracing disabled for Claude, Codex, and Copilot, including failed skill loads and text-only claims. Document native skill metadata preservation and that no OpenTelemetry collector is required.
 * Exercise the real Pi SDK with local model-service responses, including chunked streaming, bounded output, guarded directory and screenshot reads, credential errors, cancellation, skill evidence, and retained billing. Verify native Codex skill gates with two live SDK sessions, without tracing.
 
