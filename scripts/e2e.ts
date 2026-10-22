@@ -19,7 +19,7 @@ if (
 )
   throw new Error("Usage: e2e.ts [--registry VERSION]");
 const repo = resolve(".");
-const promptfooVersion = "0.124.0";
+const promptfooVersion = "0.124.1";
 const cwd = await mkdtemp(join(realpathSync(tmpdir()), "allagents-e2e-"));
 const workspaceParent = await mkdtemp(join(realpathSync(tmpdir()), "allagents-e2e-workspaces-"));
 // Local sources must work from the eval config alone, without a runner-supplied boundary.
