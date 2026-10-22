@@ -8,9 +8,266 @@ so it can grade what the agent changed rather than what it said.
 
 Both are referenced as JavaScript assertions:
 `package:oh-my-promptfoo/assertions:llmAssert` and
-`package:oh-my-promptfoo/assertions:agentAssert`. `llmAssert` needs
-`OPENAI_API_KEY` and `OPENAI_MODEL` (and `OPENAI_BASE_URL` for a non-OpenAI
-endpoint) in the environment that runs Promptfoo.
+`package:oh-my-promptfoo/assertions:agentAssert`. `llmAssert` grades with the
+judge you name in Promptfoo's provider config, the same settings `llm-rubric`
+reads; [Choosing llmAssert's judge](#choosing-llmasserts-judge) shows how.
+
+## Choosing llmAssert's judge
+
+### No judge configured
+
+```yaml
+assert:
+  - type: javascript
+    value: package:oh-my-promptfoo/assertions:llmAssert
+    config:
+      components:
+        - metric: names-the-file
+          value: The answer names the file to change.
+```
+
+With no judge set anywhere, `llmAssert` stops before it sends any request, and
+the row is an ERROR:
+
+> llmAssert has no judge. Set defaultTest.options.provider for the suite, a
+> test's options.provider, or pass --grader.
+
+`llm-rubric` instead picks a default grader from whatever credentials are
+present. Promptfoo doesn't export that choice to packages yet. If it does,
+`llmAssert` can use it in a later minor release with no config change.
+
+### One judge for the suite
+
+Write it where `llm-rubric` reads it. Every `llmAssert` and every model-graded
+Promptfoo assertion in the suite uses it:
+
+```yaml
+defaultTest:
+  options:
+    provider:
+      id: openai:chat:gpt-6-sol
+      config:
+        temperature: 0
+        response_format: { type: json_object }
+```
+
+### One judge for a test
+
+A test's own `options.provider` replaces the suite's judge for that test, as it
+does in Promptfoo:
+
+```yaml
+tests:
+  - vars: { task: Explain the failing build. }
+    options:
+      provider: anthropic:messages:claude-sonnet-5
+```
+
+### No per-assertion judge
+
+`llmAssert` reads its judge only from the suite, the test or the run. Setting
+`config.provider` on an `llmAssert` assertion, or `provider:` beside its
+`config:`, is a configuration error and the row is an ERROR:
+
+> llmAssert takes no per-assertion judge: remove provider from this assertion
+> and set the judge in defaultTest.options.provider for the suite, in a test's
+> options.provider, or with --grader for the run
+
+This is a deliberate difference from `llm-rubric`, which accepts `provider:` on
+the assertion. Promptfoo doesn't pass an assertion's `provider:` to package
+functions, so `llmAssert` can't honour it, and a second spelling in `config`
+would drift from how every other grader in the suite is chosen. To grade some
+criteria with a different judge, put them in a test with its own
+`options.provider`.
+
+### A fallback chain
+
+`FallbackProvider` tries judges in order and moves to the next one only after a
+retryable failure such as a rate limit or an outage. It is an ordinary provider,
+so it goes anywhere a judge goes, and native `llm-rubric` in the same suite uses
+it too:
+
+```yaml
+defaultTest:
+  options:
+    provider:
+      id: package:oh-my-promptfoo/providers:FallbackProvider
+      config:
+        providers:                      # tried in order
+          - id: openai:chat:gpt-6-sol
+            label: primary
+            config:
+              maxRetries: 1             # fail over fast instead of backing off
+          - id: azure:chat:my-deployment
+            config: { maxRetries: 1 }
+          - anthropic:messages:claude-sonnet-5
+        cooldownMs: 30000               # optional, the default
+```
+
+Each entry in `providers` is written the way you'd write a single judge: an id,
+a provider object, or a `{ text: … }` map. Promptfoo's OpenAI provider already
+retries a 429 or a timeout with exponential backoff (`maxRetries`, default 4,
+starting from `PROMPTFOO_REQUEST_BACKOFF_MS`, 5 seconds), which can hold a row
+for over a minute before the chain moves on. `maxRetries: 1` on the judges in a
+chain fails over in seconds.
+
+### From the command line
+
+```sh
+promptfoo eval -c suite.yaml --grader openai:chat:gpt-6-sol
+```
+
+`--grader` replaces `defaultTest.options.provider`, including a fallback chain.
+It does not replace a test's `options.provider`, which is how it behaves for
+`llm-rubric`. It takes only an id, so a chain has to go in `defaultTest`.
+
+### Where the judge comes from
+
+The first match wins:
+
+| # | Where | Same as `llm-rubric`? |
+| --- | --- | --- |
+| 1 | the test's `options.provider` | Yes |
+| 2 | `--grader` | Yes |
+| 3 | `defaultTest.options.provider` | Yes |
+| — | nothing set: configuration error | No: `llm-rubric` falls back to a credential-based default |
+
+`llm-rubric` also checks an assertion's own `provider:` first; `llmAssert`
+rejects it, as described above.
+
+A judge can be written in the shapes Promptfoo accepts for a grader:
+
+- a provider id such as `openai:chat:gpt-6-sol`;
+- a provider object with an `id`, plus `config`, `label` and `env` as needed;
+- a provider instance, used as it is;
+- a `{ text: … }` map, of which `llmAssert` uses `text`.
+
+A list of judges is rejected with a message that points to `FallbackProvider`.
+Promptfoo rejects lists here too, so a list would also break every
+`llm-rubric` that shares the setting. Promptfoo renders `{{ env.NAME }}`
+templates in the id and config before `llmAssert` sees them.
+See [ADR 0012](adr/0012-llm-assert-judge-from-promptfoo-grading-provider.md)
+for why the judge works this way.
+
+### Fallback rules
+
+- **When it moves on.** The judge returned an error with HTTP status 408, 429,
+  any 5xx, or 0 (Promptfoo's code for network failures and timeouts). A 429
+  counts whether it is a rate limit or an exhausted quota, because the next
+  judge is usually a different account. For a provider that attaches no HTTP
+  status, the error is classified the way Promptfoo classifies it: broken
+  pipes and connection resets (by error code too), timeouts, refused
+  connections, socket hang-ups, transient TLS errors (but not certificate or
+  protocol-version failures, which are permanent), network errors,
+  502/503/504, 429 and rate-limit or quota messages move on.
+- **When it stops.** On a good reply, or on any other error (400, 401, 403,
+  404, 422, a content filter), which it returns as the answer. A misconfigured
+  primary should be visible, not quietly covered by the next judge. A judge
+  that throws (missing credentials, unknown id) is re-thrown, unless its
+  error is one of the transient errors above. A cancelled evaluation is
+  re-thrown too: it never moves on to the next judge or cools a judge down.
+- **Retries.** Each judge is called once per request and keeps its own
+  retries, so attempts don't multiply. `FallbackProvider` declares
+  `handlesOwnRetries`, so Promptfoo's scheduler doesn't re-run the whole chain
+  either.
+- **Cooldown.** A judge that failed retryably is skipped by later requests in
+  the same process for `cooldownMs` (default 30,000 ms) or for the judge's
+  `Retry-After`, whichever is longer, so `cooldownMs: 0` leaves only the
+  `Retry-After`. Without this, every row in a rate-limit storm would wait
+  through the primary's backoff first. A cooldown belongs to that judge as
+  configured, including its environment, so the same provider id under another
+  account or another provider instance is not skipped. If every judge is
+  cooling down, it tries the one whose cooldown ends first. A success clears
+  that judge's cooldown.
+- **Result.** The answering judge's reply, with token usage and cost summed
+  over every attempt, and `metadata.fallback`: `answeredBy` (the judge's label,
+  or its id) and `attempts`, one `{ provider, status, error, cached,
+  latencyMs }` per judge tried. `llmAssert` copies it into its result
+  metadata. If every judge fails, the error lists each one, for example
+  `All 3 judges failed: primary: …; …`, and says how many were skipped while
+  cooling down.
+
+### When the judge fails
+
+`llmAssert` reports judge failures the way `llm-rubric` does:
+
+| What happens | Result |
+| --- | --- |
+| The judge returns an error: an HTTP error, a 429 after its own retries, a timeout or a network failure | FAIL: score 0, the error as the reason, `metadata.graderError: true`. The row's other assertion results are kept |
+| The judge returns an empty reply | FAIL with `graderError`, as above |
+| Every judge in a `FallbackProvider` chain fails | FAIL with `graderError`; the reason lists each attempt |
+| The verdict can't be parsed | One retry that bypasses the cache, then FAIL with `graderError` |
+| The judge's provider throws, for example no API key or an unknown provider id | Row ERROR, as for `llm-rubric` |
+| No judge configured, a per-assertion `config.provider` or `provider:`, a list of judges, or invalid `llmAssert` config | Row ERROR |
+
+A throw stays an ERROR on purpose: missing credentials affect every row and
+should not pass for ordinary failed grades.
+
+### Re-running after a judge outage
+
+`--retry-errors` re-runs ERROR rows only. Judge outages (HTTP errors, 429s,
+timeouts, empty replies) are now FAIL rows, so `--retry-errors` skips them.
+Re-run them with `--filter-failing <evalId>`, which takes failures and errors.
+Both re-run the target as well as the judge, as they do for `llm-rubric`.
+Missing credentials and bad provider ids are still ERROR, so `--retry-errors`
+still picks those up once the environment is fixed. CI that counts ERROR and
+FAIL separately will see judge outages move from one count to the other.
+
+### Token usage
+
+`llmAssert` reports the judge's token usage back to Promptfoo, which records it
+under `tokenUsage.assertions`: grader spend, separate from the agent under
+test. `tokensUsed` adds up every judge call the assertion made, including each
+`FallbackProvider` attempt and the malformed-verdict retry, and `cost` is the
+sum of the costs the provider reported. `numRequests` counts the calls
+`llmAssert` and `FallbackProvider` sent; a provider's own transport retries are
+not visible, the same limit `llm-rubric` has. A failed grade always carries
+`tokensUsed`, counting the requests made even when the judge measured nothing.
+A graded result from a judge that reports no usage reports nothing rather than
+zero, so an unmeasured call is never summed into a run total as a free one.
+When the verdict came from the provider's cache, the cached reply counts no new
+request and the result carries `metadata.cachedResponse: true`.
+
+### Caching
+
+`llmAssert` uses the judge provider's cache as it is and adds none of its own,
+as `llm-rubric` does. Promptfoo's built-in providers cache successful replies,
+so the same judge, prompt and answer replay the earlier verdict. Errors are not
+cached, so after an outage the next run starts at the primary judge again. The
+malformed-verdict retry passes `bustCache: true`, so it doesn't replay the bad
+reply.
+
+`--no-cache` does not reach package code yet
+([promptfoo/promptfoo#11918](https://github.com/promptfoo/promptfoo/issues/11918)):
+a package loaded during an eval gets its own copy of Promptfoo's cache state,
+and the flag only turns off the CLI's copy. That includes the judges inside a
+`FallbackProvider`. Set `PROMPTFOO_CACHE_ENABLED=false` in the environment
+instead, which both copies read.
+
+### Relative `file://` judges
+
+`llmAssert` loads its judge itself, so a relative `file://` judge resolves from
+the working directory, not the eval config's directory, for the same reason:
+the config's base path doesn't reach package code. That includes the inner
+judges of a `FallbackProvider` that `llmAssert` loads. When native
+`llm-rubric` uses the same setting, Promptfoo loads it and passes the base
+path, so there it resolves against the config. Use an absolute path, or run
+`promptfoo` from the config's directory.
+
+### Azure OpenAI
+
+Promptfoo's OpenAI provider reads `OPENAI_BASE_URL` and `OPENAI_API_KEY` from
+the environment and uses the address as given. For an Azure OpenAI v1
+endpoint, set the full address and name the deployment as the model:
+
+```sh
+export OPENAI_BASE_URL=https://<resource>.openai.azure.com/openai/v1
+export OPENAI_API_KEY=...
+promptfoo eval -c suite.yaml --grader openai:chat:<deployment>
+```
+
+`llmAssert` itself reads none of these variables and doesn't rewrite the
+address, so set the full v1 address rather than the resource root.
 
 ## llmAssert
 
@@ -116,10 +373,8 @@ and deliberate differences from Promptfoo's grader defaults, and
 [ADR 0011](adr/0011-llm-assert-is-batched-llm-rubric.md) for what parity with
 `llm-rubric` means and why batching is the one intended difference.
 
-It reports the judge call's token usage back to Promptfoo, which records it under
-`tokenUsage.assertions` — grader spend, separate from the agent under test. A
-grader that returns no usage reports nothing rather than zero, so an unmeasured
-call is never summed into a run total as a free one.
+Its token usage, caching and failure handling are described under
+[Choosing llmAssert's judge](#choosing-llmasserts-judge).
 
 As `llm-rubric` does, a graded result carries `metadata.renderedGradingPrompt`:
 the messages exactly as the judge received them. Check it first when a grade
@@ -203,6 +458,11 @@ for that slot (default 15 minutes); both settings accept 1–3,600,000 ms.
 Sessions serialize per process, independently of provider workers. Tokens are
 accounted as assertion usage even when a billed attempt fails; reported cost is
 preserved in `tokensUsed.cost`, although Promptfoo versions may not aggregate it.
+When the delegate itself fails (it crashes or times out, or the workspace is
+released mid-grade), the result is a failed grade with `metadata.graderError:
+true` and secrets redacted from the reason; invalid config and queue timeouts
+are still row errors. The judge is always `config.grader`: `--grader` and
+`options.provider` choose `llmAssert`'s judge, not this one.
 
 Codex graders require API-key auth via `grader.config.apiKey` or explicit
 `grader.env.OPENAI_API_KEY`. They do not load or copy ChatGPT `auth.json`, avoiding

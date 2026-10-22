@@ -235,6 +235,17 @@ export interface GraderUsage {
   cost?: unknown;
 }
 
+/** One judge reply, as the caller's request function reports it. */
+export interface GraderReply {
+  text?: string;
+  error?: string;
+  usage?: GraderUsage;
+  /** The reply was served from Promptfoo's response cache. */
+  cached?: boolean;
+  /** The judge provider's response metadata, copied into the result as llm-rubric does. */
+  metadata?: unknown;
+}
+
 function parseVerdict(text: string): GraderResponse {
   try {
     return JSON.parse(text) as GraderResponse;
@@ -299,37 +310,49 @@ function parseGrades(text: string, components: RubricComponent[]): Map<string, G
 }
 
 /**
- * Retry only malformed verdicts; execution failures are not another paid attempt.
+ * Retry only malformed verdicts; execution failures are not another paid attempt. The
+ * retry is attempt 1, which the caller sends past the response cache so it does not
+ * replay the same bad reply.
+ *
+ * A reply that reports an error, or no text, is a judge failure: a failed result with
+ * `metadata.graderError`, as llm-rubric returns it. An error thrown by `request` is not
+ * caught here: llm-rubric lets a provider that throws (no API key, unknown id) fail the
+ * row, and each caller decides what its own throws mean.
+ *
  * `renderedGradingPrompt` is what the judge was sent, reported in result metadata under
  * the key `llm-rubric` uses so a suite can inspect how the answer was framed.
  */
 export async function gradeRubric(
   rubric: PreparedRubric,
   renderedGradingPrompt: string,
-  request: () => Promise<{ text?: string; error?: string; usage?: GraderUsage }>,
+  request: (attempt: number) => Promise<GraderReply>,
 ): Promise<RubricResult> {
   const usages: GraderUsage[] = [];
   for (let attempt = 0; attempt < 2; attempt++) {
-    let response: Awaited<ReturnType<typeof request>>;
-    try {
-      response = await request();
-    } catch (error) {
-      return gradingFailure(error, usages);
-    }
-    if (response.usage) usages.push(response.usage);
-    if (response.error !== undefined) return gradingFailure(new Error(response.error), usages);
-    if (!response.text)
-      return gradingFailure(new Error("LLM grader returned no response text"), usages);
+    const reply = await request(attempt);
+    // Every reply is a request unless the cache served it, whether or not it was billed.
+    usages.push({
+      ...reply.usage,
+      numRequests: reply.usage?.numRequests ?? (reply.cached ? 0 : 1),
+    });
+    if (reply.error !== undefined) return gradingFailure(reply.error, usages, reply.cached);
+    if (!reply.text)
+      return gradingFailure("LLM grader returned no response text", usages, reply.cached);
     let grades: Map<string, Grade>;
     try {
-      grades = parseGrades(response.text, rubric.components);
+      grades = parseGrades(reply.text, rubric.components);
     } catch (error) {
-      if (attempt === 1) return gradingFailure(error, usages);
+      if (attempt === 1)
+        return gradingFailure(
+          error instanceof Error ? error.message : String(error),
+          usages,
+          reply.cached,
+        );
       continue;
     }
-    return rubricResult(rubric, grades, usages, renderedGradingPrompt);
+    return rubricResult(rubric, grades, usages, renderedGradingPrompt, reply);
   }
-  return gradingFailure(new Error("LLM grader did not return a verdict"), usages);
+  return gradingFailure("LLM grader did not return a verdict", usages, false);
 }
 
 /** Token usage in the shape Promptfoo accumulates into `tokenUsage.assertions`. */
@@ -362,26 +385,55 @@ export interface RubricResult {
     };
   }[];
   tokensUsed?: RubricTokenUsage;
-  /** Keys `llm-rubric` uses: what the judge was sent, or that the judge call failed. */
-  metadata: { renderedGradingPrompt: string } | { graderError: true };
+  /**
+   * Keys `llm-rubric` uses: the judge provider's own metadata and what the judge was
+   * sent, or that the judge call failed; `cachedResponse` when the cache served the reply.
+   */
+  metadata: {
+    renderedGradingPrompt?: string;
+    graderError?: true;
+    cachedResponse?: true;
+    [key: string]: unknown;
+  };
 }
 
-function gradingFailure(error: unknown, usages: GraderUsage[]): RubricResult {
-  const tokensUsed = summarizeUsage(usages);
-  if (!tokensUsed) throw error;
-  // Promptfoo discards properties attached to thrown Errors. A billed failure must be an
-  // assertion result so its usage still reaches tokenUsage.assertions. `graderError` is
-  // how Promptfoo's own model-graded assertions mark a judge failure in their results.
+function gradingFailure(reason: string, usages: GraderUsage[], cached?: boolean): RubricResult {
+  // Like llm-rubric's graderFail, a failure always reports what it cost, at least the
+  // request it made, so judge spend reaches tokenUsage.assertions even when unbilled.
+  const tokensUsed = summarizeUsage(usages) ?? {
+    total: 0,
+    prompt: 0,
+    completion: 0,
+    cached: 0,
+    numRequests: requestCount(usages),
+  };
   return {
     pass: false,
     score: 0,
-    reason: error instanceof Error ? error.message : String(error),
+    reason,
     namedScores: {},
     namedScoreWeights: {},
     componentResults: [],
     tokensUsed,
-    metadata: { graderError: true },
+    metadata: { graderError: true, ...(cached ? { cachedResponse: true as const } : {}) },
   };
+}
+
+/**
+ * The judge's response metadata as llm-rubric copies it: JSON-safe, and never trusted to
+ * claim `cachedResponse`, which only the provider's own `cached` flag sets.
+ */
+function providerMetadata(metadata: unknown): Record<string, unknown> {
+  if (typeof metadata !== "object" || metadata === null || Array.isArray(metadata)) return {};
+  let copy: unknown;
+  try {
+    copy = JSON.parse(JSON.stringify(metadata));
+  } catch {
+    return {};
+  }
+  if (typeof copy !== "object" || copy === null) return {};
+  const { cachedResponse: _untrusted, ...trusted } = copy as Record<string, unknown>;
+  return trusted;
 }
 
 function rubricResult(
@@ -389,6 +441,7 @@ function rubricResult(
   grades: Map<string, Grade>,
   usages: GraderUsage[],
   renderedGradingPrompt: string,
+  reply: GraderReply,
 ): RubricResult {
   const namedScores: Record<string, number> = {};
   const namedScoreWeights: Record<string, number> = {};
@@ -428,8 +481,19 @@ function rubricResult(
     namedScoreWeights,
     componentResults,
     ...(tokensUsed ? { tokensUsed } : {}),
-    metadata: { renderedGradingPrompt },
+    metadata: {
+      ...providerMetadata(reply.metadata),
+      renderedGradingPrompt,
+      ...(reply.cached ? { cachedResponse: true as const } : {}),
+    },
   };
+}
+
+const tokenCount = (value: unknown) =>
+  typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
+
+function requestCount(usages: GraderUsage[]): number {
+  return usages.reduce((sum, usage) => sum + (tokenCount(usage.numRequests) ?? 1), 0);
 }
 
 function summarizeUsage(usages: GraderUsage[]): RubricTokenUsage | undefined {
@@ -438,13 +502,11 @@ function summarizeUsage(usages: GraderUsage[]): RubricTokenUsage | undefined {
   // judge's spend lands in no bucket: a suite batching ten criteria into one request shows
   // the same zero as one that never graded at all. Promptfoo reads `tokensUsed` off the
   // assertion result and accumulates it into tokenUsage.assertions.
-  const tokenCount = (value: unknown) =>
-    typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
   let promptTokens = 0;
   let completionTokens = 0;
   let totalTokens = 0;
   let cachedTokens = 0;
-  let measuredRequests = 0;
+  let measuredTokens = false;
   let cost = 0;
   let measuredCost = false;
   for (const usage of usages) {
@@ -458,20 +520,20 @@ function summarizeUsage(usages: GraderUsage[]): RubricTokenUsage | undefined {
       completionTokens += completion ?? 0;
       totalTokens += total;
       cachedTokens += tokenCount(usage.cached) ?? 0;
-      measuredRequests += tokenCount(usage.numRequests) ?? 1;
+      measuredTokens = true;
     }
     if (typeof usage.cost === "number" && Number.isFinite(usage.cost) && usage.cost >= 0) {
       cost += usage.cost;
       measuredCost = true;
     }
   }
-  if (measuredRequests === 0 && !measuredCost) return undefined;
+  if (!measuredTokens && !measuredCost) return undefined;
   return {
     total: totalTokens,
     prompt: promptTokens,
     completion: completionTokens,
     cached: cachedTokens,
-    numRequests: measuredRequests || usages.length,
+    numRequests: requestCount(usages),
     ...(measuredCost ? { cost } : {}),
   };
 }

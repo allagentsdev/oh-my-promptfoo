@@ -5,6 +5,7 @@ await build({
   entry: {
     index: "packages/oh-my-promptfoo/src/index.ts",
     assertions: "packages/oh-my-promptfoo/src/assertions.ts",
+    providers: "packages/oh-my-promptfoo/src/providers.ts",
   },
   outDir: "packages/oh-my-promptfoo/dist",
   format: ["esm", "cjs"],

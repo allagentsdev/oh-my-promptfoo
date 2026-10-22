@@ -1,6 +1,6 @@
 # ADR 0011: llmAssert is llm-rubric, batched
 
-- Status: Accepted
+- Status: Accepted; the judge source and judge failures settled by [ADR 0012](0012-llm-assert-judge-from-promptfoo-grading-provider.md)
 - Date: 2026-10-22
 - Amends: answer placement in [ADR 0006](0006-llm-assert-rubric-prompt.md)
 
@@ -56,8 +56,8 @@ Results get larger by the size of the rendered prompt, the same cost `llm-rubric
 
 These remaining differences from `llm-rubric` are not batching. They are open questions for the maintainer, not decisions made here:
 
-- the judge comes from the `OPENAI_*` environment, not Promptfoo's grading provider or its cache;
-- a judge failure that reports no usage throws, so Promptfoo records an ERROR row instead of a failed assertion;
+- the judge comes from the `OPENAI_*` environment, not Promptfoo's grading provider or its cache (settled by [ADR 0012](0012-llm-assert-judge-from-promptfoo-grading-provider.md));
+- a judge failure that reports no usage throws, so Promptfoo records an ERROR row instead of a failed assertion (settled by [ADR 0012](0012-llm-assert-judge-from-promptfoo-grading-provider.md));
 - an assertion-level `threshold:` is never applied to this result;
 - images and audio in the provider response are not attached to the judge request.
 

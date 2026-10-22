@@ -9,6 +9,8 @@ source permissions, and cache use.
 
 Both providers use stock Promptfoo. Their YAML IDs are `package:oh-my-promptfoo:Provider` and `package:oh-my-promptfoo:CopilotSdkProvider`.
 
+The package also ships a judge provider, `package:oh-my-promptfoo/providers:FallbackProvider`, which tries `llmAssert` and `llm-rubric` judges in order and fails over on rate limits and outages. Name `llmAssert`'s judge with `defaultTest.options.provider` for the suite, a test's `options.provider`, or `--grader` for the run; it takes no per-assertion judge and does not read `OPENAI_*` variables itself. The [grading guide](grading-guide.md#choosing-llmasserts-judge) covers both.
+
 ## Provider response and assertions
 
 Each workspace-provider call returns a distinct absolute `metadata.workspace.path`, an immutable manifest digest, resolved source commits/digests, and `cleanup: best-effort-evaluation`. Native output, raw response, usage, cost, and metadata (including `skillCalls`) keep their original locations. Codex's root Git check is bypassed internally because workspace roots may contain nested repositories. A native top-level `error` remains an execution error; Promptfoo skips assertions for that row.
@@ -50,7 +52,8 @@ plus required `grader: { id, config?, env? }` and optional `timeoutMs`,
 `queueTimeoutMs` and `maxPromptBytes`. Its workspace verification rule is
 always built in.
 The grader IDs are the same four supported delegates as the workspace provider.
-Use explicit `grader.env` for credentials. The assertion consumes
+Use explicit `grader.env` for credentials. `--grader` and `options.provider`
+choose `llmAssert`'s judge and never this grader. The assertion consumes
 `context.providerResponse.metadata.workspace.path`; absent or released paths
 are errors even when a candidate answer or durable file changes are available.
 

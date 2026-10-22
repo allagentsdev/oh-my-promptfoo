@@ -132,9 +132,32 @@ For an existing Copilot directory, replace the workspace provider with
 
 ## Grade semantic findings
 
-Use one independent judge request for named criteria. The judge needs
-`OPENAI_MODEL` and `OPENAI_API_KEY`; an OpenAI-compatible or Azure OpenAI v1
-endpoint can be set with `OPENAI_BASE_URL`.
+Use one independent judge request for named criteria. Name the judge in
+Promptfoo's provider config, the same place `llm-rubric` reads it; `llmAssert`
+does not read `OPENAI_*` variables itself, and with no judge set it stops with
+a configuration error before any request:
+
+```yaml
+defaultTest:
+  options:
+    provider: openai:chat:gpt-6-sol   # reads OPENAI_API_KEY and OPENAI_BASE_URL
+```
+
+Or pass `--grader openai:chat:gpt-6-sol`, which replaces
+`defaultTest.options.provider`; a test's `options.provider` overrides both.
+There is no per-assertion judge: `config.provider` or `provider:` on an
+`llmAssert` assertion is rejected, unlike `llm-rubric`. Put criteria that need
+a different judge in a test with its own `options.provider`.
+For Azure OpenAI v1, set the full
+`OPENAI_BASE_URL=https://<resource>.openai.azure.com/openai/v1` and use
+`openai:chat:<deployment>`. To fail over between judges on 429s and outages,
+use `id: package:oh-my-promptfoo/providers:FallbackProvider` with
+`config.providers` listing judges in order (set `maxRetries: 1` on each); a
+plain list is rejected. Judge errors and outages fail the assertion with
+`metadata.graderError: true`; a judge provider that throws (no API key) makes
+the row an ERROR. `--no-cache` does not reach the judge yet; set
+`PROMPTFOO_CACHE_ENABLED=false`. See
+[the grading guide](../../docs/grading-guide.md#choosing-llmasserts-judge).
 
 ```yaml
 assert:
@@ -256,7 +279,8 @@ assert:
 
 The grader may also be `anthropic:claude-agent-sdk`, `openai:codex-sdk`, or `pi-sdk`.
 Use the delegate's supported model fields and explicit `grader.env` credentials;
-`OPENAI_MODEL` and `OPENAI_API_KEY` are not an implicit agent-grader selection.
+`--grader`, `options.provider` and `OPENAI_*` variables never select an agent
+grader; its judge is always `config.grader`.
 Codex graders require an API key in `grader.config.apiKey` or explicit
 `grader.env.OPENAI_API_KEY`; they do not load ChatGPT login credentials.
 Pi graders require `provider` and `model` and explicit credentials too. They

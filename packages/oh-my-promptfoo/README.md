@@ -43,6 +43,9 @@ providers:
             path: ./skills               # relative to this file
             destination: .agents/skills
             permissions: all
+defaultTest:
+  options:
+    provider: openai:chat:gpt-6-sol      # the llmAssert judge
 tests:
   - vars:
       task: Our checkout page crashes when the price is empty. Explain the likely cause.
@@ -61,11 +64,18 @@ Run it and open the results:
 
 ```sh
 export GH_TOKEN=...            # for the agent
-export OPENAI_API_KEY=...      # for the llmAssert judge
-export OPENAI_MODEL=...        # the judge model
+export OPENAI_API_KEY=...      # for the judge's OpenAI provider
 npx promptfoo eval
 npx promptfoo view
 ```
+
+The judge is an ordinary Promptfoo provider, set the way `llm-rubric`'s is:
+in `defaultTest.options.provider` as above, or with
+`npx promptfoo eval --grader <provider-id>`. For Azure OpenAI, set
+`OPENAI_BASE_URL` to the full `https://<resource>.openai.azure.com/openai/v1`
+address and use `openai:chat:<deployment>`. The
+[grading guide](https://github.com/allagentsdev/oh-my-promptfoo/blob/main/docs/grading-guide.md#choosing-llmasserts-judge)
+covers per-test judges and falling back to another judge during an outage.
 
 The [examples](https://github.com/allagentsdev/oh-my-promptfoo/tree/main/examples) include configs for Codex, Claude Code, Copilot,
 pinned Git and OCI sources, and larger runs.
@@ -102,7 +112,8 @@ examples.
 - [Provider guide](https://github.com/allagentsdev/oh-my-promptfoo/blob/main/docs/provider-guide.md): sources, permissions, each agent's
   settings, limits, cleanup and caching
 - [Grading guide](https://github.com/allagentsdev/oh-my-promptfoo/blob/main/docs/grading-guide.md): `llmAssert` and `agentAssert` in
-  full, including scoring modes, templates, token usage and prompt size limits
+  full, including choosing the judge, fallback judges, scoring modes,
+  templates, token usage and prompt size limits
 - [Examples](https://github.com/allagentsdev/oh-my-promptfoo/tree/main/examples): complete Promptfoo configs
 - [Architecture decisions](https://github.com/allagentsdev/oh-my-promptfoo/tree/main/docs/adr): why things work the way they do
 - [Changelog](https://github.com/allagentsdev/oh-my-promptfoo/blob/main/CHANGELOG.md)

@@ -31,6 +31,8 @@ interface Reply {
   cost?: number;
   delayMs?: number;
   error?: string;
+  /** The fake SDK throws this message instead of answering. */
+  throws?: string;
   forbidden?: "write" | "shell" | "url";
 }
 interface RecordedCall {
@@ -75,6 +77,7 @@ async function reply(call){
   const queue=JSON.parse(await readFile(queuePath,'utf8'));const next=queue.shift();await writeFile(queuePath,JSON.stringify(queue));
   if(!next)throw Error('Unexpected extra grader attempt');
   if(next.delayMs)await new Promise(resolve=>setTimeout(resolve,next.delayMs));
+  if(next.throws)throw Error(next.throws);
   return next;
  }finally{await unlink(activePath);}
 }
@@ -652,7 +655,13 @@ test("agentAssert retries malformed verdicts once and accounts for both delegate
       }),
     ]) {
       await queue([{ output }, { output }]);
-      await assert.rejects(agentAssert("candidate answer", context()), /JSON|component|reply/i);
+      // Two malformed verdicts are a judge failure, recorded as llm-rubric records one.
+      const result = await agentAssert("candidate answer", context());
+      assert.equal(result.pass, false);
+      assert.equal(result.score, 0);
+      assert.equal(result.metadata.graderError, true);
+      assert.match(result.reason, /JSON|component|reply/i);
+      assert.equal(result.tokensUsed?.numRequests, 2);
       assert.equal((await calls()).length, 2);
     }
   });
@@ -792,13 +801,15 @@ test("agentAssert shares the execution deadline across malformed-verdict retries
       { output: verdict(), delayMs: 1100 },
     ]);
     const gradingContext = context();
-    await assert.rejects(
-      agentAssert("candidate answer", {
-        ...gradingContext,
-        config: { ...gradingContext.config, timeoutMs: 1900 },
-      }),
-      /timeout|timed out/i,
-    );
+    // A delegate cut off by the deadline is a judge failure, not a row error.
+    const result = await agentAssert("candidate answer", {
+      ...gradingContext,
+      config: { ...gradingContext.config, timeoutMs: 1900 },
+    });
+    assert.equal(result.pass, false);
+    assert.equal(result.metadata.graderError, true);
+    assert.match(result.reason, /timeout|timed out/i);
+    assert.equal(result.tokensUsed?.numRequests, 2);
     assert.equal((await calls()).length, 2);
   });
 }, 10_000);
@@ -807,10 +818,10 @@ test("agentAssert does not credit a grader that fails on a forbidden tool reques
   await withGrader(async ({ workspace, queue, calls, context }) => {
     for (const forbidden of ["write", "shell", "url"] as const) {
       await queue([{ output: verdict(), forbidden }]);
-      await assert.rejects(
-        agentAssert("candidate answer", context("copilot-sdk")),
-        /read.only|denied/i,
-      );
+      const result = await agentAssert("candidate answer", context("copilot-sdk"));
+      assert.equal(result.pass, false);
+      assert.equal(result.metadata.graderError, true);
+      assert.match(result.reason, /read.only|denied/i);
       assert.equal((await calls()).length, 1);
       assert.equal(await readFile(join(workspace, "input.txt"), "utf8"), "candidate fix\n");
     }
@@ -991,6 +1002,31 @@ test("agentAssert retains native measured failures without retrying or exposing 
       assert.equal(result.reason.includes("fixture-api-key"), false);
       assert.equal(result.tokensUsed?.total, 12);
       assert.equal(result.tokensUsed?.cost, 0.1);
+      assert.equal((await calls()).length, 1);
+    }
+  });
+});
+
+test("agentAssert records a delegate that throws as a grader error without exposing keys", async () => {
+  await withGrader(async ({ queue, calls, context }) => {
+    for (const id of ["openai:codex-sdk", "anthropic:claude-agent-sdk"] as const) {
+      await queue([{ output: "", throws: "grader crashed using fixture-api-key" }]);
+      const result = await agentAssert(
+        "candidate answer",
+        context(id, { apiKey: "fixture-api-key" }),
+      );
+      assert.equal(result.pass, false);
+      assert.equal(result.score, 0);
+      assert.equal(result.metadata.graderError, true);
+      assert.match(result.reason, /grader crashed/);
+      assert.equal(result.reason.includes("fixture-api-key"), false);
+      assert.deepEqual(result.tokensUsed, {
+        total: 0,
+        prompt: 0,
+        completion: 0,
+        cached: 0,
+        numRequests: 1,
+      });
       assert.equal((await calls()).length, 1);
     }
   });

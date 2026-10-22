@@ -276,7 +276,12 @@ try {
     }
   }
   const cli = join(cwd, "node_modules/promptfoo/dist/src/entrypoint.js");
-  async function evaluateFixture(name: string, suite: unknown, accepted = [0]) {
+  async function evaluateFixture(
+    name: string,
+    suite: unknown,
+    accepted = [0],
+    env: NodeJS.ProcessEnv = testEnvironment,
+  ) {
     await writeFile(join(cwd, `${name}.json`), JSON.stringify(suite));
     const child = spawn(
       "node",
@@ -290,7 +295,7 @@ try {
         "--output",
         `${name}-results.json`,
       ],
-      { cwd, env: testEnvironment, stdio: ["ignore", "pipe", "pipe"] },
+      { cwd, env, stdio: ["ignore", "pipe", "pipe"] },
     );
     let stdout = "";
     let stderr = "";
@@ -655,23 +660,27 @@ try {
     let body = "";
     for await (const chunk of request) body += chunk;
     judgeRequests.push({ url: request.url, body: JSON.parse(body) });
+    if (request.url?.startsWith("/fail/")) {
+      response.writeHead(500, { "content-type": "application/json" });
+      response.end(JSON.stringify({ error: { message: "Local judge outage" } }));
+      return;
+    }
+    // `/ok/v1` answers both Promptfoo's llm-rubric and llmAssert with one reply shape.
+    const verdict = request.url?.startsWith("/ok/")
+      ? {
+          pass: true,
+          score: 1,
+          reason: "Fallback judge answered",
+          components: [{ metric: "fallback", score: 1, reason: "Fallback judge answered" }],
+        }
+      : {
+          components: [
+            { metric: "accuracy", score: 1, reason: "Grounded" },
+            { metric: "clarity", score: 0.7, reason: "Clear" },
+          ],
+        };
     response.writeHead(200, { "content-type": "application/json" });
-    response.end(
-      JSON.stringify({
-        choices: [
-          {
-            message: {
-              content: JSON.stringify({
-                components: [
-                  { metric: "accuracy", score: 1, reason: "Grounded" },
-                  { metric: "clarity", score: 0.7, reason: "Clear" },
-                ],
-              }),
-            },
-          },
-        ],
-      }),
-    );
+    response.end(JSON.stringify({ choices: [{ message: { content: JSON.stringify(verdict) } }] }));
   });
   judge.listen(0, "127.0.0.1");
   await once(judge, "listening");
@@ -684,6 +693,14 @@ try {
       JSON.stringify({
         prompts: ["review"],
         providers: ["echo"],
+        defaultTest: {
+          options: {
+            provider: {
+              id: "openai:chat:fake-grader",
+              config: { apiBaseUrl: `http://127.0.0.1:${address.port}/v1`, apiKey: "local-only" },
+            },
+          },
+        },
         tests: [
           {
             vars: {
@@ -734,9 +751,8 @@ try {
           PACKED_ASSERTION_SUBJECT: "packed environment",
           PROMPTFOO_DISABLE_TEMPLATING: "false",
           PROMPTFOO_DISABLE_OBJECT_STRINGIFY: "false",
-          OPENAI_MODEL: "fake-grader",
-          OPENAI_API_KEY: "local-only",
-          OPENAI_BASE_URL: `http://127.0.0.1:${address.port}/v1`,
+          // `--no-cache` does not reach package code yet (promptfoo/promptfoo#11918).
+          PROMPTFOO_CACHE_ENABLED: "false",
         },
         stdio: ["ignore", "pipe", "pipe"],
       },
@@ -784,6 +800,111 @@ try {
       componentGrades.some((part: { pass: boolean }) => !part.pass)
     )
       throw Error("Stock Promptfoo did not preserve the packed single-request rubric grades");
+    const base = `http://127.0.0.1:${address.port}`;
+    const judgeEnvironment = { ...testEnvironment, PROMPTFOO_CACHE_ENABLED: "false" };
+    const failingJudge = {
+      id: "openai:chat:fake-grader",
+      label: "failing-judge",
+      config: { apiBaseUrl: `${base}/fail/v1`, apiKey: "local-only" },
+    };
+    const answeringJudge = {
+      id: "openai:chat:fake-grader",
+      label: "answering-judge",
+      config: { apiBaseUrl: `${base}/ok/v1`, apiKey: "local-only" },
+    };
+    const fallbackStart = judgeRequests.length;
+    const fallback = await evaluateFixture(
+      "packaged-fallback-judge",
+      {
+        prompts: ["fallback"],
+        providers: ["echo"],
+        defaultTest: {
+          options: {
+            provider: {
+              id: "package:oh-my-promptfoo/providers:FallbackProvider",
+              config: { providers: [failingJudge, answeringJudge] },
+            },
+          },
+        },
+        tests: [
+          {
+            assert: [
+              { type: "llm-rubric", value: "Says fallback" },
+              {
+                type: "javascript",
+                value: "package:oh-my-promptfoo/assertions:llmAssert",
+                config: { components: [{ metric: "fallback", value: "Says fallback" }] },
+              },
+            ],
+          },
+        ],
+      },
+      [0],
+      judgeEnvironment,
+    );
+    const fallbackRequests = judgeRequests.slice(fallbackStart);
+    const fallbackRow = fallback.results[0];
+    const fallbackParts: {
+      pass: boolean;
+      assertion?: { type?: string };
+      metadata?: { fallback?: { answeredBy?: string } };
+    }[] = fallbackRow?.gradingResult?.componentResults ?? [];
+    const rubricPart = fallbackParts.find((part) => part.assertion?.type === "llm-rubric");
+    const llmAssertPart = fallbackParts.find((part) => part.assertion?.type === "javascript");
+    if (
+      fallback.stats.successes !== 1 ||
+      !rubricPart?.pass ||
+      !llmAssertPart?.pass ||
+      rubricPart.metadata?.fallback?.answeredBy !== "answering-judge" ||
+      llmAssertPart.metadata?.fallback?.answeredBy !== "answering-judge" ||
+      !fallbackRequests.some((request) => request.url === "/fail/v1/chat/completions") ||
+      fallbackRequests.filter((request) => request.url === "/ok/v1/chat/completions").length !==
+        2 ||
+      // Failed attempts on the first judge count as grading requests too.
+      fallbackRow.tokenUsage?.assertions?.numRequests !== fallbackRequests.length
+    )
+      throw Error(
+        `Stock Promptfoo did not fail over llm-rubric and llmAssert to the second judge: ${JSON.stringify(fallbackRow?.gradingResult)}`,
+      );
+    const outage = await evaluateFixture(
+      "packaged-judge-outage",
+      {
+        prompts: ["outage"],
+        providers: ["echo"],
+        defaultTest: { options: { provider: failingJudge } },
+        tests: [
+          {
+            assert: [
+              { type: "contains", value: "outage" },
+              {
+                type: "javascript",
+                value: "package:oh-my-promptfoo/assertions:llmAssert",
+                config: { components: [{ metric: "outage", value: "Says outage" }] },
+              },
+            ],
+          },
+        ],
+      },
+      [100],
+      judgeEnvironment,
+    );
+    const outageRow = outage.results[0];
+    const outageParts: {
+      pass: boolean;
+      assertion?: { type?: string };
+      metadata?: { graderError?: boolean };
+    }[] = outageRow?.gradingResult?.componentResults ?? [];
+    if (
+      outage.stats.failures !== 1 ||
+      outage.stats.errors !== 0 ||
+      outageRow.failureReason !== 1 ||
+      !outageParts.find((part) => part.assertion?.type === "contains")?.pass ||
+      outageParts.find((part) => part.assertion?.type === "javascript")?.metadata?.graderError !==
+        true
+    )
+      throw Error(
+        `A judge outage did not fail the row while keeping its other results: ${JSON.stringify(outageRow?.gradingResult)}`,
+      );
   } finally {
     const closed = once(judge, "close");
     judge.close();
@@ -873,6 +994,9 @@ try {
           "trajectory:tool-args-match",
           "trajectory:tool-sequence",
           "trajectory:step-count",
+          "packaged llmAssert with defaultTest judge",
+          "llm-rubric and llmAssert through FallbackProvider",
+          "llmAssert judge outage keeps row results",
         ],
         stdout: output
           .replaceAll(cwd, "<temporary-consumer>")
