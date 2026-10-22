@@ -21,7 +21,11 @@ export async function llmAssert(
   const parsedBaseUrl = new URL(baseUrl);
   const azureOpenAI = parsedBaseUrl.hostname.endsWith(".openai.azure.com");
   const prefix = azureOpenAI && parsedBaseUrl.pathname === "/" ? "/openai/v1" : "";
-  return gradeRubric(rubric, async () => {
+  const messages = [
+    { role: "system", content: rubric.system },
+    { role: "user", content: rubric.user },
+  ];
+  return gradeRubric(rubric, JSON.stringify(messages), async () => {
     const response = await fetch(`${baseUrl}${prefix}/chat/completions`, {
       method: "POST",
       headers: {
@@ -30,10 +34,7 @@ export async function llmAssert(
       },
       body: JSON.stringify({
         model,
-        messages: [
-          { role: "system", content: rubric.prompt },
-          { role: "user", content: rubric.candidate },
-        ],
+        messages,
         response_format: { type: "json_object" },
       }),
       signal: AbortSignal.timeout(120_000),

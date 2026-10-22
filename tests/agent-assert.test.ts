@@ -201,8 +201,15 @@ test("agentAssert shares component scoring and inspects the live workspace with 
       assert.equal(recorded.length, 2);
       assert.equal(recorded[0].id, id);
       assert.equal(recorded[0].workingDir, workspace);
-      assert.match(recorded[0].prompt, /parser regression/);
-      assert.match(recorded[0].prompt, /I fixed the parser/);
+      // The same framing as llmAssert: the answer labelled as <Output>, criteria in <Rubric>,
+      // and no evidence section when the candidate provider captured no file changes.
+      assert.ok(
+        recorded[0].prompt.endsWith(
+          "\n\n<Output>\nI fixed the parser\n</Output>\n<Rubric>\n- accuracy: Verify the fix for parser regression in input.txt\n- scope: Only the intended file changed\n</Rubric>",
+        ),
+      );
+      assert.ok(recorded[0].prompt.startsWith("You grade the answer inside <Output>"));
+      assert.deepEqual(passed.metadata, { renderedGradingPrompt: recorded[0].prompt });
       assert.match(recorded[0].prompt, /never an unverified claim/);
       assert.ok(
         recorded[0].prompt.includes(
