@@ -663,7 +663,12 @@ export class WorkspaceManager {
           throw leftover;
         throw error;
       }
-      if (marker.package !== PACKAGE || marker.kind !== "runtime-provider" || !marker.identity)
+      if (
+        !marker ||
+        marker.package !== PACKAGE ||
+        marker.kind !== "runtime-provider" ||
+        !marker.identity
+      )
         throw leftover;
       if (await alive(marker.identity)) continue;
       const records = join(root, "records");

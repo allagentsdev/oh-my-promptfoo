@@ -695,12 +695,13 @@ describe("workspace lifecycle", () => {
     await writeFile(join(leftover, `${MARKER}.594255bf-3655-401e-b18e-dad47d5eef85.tmp`), "");
     const message = `Runtime root ${leftover} has no runtime provider ownership marker. It is a leftover from an interrupted run and is safe to delete when no eval is running.`;
     await expect(manager({ sources: [] }, channels).prepare()).rejects.toThrow(message);
-    await atomicJson(join(leftover, MARKER), {
-      schemaVersion: 1,
-      package: "@allagents/promptfoo-integration",
-      kind: "seed-cache",
-    });
-    await expect(manager({ sources: [] }, channels).prepare()).rejects.toThrow(message);
+    for (const marker of [
+      { schemaVersion: 1, package: "@allagents/promptfoo-integration", kind: "seed-cache" },
+      null,
+    ]) {
+      await atomicJson(join(leftover, MARKER), marker);
+      await expect(manager({ sources: [] }, channels).prepare()).rejects.toThrow(message);
+    }
     expect(await exists(leftover)).toBe(true);
   });
   test("parallel rows isolate file content, metadata, Git index and writable roots while retaining reusable seeds", async () => {
