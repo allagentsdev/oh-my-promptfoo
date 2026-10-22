@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { resolve } from "node:path";
 import { isJudge, type Judge, type JudgeResponse, judgeName, loadJudge } from "./judge.js";
 
 export interface FallbackProviderConfig {
@@ -112,10 +113,15 @@ function retryAfterMs(response: JudgeResponse): number | undefined {
 
 /**
  * The identity a judge's cooldown is kept under. A live instance is its own identity; a
- * `{ text: … }` map is the judge it names; any other spec is a fingerprint of the spec and
- * the environment it loads with, so the same id under another account cools separately.
+ * `{ text: … }` map is the judge it names; any other spec is a fingerprint of everything
+ * that decides which judge loads: the spec, its environment and the base path relative
+ * references resolve against. The same id under another account, or the same relative
+ * `file://` judge in another suite, cools separately.
  */
-function judgeKey(spec: unknown, env: Record<string, string> | undefined): string {
+function judgeKey(
+  spec: unknown,
+  load: { basePath?: string; env?: Record<string, string> },
+): string {
   if (isJudge(spec)) {
     let key = state.instances.get(spec);
     if (!key) {
@@ -131,9 +137,15 @@ function judgeKey(spec: unknown, env: Record<string, string> | undefined): strin
     "text" in spec &&
     spec.text !== undefined
   )
-    return judgeKey(spec.text, env);
+    return judgeKey(spec.text, load);
   const fingerprint = createHash("sha256")
-    .update(JSON.stringify({ spec, env: env ?? null }))
+    .update(
+      JSON.stringify({
+        spec,
+        env: load.env ?? null,
+        basePath: load.basePath ? resolve(load.basePath) : null,
+      }),
+    )
     .digest("hex");
   return `spec:${fingerprint}`;
 }
@@ -194,7 +206,7 @@ export class FallbackProvider {
     const judges = this.providers.map((spec, index) => ({
       spec,
       index,
-      key: judgeKey(spec, this.options.env),
+      key: judgeKey(spec, { basePath: this.options.config?.basePath, env: this.options.env }),
     }));
     let order = judges.filter(({ key }) => (cooldowns.get(key) ?? 0) <= now);
     // Every judge cooling down: try the one that recovers first rather than make no call.

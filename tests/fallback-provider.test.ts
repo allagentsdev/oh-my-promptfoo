@@ -456,3 +456,23 @@ test("cooldowns are kept per judge identity, not per provider id", async () => {
   const sameAccount = await withEnv("a").callApi("p");
   assert.notEqual(meta(sameAccount).attempts[0]?.provider, spec.label);
 });
+
+test("the same relative judge in another suite's directory cools separately", async () => {
+  const spec = { id: "file://judge.mjs", label: unique("relative-judge") };
+  const suite = (directory: string) =>
+    new FallbackProvider({
+      config: {
+        providers: [spec, stub("suite-backup", ok("backup"))],
+        cooldownMs: 60_000,
+        basePath: join(import.meta.dir, "fixtures", directory),
+      },
+    });
+  const limited = await suite("basepath-failing").callApi("p");
+  assert.equal(limited.output, "backup");
+  const other = await suite("basepath-answering").callApi("p");
+  assert.equal(other.output, "answered from its own suite");
+  assert.equal(meta(other).answeredBy, spec.label);
+  const again = await suite("basepath-failing").callApi("p");
+  assert.equal(meta(again).attempts.length, 1);
+  assert.equal(again.output, "backup");
+});
