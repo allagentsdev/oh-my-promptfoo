@@ -15,6 +15,13 @@
 * Verify `skill-used` with tracing disabled for Claude, Codex, and Copilot, including failed skill loads and text-only claims. Document native skill metadata preservation and that no OpenTelemetry collector is required.
 * Exercise the real Pi SDK with local model-service responses, including chunked streaming, bounded output, guarded directory and screenshot reads, credential errors, cancellation, skill evidence, and retained billing. Verify native Codex skill gates with two live SDK sessions, without tracing.
 
+## [1.20.0](https://github.com/allagentsdev/oh-my-promptfoo/compare/v1.19.0...v1.20.0) (2026-10-22)
+
+
+### Features
+
+* **assertions:** take a per-assertion llmAssert judge from config.provider ([#105](https://github.com/allagentsdev/oh-my-promptfoo/issues/105)) ([bc01b6e](https://github.com/allagentsdev/oh-my-promptfoo/commit/bc01b6eaea9ef2574a926b57f9eb1485dcbcae92))
+
 ## [1.19.0](https://github.com/allagentsdev/oh-my-promptfoo/compare/v1.18.0...v1.19.0) (2026-10-22)
 
 
