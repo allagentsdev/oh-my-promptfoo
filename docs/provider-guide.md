@@ -9,7 +9,7 @@ source permissions, and cache use.
 
 Both providers use stock Promptfoo. Their YAML IDs are `package:oh-my-promptfoo:Provider` and `package:oh-my-promptfoo:CopilotSdkProvider`.
 
-The package also ships a judge provider, `package:oh-my-promptfoo/providers:FallbackProvider`, which tries `llmAssert` and `llm-rubric` judges in order and fails over on rate limits and outages. Name `llmAssert`'s judge with `defaultTest.options.provider` for the suite, a test's `options.provider`, or `--grader` for the run; it takes no per-assertion judge and does not read `OPENAI_*` variables itself. The [grading guide](grading-guide.md#choosing-llmasserts-judge) covers both.
+The package also ships a judge provider, `package:oh-my-promptfoo/providers:FallbackProvider`, which tries `llmAssert` and `llm-rubric` judges in order and fails over on rate limits and outages. Name `llmAssert`'s judge with `defaultTest.options.provider` for the suite, a test's `options.provider`, or `--grader` for the run; one assertion that needs its own judge can set `config.provider`. `llmAssert` does not read `OPENAI_*` variables itself. The [grading guide](grading-guide.md#choosing-llmasserts-judge) covers both.
 
 ## Provider response and assertions
 

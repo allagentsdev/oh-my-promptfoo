@@ -63,22 +63,37 @@ tests:
       provider: anthropic:messages:claude-sonnet-5
 ```
 
-### No per-assertion judge
+### One assertion, different judge
 
-`llmAssert` reads its judge only from the suite, the test or the run. Setting
-`config.provider` on an `llmAssert` assertion, or `provider:` beside its
-`config:`, is a configuration error and the row is an ERROR:
+Name the judge for the suite, the test or the run, as above: one judge per
+suite keeps it in a single place a reader can find. When one assertion really
+needs its own judge, for example a second opinion beside the suite's judge in
+the same test, put it in that assertion's `config.provider`:
 
-> llmAssert takes no per-assertion judge: remove provider from this assertion
-> and set the judge in defaultTest.options.provider for the suite, in a test's
-> options.provider, or with --grader for the run
+```yaml
+- type: javascript
+  value: package:oh-my-promptfoo/assertions:llmAssert
+  config:
+    provider: anthropic:messages:claude-sonnet-5
+    components: [...]
+```
 
-This is a deliberate difference from `llm-rubric`, which accepts `provider:` on
-the assertion. Promptfoo doesn't pass an assertion's `provider:` to package
-functions, so `llmAssert` can't honour it, and a second spelling in `config`
-would drift from how every other grader in the suite is chosen. To grade some
-criteria with a different judge, put them in a test with its own
-`options.provider`.
+It takes an id, a provider object or a `{ text: … }` map, including a
+`FallbackProvider` chain, and it beats the test's `options.provider`,
+`--grader` and `defaultTest.options.provider`, the way an assertion's
+`provider:` does for `llm-rubric`. An empty value (`provider:` with nothing
+after it, or `""`) counts as unset, as it does for `llm-rubric`. A provider
+instance works only when you call `llmAssert` yourself: Promptfoo copies an
+assertion's `config` with `structuredClone` before a package function sees it,
+which drops the instance's methods. It lives in `config` because Promptfoo
+doesn't pass an assertion's own `provider:` to package functions. Writing
+`provider:` beside `config:` on an `llmAssert` assertion is a configuration
+error, and the row is an ERROR:
+
+> llmAssert does not see provider: beside config: (Promptfoo does not pass it
+> to package assertions): move it into this assertion's config.provider, or
+> set the judge for the suite in defaultTest.options.provider, for a test in
+> its options.provider, or for the run with --grader
 
 ### A fallback chain
 
@@ -118,8 +133,9 @@ promptfoo eval -c suite.yaml --grader openai:chat:gpt-6-sol
 ```
 
 `--grader` replaces `defaultTest.options.provider`, including a fallback chain.
-It does not replace a test's `options.provider`, which is how it behaves for
-`llm-rubric`. It takes only an id, so a chain has to go in `defaultTest`.
+It does not replace a test's `options.provider` or an assertion's
+`config.provider`, which is how it behaves for `llm-rubric`. It takes only an
+id, so a chain has to go in `defaultTest`.
 
 ### Where the judge comes from
 
@@ -127,13 +143,14 @@ The first match wins:
 
 | # | Where | Same as `llm-rubric`? |
 | --- | --- | --- |
-| 1 | the test's `options.provider` | Yes |
-| 2 | `--grader` | Yes |
-| 3 | `defaultTest.options.provider` | Yes |
+| 1 | the assertion's `config.provider` | Yes, but in `config`: `llm-rubric` reads the assertion's `provider:` |
+| 2 | the test's `options.provider` | Yes |
+| 3 | `--grader` | Yes |
+| 4 | `defaultTest.options.provider` | Yes |
 | — | nothing set: configuration error | No: `llm-rubric` falls back to a credential-based default |
 
-`llm-rubric` also checks an assertion's own `provider:` first; `llmAssert`
-rejects it, as described above.
+`metadata.judge` in the result names the judge that graded it: its label, or
+its id.
 
 A judge can be written in the shapes Promptfoo accepts for a grader:
 
@@ -198,7 +215,7 @@ for why the judge works this way.
 | Every judge in a `FallbackProvider` chain fails | FAIL with `graderError`; the reason lists each attempt |
 | The verdict can't be parsed | One retry that bypasses the cache, then FAIL with `graderError` |
 | The judge's provider throws, for example no API key or an unknown provider id | Row ERROR, as for `llm-rubric` |
-| No judge configured, a per-assertion `config.provider` or `provider:`, a list of judges, or invalid `llmAssert` config | Row ERROR |
+| No judge configured, `provider:` beside `config:`, a list of judges, or invalid `llmAssert` config | Row ERROR |
 
 A throw stays an ERROR on purpose: missing credentials affect every row and
 should not pass for ordinary failed grades.
