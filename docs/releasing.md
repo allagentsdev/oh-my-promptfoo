@@ -32,6 +32,8 @@ GitHub currently supports Bun version-update PRs but not Bun security-update PRs
 
 Before merging a dependency update, run the audit and the normal validation checks. Review SDK peer requirements in `packages/oh-my-promptfoo/package.json` alongside root development pins and packed-package compatibility. `bun audit fix --dry-run` shows compatible fixes and parent ranges that block them; do not force major upgrades or add advisory exceptions just to make CI green. An advisory with no published fix remains a merge blocker until a reviewed remediation or explicit risk decision is available.
 
+The lockfile resolves `ip-address` to `10.7.4` for [GHSA-rxp7-6hxx-x8q5](https://github.com/advisories/GHSA-rxp7-6hxx-x8q5), which fixes quadratic-time IPv6 zone parsing. This patch fits the existing parent ranges and needs no override. Re-run the audit before merging even when an earlier check was green: new advisories can invalidate that result.
+
 ### Reviewed security overrides
 
 The private development workspace uses Promptfoo `0.124.1` and two root overrides while upstream dependency ranges block the fixes:
