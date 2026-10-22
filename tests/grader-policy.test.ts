@@ -226,7 +226,7 @@ test("Codex reader accepts contained absolute paths and denies outside files and
   });
 }, 20_000);
 
-test("Copilot transport errors preserve already measured usage", async () => {
+test("Copilot transport errors retain tokens and multipliers without inventing money", async () => {
   await withReadPolicy(async ({ call }) => {
     const response = await call("copilot-sdk", "usage-error");
     assert.match(response.error as string, /Billed Copilot transport failure/);
@@ -237,7 +237,32 @@ test("Copilot transport errors preserve already measured usage", async () => {
       cached: 0,
       numRequests: 1,
     });
-    assert.equal(response.cost, 0.01);
+    assert.equal(response.cost, undefined);
+    const metadata = response.metadata;
+    assert.ok(metadata && typeof metadata === "object" && "copilot" in metadata);
+    const copilot = metadata.copilot;
+    assert.ok(
+      copilot &&
+        typeof copilot === "object" &&
+        "accounting" in copilot &&
+        "premiumRequestUsage" in copilot,
+    );
+    const accounting = copilot.accounting;
+    assert.ok(
+      accounting &&
+        typeof accounting === "object" &&
+        "status" in accounting &&
+        "reason" in accounting,
+    );
+    assert.equal(accounting.status, "unavailable");
+    assert.equal(accounting.reason, "unsupported");
+    assert.equal("totalNanoAiu" in accounting, false);
+    assert.deepEqual(copilot.premiumRequestUsage, {
+      source: "assistant.usage",
+      scope: "received-events",
+      reportedCost: 0.01,
+      numRequests: 1,
+    });
   });
 }, 20_000);
 
