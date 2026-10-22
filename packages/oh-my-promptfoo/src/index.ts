@@ -26,6 +26,7 @@ import {
   validateCopilotConfig,
   validateProviderConfig,
 } from "./config.js";
+import { copilotFailure } from "./copilot-accounting.js";
 import { jsonSafe, redact, runDelegate, secrets, wireContext } from "./protocol.js";
 
 export type { CapturedFile, FileChanges } from "../../workspace-core/src/file-changes.js";
@@ -169,6 +170,7 @@ export class Provider extends Calls {
         error: redact((error as Error).message, secrets(this.config.delegate.config ?? {}, env)),
       };
     }
+    let response: JsonObject | undefined;
     try {
       return await this.execute(options?.abortSignal, async (signal) => {
         let handle: WorkspaceHandle | undefined;
@@ -189,7 +191,6 @@ export class Provider extends Calls {
             }
           }
           publishProgress("agent-start", caseIndex);
-          let response: JsonObject;
           try {
             response = await runDelegate(
               {
@@ -258,9 +259,11 @@ export class Provider extends Calls {
         }
       });
     } catch (error) {
-      return {
-        error: redact(error instanceof Error ? error.message : String(error), secrets(merged, env)),
-      };
+      const message = redact(
+        error instanceof Error ? error.message : String(error),
+        secrets(merged, env),
+      );
+      return (response && copilotFailure(response, message)) ?? { error: message };
     }
   }
   cleanup(): Promise<void> {

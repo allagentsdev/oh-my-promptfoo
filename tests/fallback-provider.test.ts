@@ -15,6 +15,7 @@ type Reply = {
 
 type FallbackMetadata = {
   answeredBy?: string;
+  permanentError?: true;
   attempts: {
     provider: string;
     status?: number;
@@ -58,6 +59,154 @@ function fallback(providers: unknown[], extra: Record<string, unknown> = {}) {
 function meta(response: { metadata?: Record<string, unknown> }): FallbackMetadata {
   return response.metadata?.fallback as FallbackMetadata;
 }
+
+const accounting = (totalNanoAiu: number) =>
+  ({
+    version: 1,
+    source: "session.rpc.usage.getMetrics",
+    scope: "session",
+    unit: "nano-AIU",
+    status: "complete",
+    totalNanoAiu,
+  }) as const;
+
+test("exhausted fallback preserves each session snapshot and its failure diagnostics", async () => {
+  const first = accounting(1_000_000_000);
+  const second = {
+    ...accounting(2_000_000_000),
+    status: "partial",
+    reason: "execution_incomplete",
+  };
+  const response = await fallback(
+    [
+      stub("first", {
+        ...failing(503),
+        metadata: { http: { status: 503 }, copilot: { accounting: first } },
+      }),
+      stub("second", { error: "Request timed out", metadata: { copilot: { accounting: second } } }),
+    ],
+    { cooldownMs: 0 },
+  ).callApi("p");
+  assert.match(response.error!, /All 2 judges failed/);
+  assert.deepEqual(response.metadata?.judgeAccounting, {
+    version: 1,
+    attempts: [
+      { cached: false, accounting: first },
+      { cached: false, accounting: second },
+    ],
+  });
+  assert.equal(meta(response).attempts.length, 2);
+  assert.equal(response.cost, undefined);
+});
+
+test("fallback scalar cost requires complete same-unit accounting for every executed leaf", async () => {
+  const first = accounting(1_000_000_000);
+  const second = accounting(2_000_000_000);
+  const measured = () =>
+    stub("measured", {
+      ...failing(503),
+      cost: 99,
+      metadata: { http: { status: 503 }, copilot: { accounting: first } },
+    });
+  const complete = await fallback(
+    [
+      measured(),
+      stub("complete", {
+        ...ok(),
+        cost: 99,
+        metadata: { copilot: { accounting: second } },
+      }),
+    ],
+    { cooldownMs: 0 },
+  ).callApi("p");
+  assert.equal(complete.cost, 0.03);
+  for (const last of [
+    { ...ok(), cost: 0.2 },
+    ok(),
+    {
+      ...ok(),
+      cost: 99,
+      metadata: { copilot: { accounting: { ...second, status: "unavailable" } } },
+    },
+    { ...ok(), cost: 99, metadata: { copilot: { accounting: { ...second, totalNanoAiu: -1 } } } },
+  ]) {
+    const response = await fallback([measured(), stub("last", last)], { cooldownMs: 0 }).callApi(
+      "p",
+    );
+    assert.equal(response.cost, undefined);
+  }
+  const missingNative = await fallback(
+    [stub("native-cost", { ...failing(503), cost: 0.1 }), stub("native-missing", ok())],
+    { cooldownMs: 0 },
+  ).callApi("p");
+  assert.equal(missingNative.cost, undefined);
+});
+
+test("nested fallback accounting flattens leaves once and excludes cached snapshots", async () => {
+  const first = accounting(8_000_000_000);
+  const second = accounting(1_000_000_000);
+  const nested = fallback(
+    [
+      stub("cached-failure", {
+        ...failing(503),
+        cached: true,
+        metadata: { http: { status: 503 }, copilot: { accounting: first } },
+      }),
+      stub("complete", { ...ok(), metadata: { copilot: { accounting: second } } }),
+    ],
+    { cooldownMs: 0 },
+  );
+  const response = await fallback([nested], { cooldownMs: 0 }).callApi("p");
+  assert.equal(response.cost, 0.01);
+  assert.deepEqual(response.metadata?.judgeAccounting, {
+    version: 1,
+    attempts: [
+      { cached: true, accounting: first },
+      { cached: false, accounting: second },
+    ],
+  });
+  assert.equal(meta(response).attempts.length, 1);
+});
+
+test("fallback transient throws remain unknown leaf attempts and block complete cost", async () => {
+  const first = stub("throwing", () => {
+    throw new Error("socket hang up");
+  });
+  const second = accounting(1_000_000_000);
+  const response = await fallback(
+    [first, stub("measured", { ...ok(), metadata: { copilot: { accounting: second } } })],
+    { cooldownMs: 0 },
+  ).callApi("p");
+  assert.equal(response.output, "ok");
+  assert.deepEqual(response.metadata?.judgeAccounting, {
+    version: 1,
+    attempts: [{ cached: false }, { cached: false, accounting: second }],
+  });
+  assert.equal(response.cost, undefined);
+});
+
+test("fallback ledger growth fails closed rather than reporting a truncated total", async () => {
+  const leaf = accounting(1_000_000_000);
+  const providers = Array.from({ length: 2 }, (_, index) =>
+    stub(`large-${index}`, {
+      ...(index === 0 ? failing(503) : ok()),
+      metadata: {
+        ...(index === 0 ? { http: { status: 503 } } : {}),
+        judgeAccounting: {
+          version: 1,
+          attempts: Array.from({ length: 600 }, () => ({ cached: false, accounting: leaf })),
+        },
+      },
+    }),
+  );
+  const response = await fallback(providers, { cooldownMs: 0 }).callApi("p");
+  assert.equal(response.output, "ok");
+  assert.deepEqual(response.metadata?.judgeAccounting, {
+    version: 1,
+    attempts: [{ cached: false }],
+  });
+  assert.equal(response.cost, undefined);
+});
 
 for (const status of [408, 429, 500, 503, 0]) {
   test(`fails over on HTTP status ${status}`, async () => {
@@ -124,6 +273,9 @@ test("re-throws a non-transient thrown error", async () => {
   });
   const second = stub("second", ok());
   await expect(fallback([first, second]).callApi("p")).rejects.toThrow("API key is not set");
+  await expect(
+    fallback([stub("native-503", failing(503)), first, second], { cooldownMs: 0 }).callApi("p"),
+  ).rejects.toThrow("API key is not set");
   assert.equal(second.calls.length, 0);
 });
 
@@ -237,14 +389,14 @@ test("success clears a judge's cooldown", async () => {
   assert.equal(meta(response).attempts.length, 1);
 });
 
-test("sums usage and cost across attempts and records attempts", async () => {
+test("sums complete native usage and cost across attempts and records diagnostics", async () => {
   const first = stub("usage-a", {
     error: "API error: 500",
     cost: 0.01,
     tokenUsage: { total: 10, prompt: 8, completion: 2, cached: 0 },
     metadata: { http: { status: 500 } },
   });
-  const second = stub("usage-b", failing(502));
+  const second = stub("usage-b", { ...failing(502), cost: 0 });
   const third = stub(
     "usage-c",
     {
@@ -264,7 +416,7 @@ test("sums usage and cost across attempts and records attempts", async () => {
     cached: 5,
     numRequests: 2,
   });
-  assert.ok(Math.abs((response.cost ?? 0) - 0.03) < 1e-9);
+  assert.equal(response.cost, 0.01);
   assert.equal(response.metadata?.own, "kept");
   const fallbackMeta = meta(response);
   assert.equal(fallbackMeta.answeredBy, "Third Judge");
@@ -475,4 +627,128 @@ test("the same relative judge in another suite's directory cools separately", as
   const again = await suite("basepath-failing").callApi("p");
   assert.equal(meta(again).attempts.length, 1);
   assert.equal(again.output, "backup");
+});
+
+test("nested fallback retains accounted permanent throws without trying any backup", async () => {
+  const measured = accounting(1_000_000_000);
+  const first = () =>
+    stub("accounted", {
+      ...failing(503),
+      metadata: {
+        http: { status: 503 },
+        copilot: { accounting: measured },
+        diagnostic: "retained",
+      },
+    });
+  const throwing = stub("permanent", () => {
+    throw new Error("API key is not set");
+  });
+  const untouched = stub("untouched", ok());
+  const outerBackup = stub("outer-backup", ok());
+  const middleBackup = stub("middle-backup", ok());
+  const inner = fallback([first(), throwing, untouched], { cooldownMs: 0 });
+  const middle = fallback([inner, middleBackup], { cooldownMs: 0 });
+  const response = await fallback([middle, outerBackup], { cooldownMs: 0 }).callApi("p");
+  assert.equal(response.error, "API key is not set");
+  assert.equal(untouched.calls.length, 0);
+  assert.equal(middleBackup.calls.length, 0);
+  assert.equal(outerBackup.calls.length, 0);
+  assert.equal(meta(response).permanentError, true);
+  assert.equal(response.metadata?.http, undefined);
+  assert.equal(response.metadata?.diagnostic, "retained");
+  assert.deepEqual(response.metadata?.judgeAccounting, {
+    version: 1,
+    attempts: [{ cached: false, accounting: measured }, { cached: false }],
+  });
+  assert.equal(response.cost, undefined);
+  assert.equal(response.tokenUsage?.numRequests, 2);
+  const abort = new AbortController();
+  const cancelled = new Error("Evaluation cancelled");
+  const cancelling = stub("cancelled", () => {
+    abort.abort(cancelled);
+    throw cancelled;
+  });
+  await assert.rejects(
+    fallback([first(), cancelling], { cooldownMs: 0 }).callApi("p", undefined, {
+      abortSignal: abort.signal,
+    }),
+    (error) => error === cancelled,
+  );
+});
+
+test("exhausted fallback retains complete reported totals without summing event or provider costs", async () => {
+  const leaves = [accounting(1_000_000_000), accounting(2_000_000_000)];
+  const response = await fallback(
+    leaves.map((accounting, index) =>
+      stub(`complete-failure-${index}`, {
+        ...failing(503),
+        cost: 99,
+        metadata: {
+          http: { status: 503 },
+          copilot: { accounting, premiumRequestUsage: { reportedCost: 99 } },
+        },
+      }),
+    ),
+    { cooldownMs: 0 },
+  ).callApi("p");
+  assert.match(response.error!, /All 2 judges failed/);
+  assert.equal(response.cost, 0.03);
+  assert.deepEqual(response.metadata?.judgeAccounting, {
+    version: 1,
+    attempts: leaves.map((accounting) => ({ cached: false, accounting })),
+  });
+});
+
+test("nested fallback ignores cached unknown or partial coverage when live leaves are complete", async () => {
+  for (const cachedMetadata of [
+    undefined,
+    { copilot: { accounting: { ...accounting(7), status: "partial" } } },
+  ]) {
+    const live = accounting(1_000_000_000);
+    const cached = stub("cached", {
+      error: "Request timed out",
+      cached: true,
+      metadata: cachedMetadata,
+    });
+    const measured = stub("measured", { ...ok(), metadata: { copilot: { accounting: live } } });
+    const nested = fallback([cached, measured], { cooldownMs: 0 });
+    const response = await fallback([nested], { cooldownMs: 0 }).callApi("p");
+    assert.equal(response.cost, 0.01);
+    const result = response.metadata?.judgeAccounting;
+    assert.ok(
+      result &&
+        typeof result === "object" &&
+        "attempts" in result &&
+        Array.isArray(result.attempts),
+    );
+    assert.equal(result.attempts.length, 2);
+  }
+});
+
+test("nested fallback preserves permanent loading errors containing 503", async () => {
+  const measured = accounting(1_000_000_000);
+  const first = stub("accounted-load", {
+    ...failing(503),
+    metadata: { http: { status: 503 }, copilot: { accounting: measured } },
+  });
+  const untouched = stub("untouched-load", ok());
+  const outerBackup = stub("outer-load-backup", ok());
+  const middleBackup = stub("middle-load-backup", ok());
+  const inner = fallback([first, 503, untouched], { cooldownMs: 0 });
+  const middle = fallback([inner, middleBackup], { cooldownMs: 0 });
+  const response = await fallback([middle, outerBackup], { cooldownMs: 0 }).callApi("p");
+  assert.match(response.error!, /A judge must be/);
+  assert.match(response.error!, /503/);
+  assert.equal(meta(response).permanentError, true);
+  assert.equal(response.metadata?.http, undefined);
+  assert.equal(middleBackup.calls.length, 0);
+  assert.equal(outerBackup.calls.length, 0);
+  assert.equal(untouched.calls.length, 0);
+  assert.deepEqual(response.metadata?.judgeAccounting, {
+    version: 1,
+    attempts: [{ cached: false, accounting: measured }, { cached: false }],
+  });
+  assert.equal(response.cost, undefined);
+  assert.equal(response.tokenUsage?.numRequests, 2);
+  await assert.rejects(fallback([42, untouched]).callApi("p"), /A judge must be/);
 });

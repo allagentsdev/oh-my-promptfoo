@@ -11,6 +11,159 @@ const verdict = JSON.stringify({
   components: [{ metric: "accuracy", pass: true, score: 1, reason }],
 });
 
+const accounting = (totalNanoAiu: number) =>
+  ({
+    version: 1,
+    source: "session.rpc.usage.getMetrics",
+    scope: "session",
+    unit: "nano-AIU",
+    status: "complete",
+    totalNanoAiu,
+  }) as const;
+
+test("rubric retries preserve ordered accounting on success and every failure reply", async () => {
+  for (const final of [
+    { text: verdict },
+    { text: "not JSON" },
+    { text: "" },
+    { error: "Grader disconnected" },
+  ]) {
+    const first = accounting(1_000_000_000);
+    const second = accounting(2_000_000_000);
+    const result = await gradeRubric(rubric(), "sent prompt", async (attempt) => ({
+      ...(attempt === 0 ? { text: "not JSON" } : final),
+      metadata: {
+        copilot: { accounting: attempt === 0 ? first : second },
+        diagnostic: "retained",
+      },
+      // The reported session totals, not an opaque scalar, establish the unit.
+      usage: { cost: 99 },
+    }));
+    assert.deepEqual(result.metadata.judgeAccounting, {
+      version: 1,
+      attempts: [
+        { cached: false, accounting: first },
+        { cached: false, accounting: second },
+      ],
+    });
+    assert.equal(result.tokensUsed?.cost, 0.03);
+    assert.equal(result.metadata.diagnostic, "retained");
+    assert.equal(result.metadata.graderError, final.text === verdict ? undefined : true);
+  }
+});
+
+test("rubric accounting retains cached snapshots without charging them or criterion children", async () => {
+  const first = accounting(9_000_000_000);
+  const second = accounting(0);
+  const result = await gradeRubric(rubric(), "sent prompt", async (attempt) => ({
+    text: attempt === 0 ? "not JSON" : verdict,
+    cached: attempt === 0,
+    metadata: { copilot: { accounting: attempt === 0 ? first : second } },
+  }));
+  assert.deepEqual(result.metadata.judgeAccounting, {
+    version: 1,
+    attempts: [
+      { cached: true, accounting: first },
+      { cached: false, accounting: second },
+    ],
+  });
+  assert.equal(result.tokensUsed?.cost, 0);
+  assert.ok(result.componentResults.every((child) => !Object.hasOwn(child, "metadata")));
+});
+
+test("cached unknown and partial leaves do not invalidate complete executed accounting", async () => {
+  for (const cachedMetadata of [
+    undefined,
+    { copilot: { accounting: { ...accounting(7), status: "partial" } } },
+  ]) {
+    const measured = accounting(1_000_000_000);
+    const result = await gradeRubric(rubric(), "sent prompt", async (attempt) => ({
+      text: attempt === 0 ? "not JSON" : verdict,
+      cached: attempt === 0,
+      metadata: attempt === 0 ? cachedMetadata : { copilot: { accounting: measured } },
+    }));
+    assert.equal(result.pass, true);
+    assert.equal(result.tokensUsed?.cost, 0.01);
+    assert.equal(result.metadata.judgeAccounting?.attempts.length, 2);
+    assert.equal(result.metadata.judgeAccounting?.attempts[0].cached, true);
+  }
+});
+
+test("rubric scalar costs require every attempt and one complete accounting unit", async () => {
+  for (const metadata of [
+    undefined,
+    { copilot: { accounting: { ...accounting(2), status: "partial" } } },
+    { copilot: { accounting: { ...accounting(2), totalNanoAiu: -1 } } },
+    { copilot: { accounting: { ...accounting(2), unit: "USD" } } },
+  ]) {
+    const result = await gradeRubric(rubric(), "sent prompt", async (attempt) => ({
+      text: attempt === 0 ? "not JSON" : verdict,
+      metadata: attempt === 0 ? { copilot: { accounting: accounting(1_000_000_000) } } : metadata,
+      usage: { cost: 0.01 },
+    }));
+    assert.equal(result.tokensUsed?.cost, undefined);
+    assert.equal(result.metadata.judgeAccounting?.attempts.length, 2);
+  }
+  const missingNative = await gradeRubric(rubric(), "sent prompt", async (attempt) => ({
+    text: attempt === 0 ? "not JSON" : verdict,
+    usage: attempt === 0 ? { cost: 0.1 } : undefined,
+  }));
+  assert.equal(missingNative.tokensUsed?.cost, undefined);
+});
+
+test("valid session leaves retain evidence but cannot overflow a complete scalar total", async () => {
+  const leaves = [accounting(Number.MAX_SAFE_INTEGER), accounting(1)];
+  const result = await gradeRubric(rubric(), "sent prompt", async (attempt) => ({
+    text: attempt === 0 ? "not JSON" : verdict,
+    metadata: { copilot: { accounting: leaves[attempt] } },
+  }));
+  assert.equal(result.pass, true);
+  assert.equal(result.tokensUsed?.cost, undefined);
+  assert.deepEqual(result.metadata.judgeAccounting, {
+    version: 1,
+    attempts: leaves.map((accounting) => ({ cached: false, accounting })),
+  });
+});
+
+test("rubric nested accounting is authoritative, sanitized and fails closed on invalid ledgers", async () => {
+  const leaf = accounting(1_000_000_000);
+  const result = await gradeRubric(rubric(), "sent prompt", async () => ({
+    text: verdict,
+    metadata: {
+      copilot: { accounting: accounting(9_000_000_000) },
+      judgeAccounting: {
+        version: 1,
+        attempts: [{ cached: false, accounting: { ...leaf, prompt: "private" }, raw: "private" }],
+      },
+    },
+  }));
+  assert.deepEqual(result.metadata.judgeAccounting, {
+    version: 1,
+    attempts: [{ cached: false, accounting: leaf }],
+  });
+  assert.equal(result.tokensUsed?.cost, 0.01);
+  for (const judgeAccounting of [
+    { version: 2, attempts: [{ cached: false, accounting: leaf }] },
+    { version: 1, attempts: [] },
+    { version: 1, attempts: [{ cached: "false", accounting: leaf }] },
+    {
+      version: 1,
+      attempts: Array.from({ length: 1025 }, () => ({ cached: false, accounting: leaf })),
+    },
+  ]) {
+    const invalid = await gradeRubric(rubric(), "sent prompt", async () => ({
+      text: verdict,
+      metadata: { judgeAccounting },
+      usage: { cost: 99 },
+    }));
+    assert.deepEqual(invalid.metadata.judgeAccounting, {
+      version: 1,
+      attempts: [{ cached: false }],
+    });
+    assert.equal(invalid.tokensUsed?.cost, undefined);
+  }
+});
+
 test("rubric grading accepts prose and fenced JSON without a paid retry", async () => {
   for (const text of [
     `The inspection is complete.\n${verdict}\nThat is the final verdict.`,
@@ -71,7 +224,7 @@ test("the malformed-verdict retry is attempt 1, and its failure keeps the first 
   assert.equal(result.score, 0);
   assert.equal(result.reason, "Grader session disconnected");
   // Marked the way Promptfoo's llm-rubric marks a judge failure in its results.
-  assert.deepEqual(result.metadata, { graderError: true });
+  assert.equal(result.metadata.graderError, true);
   assert.deepEqual(result.tokensUsed, {
     prompt: 10,
     completion: 2,
@@ -129,23 +282,19 @@ test("unmeasured judge failures are grader errors that still count their request
     cached: 0,
     numRequests,
   });
-  assert.deepEqual(
-    await gradeRubric(rubric(), "sent prompt", async () => ({ error: "Grader session failed" })),
-    {
-      pass: false,
-      score: 0,
-      reason: "Grader session failed",
-      namedScores: {},
-      namedScoreWeights: {},
-      componentResults: [],
-      tokensUsed: unmeasured(1),
-      metadata: { graderError: true },
-    },
-  );
+  const failed = await gradeRubric(rubric(), "sent prompt", async () => ({
+    error: "Grader session failed",
+  }));
+  assert.equal(failed.pass, false);
+  assert.equal(failed.score, 0);
+  assert.equal(failed.reason, "Grader session failed");
+  assert.deepEqual(failed.componentResults, []);
+  assert.deepEqual(failed.tokensUsed, unmeasured(1));
+  assert.equal(failed.metadata.graderError, true);
   const silent = await gradeRubric(rubric(), "sent prompt", async () => ({}));
   assert.equal(silent.reason, "LLM grader returned no response text");
   assert.deepEqual(silent.tokensUsed, unmeasured(1));
-  assert.deepEqual(silent.metadata, { graderError: true });
+  assert.equal(silent.metadata.graderError, true);
 
   let attempts = 0;
   const malformed = await gradeRubric(rubric(), "sent prompt", async () => {
@@ -163,7 +312,8 @@ test("unmeasured judge failures are grader errors that still count their request
     cached: true,
   }));
   assert.deepEqual(cached.tokensUsed, unmeasured(0));
-  assert.deepEqual(cached.metadata, { graderError: true, cachedResponse: true });
+  assert.equal(cached.metadata.graderError, true);
+  assert.equal(cached.metadata.cachedResponse, true);
   const counted = await gradeRubric(rubric(), "sent prompt", async () => ({
     error: "All 3 judges failed",
     usage: { numRequests: 3 },
@@ -236,4 +386,36 @@ test("llmAssert reports usage for HTTP failures and empty billed replies", async
     numRequests: 1,
   });
   assert.equal(attempts, 5);
+});
+
+test("a retry that throws retains prior session accounting and an unknown final leaf", async () => {
+  const first = accounting(1_000_000_000);
+  const result = await gradeRubric(rubric(), "sent prompt", async (attempt) => {
+    if (attempt === 0)
+      return {
+        text: "not JSON",
+        usage: { prompt: 10, completion: 2 },
+        metadata: { copilot: { accounting: first }, diagnostic: "retained" },
+      };
+    throw new Error("Grader disconnected");
+  });
+  assert.equal(result.pass, false);
+  assert.equal(result.metadata.graderError, true);
+  assert.equal(result.metadata.diagnostic, "retained");
+  assert.equal(result.reason, "Grader disconnected");
+  assert.deepEqual(result.metadata.judgeAccounting, {
+    version: 1,
+    attempts: [{ cached: false, accounting: first }, { cached: false }],
+  });
+  assert.equal(result.tokensUsed?.cost, undefined);
+  assert.equal(result.tokensUsed?.numRequests, 2);
+  assert.equal(result.tokensUsed?.total, 12);
+  const cancelled = new DOMException("Evaluation cancelled", "AbortError");
+  await assert.rejects(
+    gradeRubric(rubric(), "sent prompt", async (attempt) => {
+      if (attempt === 0) return { text: "not JSON", metadata: { copilot: { accounting: first } } };
+      throw cancelled;
+    }),
+    (error) => error === cancelled,
+  );
 });

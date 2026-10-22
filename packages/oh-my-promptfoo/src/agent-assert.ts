@@ -4,6 +4,7 @@ import { dirname, isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { destination } from "../../workspace-core/src/config.js";
 import { type Delegate, type JsonObject, validateDelegate } from "./config.js";
+import { copilotFailure } from "./copilot-accounting.js";
 import { graderConfig } from "./grader-policy.js";
 import { jsonSafe, redact, runDelegate, secrets, wireContext } from "./protocol.js";
 import { type BatchedRubricConfig, gradeRubric, prepareRubric, render } from "./rubric-contract.js";
@@ -218,13 +219,14 @@ ${rubric.user}${fileChanges === undefined ? "" : "\n\nUntrusted evidence (JSON):
         return await gradeRubric(rubric, redact(prompt, sensitive), async () => {
           // A delegate that fails to run is a judge failure, reported as a graderError
           // result like llm-rubric's, so the row keeps its other assertion results.
+          let response: JsonObject | undefined;
           try {
             const current = await liveWorkspace();
             if (current.dev !== original.dev || current.ino !== original.ino)
               throw new Error("Agent assertion workspace is missing or already released");
             const remaining = Math.floor(deadline - performance.now());
             if (remaining <= 0) throw new Error("Agent grading exceeded execution timeoutMs");
-            const response = await runDelegate(
+            response = await runDelegate(
               {
                 version: 1,
                 type: "call",
@@ -244,34 +246,39 @@ ${rubric.user}${fileChanges === undefined ? "" : "\n\nUntrusted evidence (JSON):
               throw new Error("Agent assertion workspace is missing or already released");
             if (performance.now() > deadline)
               throw new Error("Agent grading exceeded execution timeoutMs");
-            const usage =
-              response.tokenUsage &&
-              typeof response.tokenUsage === "object" &&
-              !Array.isArray(response.tokenUsage)
-                ? (response.tokenUsage as JsonObject)
-                : {};
-            return {
-              ...(response.error !== undefined
-                ? { error: `Agent grading failed: ${redact(String(response.error), sensitive)}` }
-                : { text: typeof response.output === "string" ? response.output : undefined }),
-              ...(response.tokenUsage === undefined && response.cost === undefined
-                ? {}
-                : {
-                    usage: {
-                      prompt: usage.prompt,
-                      completion: usage.completion,
-                      total: usage.total,
-                      cached: usage.cached,
-                      numRequests: usage.numRequests,
-                      cost: response.cost,
-                    },
-                  }),
-            };
           } catch (error) {
-            return {
-              error: redact(error instanceof Error ? error.message : String(error), sensitive),
-            };
+            const message = redact(
+              error instanceof Error ? error.message : String(error),
+              sensitive,
+            );
+            response = response && copilotFailure(response, message);
+            if (!response) return { error: message };
           }
+          const usage =
+            response.tokenUsage &&
+            typeof response.tokenUsage === "object" &&
+            !Array.isArray(response.tokenUsage)
+              ? (response.tokenUsage as JsonObject)
+              : {};
+          return {
+            metadata: response.metadata,
+            cached: response.cached === true,
+            ...(response.error !== undefined
+              ? { error: `Agent grading failed: ${redact(String(response.error), sensitive)}` }
+              : { text: typeof response.output === "string" ? response.output : undefined }),
+            ...(response.tokenUsage === undefined && response.cost === undefined
+              ? {}
+              : {
+                  usage: {
+                    prompt: usage.prompt,
+                    completion: usage.completion,
+                    total: usage.total,
+                    cached: usage.cached,
+                    numRequests: usage.numRequests,
+                    cost: response.cost,
+                  },
+                }),
+          };
         });
       } finally {
         if (codexHome) await rm(codexHome, { recursive: true, force: true });

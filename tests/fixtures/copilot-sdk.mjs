@@ -1,4 +1,4 @@
-import { readFile, writeFile } from "node:fs/promises";
+import { chmod, readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 export class CopilotClient {
   constructor(options) {
@@ -6,23 +6,90 @@ export class CopilotClient {
     if (options.env.ALLAGENTS_GIT_TOKEN) throw Error("Source credential leaked");
   }
   async createSession(config) {
+    if (config.model === "fixture-create-error") {
+      this.sessionCreationFailed = true;
+      throw Error("fixture session creation failed");
+    }
     if (config.provider && typeof config.provider !== "object")
       throw Error("Endpoint must be object");
     let callback = () => {};
     const invokedSkills = [];
-    return {
-      rpc: {
-        skills: {
-          async getInvoked() {
-            return { skills: invokedSkills };
-          },
+    const rpc = {
+      skills: {
+        async getInvoked() {
+          return { skills: invokedSkills };
         },
       },
+    };
+    let scenario;
+    let settled = false;
+    let disconnected = false;
+    let unsubscribed = false;
+    let captures = 0;
+    let rejectSend;
+    return {
+      rpc,
       on(fn) {
         callback = fn;
-        return () => {};
+        return () => {
+          unsubscribed = true;
+        };
       },
       async sendAndWait({ prompt }) {
+        if (prompt.startsWith("accounting:")) {
+          scenario = JSON.parse(prompt.slice("accounting:".length));
+          if (scenario.metrics !== "unsupported") {
+            rpc.usage = {
+              async getMetrics() {
+                if (!settled || unsubscribed || disconnected || ++captures !== 1)
+                  throw Error("Metrics must be captured once after execution and before cleanup");
+                if (scenario.metrics === "hang") await new Promise(() => {});
+                if (scenario.metrics === "throw") throw Error("private telemetry failure");
+                const totals = {
+                  complete: 2_500_000_000,
+                  zero: 0,
+                  invalid: "2500000000",
+                  unsafe: Number.MAX_SAFE_INTEGER + 1,
+                  fractional: 0.5,
+                  negative: -1,
+                  nan: NaN,
+                  infinity: Infinity,
+                };
+                return {
+                  ...(scenario.metrics in totals ? { totalNanoAiu: totals[scenario.metrics] } : {}),
+                  currentModel: "fixture-current",
+                  totalPremiumRequestCost: 1.5,
+                  totalUserRequests: 2,
+                  modelMetrics: { "fixture-current": { totalNanoAiu: 9_000_000_000 } },
+                  agentMetrics: { main: { totalNanoAiu: 8_000_000_000 } },
+                  privateTelemetry: "must not escape",
+                };
+              },
+            };
+          }
+          for (const cost of scenario.eventCosts ?? [0.25, 0.5])
+            callback({ type: "assistant.usage", data: { inputTokens: 3, outputTokens: 2, cost } });
+          callback({ type: "session.usage_info", data: { totalNanoAiu: 7_000_000_000 } });
+          callback({ type: "session.shutdown", data: { totalNanoAiu: 6_000_000_000 } });
+          const content = "accounting fixture output";
+          callback({ type: "assistant.message", data: { content } });
+          if (scenario.waitForAbort) {
+            await new Promise((_, reject) => {
+              rejectSend = reject;
+              void writeFile(join(config.workingDirectory, "accounting-started"), "ready").catch(
+                reject,
+              );
+            });
+          }
+          if (scenario.mutateProtected) {
+            const target = join(config.workingDirectory, "repo/input.txt");
+            await chmod(target, 0o644);
+            await writeFile(target, "modified protected source");
+          }
+          settled = true;
+          if (scenario.executionError) throw Error("fixture execution failed");
+          return { data: { content } };
+        }
         if (prompt.includes("AGENT_ASSERT_E2E:")) {
           const requests = await Promise.all(
             ["read", "write", "shell", "url", "mcp"].map((kind) =>
@@ -146,11 +213,19 @@ export class CopilotClient {
         callback({ type: "assistant.message", data: { content } });
         return { data: { content } };
       },
-      async abort() {},
-      async disconnect() {},
+      async abort() {
+        settled = true;
+        rejectSend?.(Error("fixture execution aborted"));
+      },
+      async disconnect() {
+        disconnected = true;
+        if (scenario?.cleanupError) throw Error("fixture cleanup failed");
+      },
     };
   }
   async stop() {
+    if (this.sessionCreationFailed)
+      await writeFile(join(this.options.workingDirectory, "accounting-stopped"), "stopped");
     return [];
   }
   async forceStop() {}
