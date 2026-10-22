@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { isJudge, type Judge, type JudgeResponse, judgeName, loadJudge } from "./judge.js";
 
 export interface FallbackProviderConfig {
@@ -27,17 +28,47 @@ interface FallbackProviderOptions {
 const DEFAULT_COOLDOWN_MS = 30_000;
 
 // Promptfoo loads a grading provider afresh for each grading call, so a judge's cooldown
-// has to outlive any one instance. Shared across the ESM and CJS builds too.
-const cooldownKey = Symbol.for("oh-my-promptfoo.FallbackProvider.cooldowns");
-const shared = globalThis as typeof globalThis & { [key: symbol]: Map<string, number> | undefined };
-const cooldowns = shared[cooldownKey] ?? new Map<string, number>();
-shared[cooldownKey] = cooldowns;
+// has to outlive any one instance. Shared across the ESM and CJS builds too, along with
+// the identities given to live provider instances.
+interface SharedState {
+  cooldowns: Map<string, number>;
+  instances: WeakMap<object, string>;
+  nextInstance: number;
+}
+const stateKey = Symbol.for("oh-my-promptfoo.FallbackProvider.state");
+const shared = globalThis as typeof globalThis & { [key: symbol]: SharedState | undefined };
+const state: SharedState = shared[stateKey] ?? {
+  cooldowns: new Map(),
+  instances: new WeakMap(),
+  nextInstance: 0,
+};
+shared[stateKey] = state;
+const { cooldowns } = state;
 
-// Promptfoo's scheduler and fetch layer treat these messages as transient or rate
-// limited when a provider attaches no HTTP status (scheduler/retryPolicy.ts,
-// scheduler/types.ts and util/fetch/errors.ts in 0.124.0).
-const TRANSIENT =
-  /timeout|timed out|econnrefused|econnreset|socket hang up|eproto|bad record mac|network|\b50[234]\b|\b429\b|rate limit|too many requests|quota exceeded:/i;
+// Promptfoo 0.124.0's transient-connection check (util/fetch/errors.ts
+// isTransientConnectionError): EPROTO is permanent when paired with these TLS phrases.
+const PERMANENT_EPROTO = /wrong version number|self signed|unable to verify|unknown ca|cert/;
+
+/**
+ * Whether an error is one Promptfoo treats as transient or rate limited, for a provider
+ * that gives no HTTP status: its connection check (codes ECONNRESET and EPIPE; bad record
+ * mac, EPROTO unless permanent, ECONNRESET, socket hang up), its scheduler's retry
+ * strings (timeout, ECONNREFUSED, network, 502/503/504; scheduler/retryPolicy.ts) and its
+ * rate-limit strings (429, rate limit, too many requests; scheduler/types.ts). A quota
+ * message counts too, as a 429 does: the next judge is usually a different account.
+ */
+function transient(error: unknown): boolean {
+  const code =
+    typeof error === "object" && error !== null && "code" in error ? error.code : undefined;
+  if (code === "ECONNRESET" || code === "EPIPE") return true;
+  const message = (
+    error instanceof Error ? error.message : typeof error === "string" ? error : ""
+  ).toLowerCase();
+  if (message.includes("eproto") && PERMANENT_EPROTO.test(message)) return false;
+  return /bad record mac|eproto|econnreset|socket hang up|timeout|timed out|econnrefused|network|\b50[234]\b|\b429\b|rate limit|too many requests|quota exceeded:/.test(
+    message,
+  );
+}
 
 function httpStatus(response: JudgeResponse): number | undefined {
   const http = response.metadata?.http;
@@ -50,7 +81,7 @@ function retryable(response: JudgeResponse): boolean {
   const status = httpStatus(response);
   if (status !== undefined)
     return status === 0 || status === 408 || status === 429 || (status >= 500 && status < 600);
-  return TRANSIENT.test(response.error ?? "");
+  return transient(response.error ?? "");
 }
 
 /** `Retry-After` from the response headers, or the "retry after Ns" Promptfoo writes. */
@@ -79,9 +110,37 @@ function retryAfterMs(response: JudgeResponse): number | undefined {
   return match ? Number(match[1]) * 1000 : undefined;
 }
 
-function judgeKey(spec: unknown): string {
-  if (isJudge(spec)) return `instance:${spec.id()}`;
-  return JSON.stringify(spec);
+/**
+ * The identity a judge's cooldown is kept under. A live instance is its own identity; a
+ * `{ text: … }` map is the judge it names; any other spec is a fingerprint of the spec and
+ * the environment it loads with, so the same id under another account cools separately.
+ */
+function judgeKey(spec: unknown, env: Record<string, string> | undefined): string {
+  if (isJudge(spec)) {
+    let key = state.instances.get(spec);
+    if (!key) {
+      key = `instance:${++state.nextInstance}`;
+      state.instances.set(spec, key);
+    }
+    return key;
+  }
+  if (
+    typeof spec === "object" &&
+    spec !== null &&
+    !("id" in spec && typeof spec.id === "string") &&
+    "text" in spec &&
+    spec.text !== undefined
+  )
+    return judgeKey(spec.text, env);
+  const fingerprint = createHash("sha256")
+    .update(JSON.stringify({ spec, env: env ?? null }))
+    .digest("hex");
+  return `spec:${fingerprint}`;
+}
+
+function abortSignal(options: object | undefined): AbortSignal | undefined {
+  if (!options || !("abortSignal" in options)) return undefined;
+  return options.abortSignal instanceof AbortSignal ? options.abortSignal : undefined;
 }
 
 /**
@@ -128,8 +187,15 @@ export class FallbackProvider {
   }
 
   async callApi(prompt: string, context?: object, callOptions?: object): Promise<JudgeResponse> {
+    // A cancelled evaluation is not a judge failure: never fail over past it.
+    const signal = abortSignal(callOptions);
+    signal?.throwIfAborted();
     const now = Date.now();
-    const judges = this.providers.map((spec, index) => ({ spec, index, key: judgeKey(spec) }));
+    const judges = this.providers.map((spec, index) => ({
+      spec,
+      index,
+      key: judgeKey(spec, this.options.env),
+    }));
     let order = judges.filter(({ key }) => (cooldowns.get(key) ?? 0) <= now);
     // Every judge cooling down: try the one that recovers first rather than make no call.
     if (order.length === 0)
@@ -142,18 +208,22 @@ export class FallbackProvider {
     const usage = { total: 0, prompt: 0, completion: 0, cached: 0, numRequests: 0 };
     let cost: number | undefined;
     for (const { spec, index, key } of order) {
+      signal?.throwIfAborted();
       const judge = await this.judge(index);
       const name = judgeName(spec, judge);
       const started = performance.now();
       let response: JudgeResponse;
+      // A transient throw was classified on the error itself, code included.
+      let threwTransient = false;
       try {
         response = await judge.callApi(prompt, context, callOptions);
       } catch (error) {
+        signal?.throwIfAborted();
         // A judge that throws is misconfigured (no key, unknown id) unless the throw is
         // itself a transient transport failure.
-        const message = error instanceof Error ? error.message : String(error);
-        if (!TRANSIENT.test(message)) throw error;
-        response = { error: message };
+        if (!transient(error)) throw error;
+        threwTransient = true;
+        response = { error: error instanceof Error ? error.message : String(error) };
       }
       const tokens = response.tokenUsage ?? {};
       for (const field of ["total", "prompt", "completion", "cached"] as const) {
@@ -172,7 +242,9 @@ export class FallbackProvider {
         cached: response.cached === true,
         latencyMs: Math.round(performance.now() - started),
       });
-      if (response.error && retryable(response)) {
+      if (threwTransient || (response.error && retryable(response))) {
+        // A failure caused by the caller's cancellation neither cools the judge nor moves on.
+        signal?.throwIfAborted();
         const coolFor = Math.max(this.cooldownMs, retryAfterMs(response) ?? 0);
         if (coolFor > 0) cooldowns.set(key, Date.now() + coolFor);
         continue;

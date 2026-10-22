@@ -355,3 +355,104 @@ test("native llm-rubric grades through FallbackProvider", async () => {
   assert.equal(result.tokensUsed?.prompt, 11);
   assert.equal(result.tokensUsed?.completion, 3);
 });
+
+test("a cancelled evaluation propagates instead of failing over", async () => {
+  const aborted = new AbortController();
+  aborted.abort(new Error("eval cancelled"));
+  const untouched = stub("untouched", ok());
+  await expect(
+    fallback([untouched]).callApi("p", undefined, { abortSignal: aborted.signal }),
+  ).rejects.toThrow("eval cancelled");
+  assert.equal(untouched.calls.length, 0);
+
+  const during = new AbortController();
+  const primary = stub("cancelled", () => {
+    during.abort(new Error("eval cancelled mid-call"));
+    throw new DOMException("The operation was aborted due to timeout", "TimeoutError");
+  });
+  const secondary = stub("never", ok());
+  await expect(
+    fallback([primary, secondary]).callApi("p", undefined, { abortSignal: during.signal }),
+  ).rejects.toThrow("eval cancelled mid-call");
+  assert.equal(secondary.calls.length, 0);
+
+  const returned = new AbortController();
+  const status0 = stub("status0", () => {
+    returned.abort(new Error("eval cancelled after reply"));
+    return failing(0);
+  });
+  const after = stub("after", ok());
+  await expect(
+    fallback([status0, after]).callApi("p", undefined, { abortSignal: returned.signal }),
+  ).rejects.toThrow("eval cancelled after reply");
+  assert.equal(after.calls.length, 0);
+  // The cancelled judge was not put in cooldown: a later run tries it first.
+  const again = await fallback([status0, after]).callApi("p");
+  assert.equal(status0.calls.length, 2);
+  assert.equal(meta(again).attempts[0]?.provider, status0.id());
+});
+
+test("a judge's own timeout fails over while the caller's signal is live", async () => {
+  const live = new AbortController();
+  const timedOut = stub("own-timeout", () => {
+    throw new DOMException("The operation was aborted due to timeout", "TimeoutError");
+  });
+  const backup = stub("backup", ok("backup"));
+  const response = await fallback([timedOut, backup], { cooldownMs: 0 }).callApi("p", undefined, {
+    abortSignal: live.signal,
+  });
+  assert.equal(response.output, "backup");
+});
+
+test("transient errors are classified as Promptfoo classifies them", async () => {
+  const brokenPipe = stub("epipe", () => {
+    throw Object.assign(new Error("write failed"), { code: "EPIPE" });
+  });
+  const backup = stub("backup", ok("backup"));
+  assert.equal(
+    (await fallback([brokenPipe, backup], { cooldownMs: 0 }).callApi("p")).output,
+    "backup",
+  );
+
+  const certificate = stub("tls", () => {
+    throw new Error("write EPROTO: self signed certificate in certificate chain");
+  });
+  const unused = stub("unused", ok());
+  await expect(fallback([certificate, unused]).callApi("p")).rejects.toThrow("self signed");
+  assert.equal(unused.calls.length, 0);
+
+  const wrongVersion = stub("tls-reply", { error: "EPROTO wrong version number" });
+  const response = await fallback([wrongVersion, unused]).callApi("p");
+  assert.equal(response.error, "EPROTO wrong version number");
+  assert.equal(unused.calls.length, 0);
+});
+
+test("cooldowns are kept per judge identity, not per provider id", async () => {
+  // Two live instances that share an id are different judges.
+  const shared = unique("same-id");
+  const make = (reply: () => Reply) => ({ id: () => shared, callApi: async () => reply() });
+  const limited = make(() => failing(429));
+  const healthy = make(() => ok("healthy"));
+  const first = await fallback([limited, healthy], { cooldownMs: 60_000 }).callApi("p");
+  assert.equal(first.output, "healthy");
+  const second = await fallback([healthy], { cooldownMs: 60_000 }).callApi("p");
+  assert.equal(second.output, "healthy");
+  assert.equal(meta(second).attempts.length, 1);
+  // The backup's success did not clear the primary's cooldown.
+  const third = await fallback([limited, healthy], { cooldownMs: 60_000 }).callApi("p");
+  assert.equal(meta(third).attempts.length, 1);
+
+  // The same spec loaded under another environment is another account's judge.
+  const judge = join(import.meta.dir, "fixtures", "fallback-judge.mjs");
+  const spec = { id: `file://${judge}`, label: unique("env-judge"), config: { fail: 429 } };
+  const withEnv = (account: string) =>
+    new FallbackProvider({
+      config: { providers: [spec, stub("env-backup", ok("backup"))], cooldownMs: 60_000 },
+      env: { ACCOUNT: account },
+    });
+  await withEnv("a").callApi("p");
+  const otherAccount = await withEnv("b").callApi("p");
+  assert.equal(meta(otherAccount).attempts[0]?.provider, spec.label);
+  const sameAccount = await withEnv("a").callApi("p");
+  assert.notEqual(meta(sameAccount).attempts[0]?.provider, spec.label);
+});

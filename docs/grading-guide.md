@@ -155,14 +155,17 @@ for why the judge works this way.
   any 5xx, or 0 (Promptfoo's code for network failures and timeouts). A 429
   counts whether it is a rate limit or an exhausted quota, because the next
   judge is usually a different account. For a provider that attaches no HTTP
-  status, the error message decides: timeouts, connection resets and refusals,
-  socket and TLS errors, network errors, 502/503/504, 429 and rate-limit or
-  quota messages move on.
+  status, the error is classified the way Promptfoo classifies it: broken
+  pipes and connection resets (by error code too), timeouts, refused
+  connections, socket hang-ups, transient TLS errors (but not certificate or
+  protocol-version failures, which are permanent), network errors,
+  502/503/504, 429 and rate-limit or quota messages move on.
 - **When it stops.** On a good reply, or on any other error (400, 401, 403,
   404, 422, a content filter), which it returns as the answer. A misconfigured
   primary should be visible, not quietly covered by the next judge. A judge
   that throws (missing credentials, unknown id) is re-thrown, unless its
-  message is one of the transient errors above.
+  error is one of the transient errors above. A cancelled evaluation is
+  re-thrown too: it never moves on to the next judge or cools a judge down.
 - **Retries.** Each judge is called once per request and keeps its own
   retries, so attempts don't multiply. `FallbackProvider` declares
   `handlesOwnRetries`, so Promptfoo's scheduler doesn't re-run the whole chain
@@ -170,10 +173,12 @@ for why the judge works this way.
 - **Cooldown.** A judge that failed retryably is skipped by later requests in
   the same process for `cooldownMs` (default 30,000 ms) or for the judge's
   `Retry-After`, whichever is longer, so `cooldownMs: 0` leaves only the
-  `Retry-After`. Without this, every row
-  in a rate-limit storm would wait through the primary's backoff first. If
-  every judge is cooling down, it tries the one whose cooldown ends first. A
-  success clears that judge's cooldown.
+  `Retry-After`. Without this, every row in a rate-limit storm would wait
+  through the primary's backoff first. A cooldown belongs to that judge as
+  configured, including its environment, so the same provider id under another
+  account or another provider instance is not skipped. If every judge is
+  cooling down, it tries the one whose cooldown ends first. A success clears
+  that judge's cooldown.
 - **Result.** The answering judge's reply, with token usage and cost summed
   over every attempt, and `metadata.fallback`: `answeredBy` (the judge's label,
   or its id) and `attempts`, one `{ provider, status, error, cached,
