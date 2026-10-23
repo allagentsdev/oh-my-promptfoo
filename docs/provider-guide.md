@@ -98,10 +98,12 @@ provider authentication.
 Provider config is closed: only `delegate`, `workspace`, `workspaceTimeoutMs`, `workingDir`, `fileChanges`, and `timeoutMs` are accepted. The delegates are exactly `openai:codex-sdk`, `anthropic:claude-agent-sdk`, `copilot-sdk`, and `pi-sdk`. Prompt-level config can change allowed `delegate.config` fields only. Delegate-level working directories, sessions, executable overrides, discovery, arbitrary native passthroughs, environment inheritance, acquisition variables, and cache controls are rejected. The wrapper forces execution and rejects cached responses. Use explicit `delegate.env` for model credentials.
 
 Promptfoo forwards the judge selected by `--grader`, `defaultTest.options.provider`,
-or a test's `options.provider` into `context.prompt.config.provider`. The workspace
-provider ignores only this reserved grading metadata when validating generation
-overrides; it does not select or configure the generation delegate. The caller's
-context, including `context.test.options.provider`, is left unchanged for grading.
+or a test's `options.provider` into `context.prompt.config.provider`. It also
+forwards native `llm-rubric` templates from `defaultTest.options.rubricPrompt` or a
+test's `options.rubricPrompt`. The workspace provider ignores these two grading-only
+fields when validating generation overrides; neither configures the generation
+delegate. The caller's context is left unchanged for grading, so a shared native
+rubric can live once in `defaultTest.options` instead of on every assertion.
 All other non-undefined prompt-config root keys except `delegate` remain rejected,
 and `delegate.config.timeoutMs` remains constructor-only.
 

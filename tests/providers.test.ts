@@ -327,7 +327,15 @@ describe("closed configuration", () => {
     ])
       expect(() =>
         promptConfig(
-          { prompt: { config: { provider: "openai:grader-model", ...override } } },
+          {
+            prompt: {
+              config: {
+                provider: "openai:grader-model",
+                rubricPrompt: "Candidate: {{output}} Criterion: {{rubric}}",
+                ...override,
+              },
+            },
+          },
           "openai:codex-sdk",
           {},
         ),
@@ -917,14 +925,19 @@ describe("workspace provider publication and lifetime", () => {
       const { provider } = await workspaceProvider(false, readOnly, "repo");
       try {
         const grader = "openai:grader-model";
+        const rubricPrompt = "Candidate: {{output}} Criterion: {{rubric}}";
         const context = {
-          prompt: { config: { provider: grader, delegate: { config: { model: "override" } } } },
-          test: { options: { provider: grader } },
+          prompt: {
+            config: { provider: grader, rubricPrompt, delegate: { config: { model: "override" } } },
+          },
+          test: { options: { provider: grader, rubricPrompt } },
         };
         const result = await provider.callApi(readOnly ? "success" : "write", context);
         expect(result.error).toBeUndefined();
         expect(context.prompt.config.provider).toBe(grader);
         expect(context.test.options.provider).toBe(grader);
+        expect(context.prompt.config.rubricPrompt).toBe(rubricPrompt);
+        expect(context.test.options.rubricPrompt).toBe(rubricPrompt);
         expect((result.metadata as any).options.options.config.model).toBe("override");
         const root = (result.metadata as any).workspace.path as string;
         expect((result.metadata as any).options.options.config.working_dir).toBe(
