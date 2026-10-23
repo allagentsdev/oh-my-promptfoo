@@ -51,7 +51,7 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 async function temporary(): Promise<string> {
-  const root = await mkdtemp(join(realpathSync(tmpdir()), "allagents-source-test-"));
+  const root = await mkdtemp(join(realpathSync.native(tmpdir()), "allagents-source-test-"));
   roots.push(root);
   return root;
 }
@@ -906,11 +906,11 @@ test("source cancellation terminates a spawned descendant before it can write", 
 
 test("private acquisition recovery removes only marked dead credential directories", async () => {
   const identity = await processIdentity();
-  const dead = await mkdtemp(join(realpathSync(tmpdir()), "allagents-acquisition-"));
+  const dead = await mkdtemp(join(realpathSync.native(tmpdir()), "allagents-acquisition-"));
   roots.push(dead);
-  const live = await mkdtemp(join(realpathSync(tmpdir()), "allagents-acquisition-"));
+  const live = await mkdtemp(join(realpathSync.native(tmpdir()), "allagents-acquisition-"));
   roots.push(live);
-  const malformed = await mkdtemp(join(realpathSync(tmpdir()), "allagents-acquisition-"));
+  const malformed = await mkdtemp(join(realpathSync.native(tmpdir()), "allagents-acquisition-"));
   roots.push(malformed);
   await atomicJson(join(dead, ".allagents-owner.json"), {
     schemaVersion: 1,

@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { copyFile, link, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { resolve as resolveImport } from "import-meta-resolve";
@@ -8,8 +8,10 @@ import { describe, expect, test } from "vitest";
 
 const fakeNpm = `#!/usr/bin/env node
 const {readFileSync,writeFileSync}=require('node:fs');
-const args=process.argv.slice(2);
-if(args[0]==='--fixture-probe'){console.log('allagents-fake-npm');process.exit(0);}
+const {basename}=require('node:path');
+// On Windows a copied node.exe runs as npm.exe and loads the subcommand-named entry file.
+const args=process.platform==='win32'?[basename(process.argv[1]),...process.argv.slice(2)]:process.argv.slice(2);
+if(args[0]==='fixture-probe'){console.log('allagents-fake-npm');process.exit(0);}
 const file=process.env.FAKE_REGISTRY_FILE;
 const state=JSON.parse(readFileSync(file,'utf8'));
 if(args[0]==='view'&&state.indexDelay>0){
@@ -62,11 +64,12 @@ async function fixture() {
     `let elapsed=0;const now=Date.now;Date.now=()=>now()+elapsed;require('node:timers/promises').setTimeout=async delay=>{if(typeof delay!=='number')throw Error('Unexpected publisher sleep');elapsed+=delay;};require('node:module').syncBuiltinESMExports();`,
   );
   if (process.platform === "win32") {
-    await writeFile(join(root, "bin", "npm.js"), fakeNpm);
-    await writeFile(
-      join(root, "bin", "npm.cmd"),
-      `@echo off\r\n"${process.execPath}" "%~dp0npm.js" %*\r\n`,
-    );
+    // Node cannot spawn .cmd shims without a shell. A copied node.exe resolves through
+    // PATH as npm.exe and runs the entry file named by the subcommand in its cwd.
+    const npm = join(root, "bin", "npm.exe");
+    await link(process.execPath, npm).catch(() => copyFile(process.execPath, npm));
+    for (const entry of ["fixture-probe", "view", join("packages", "oh-my-promptfoo", "publish")])
+      await writeFile(join(root, entry), fakeNpm);
   } else {
     await writeFile(join(root, "bin", "npm"), fakeNpm, { mode: 0o755 });
   }
@@ -100,7 +103,7 @@ function run(
     FAKE_REGISTRY_FILE: f.registry,
     FAKE_REGISTRY_MODE: options.mode ?? "",
   });
-  const probe = spawnSync("npm", ["--fixture-probe"], { cwd: f.root, encoding: "utf8", env });
+  const probe = spawnSync("npm", ["fixture-probe"], { cwd: f.root, encoding: "utf8", env });
   if (probe.status !== 0 || probe.stdout.trim() !== "allagents-fake-npm")
     throw new Error("Fake npm shim was not selected; refusing to run release script");
   return spawnSync(

@@ -53,7 +53,7 @@ test("unsafe arithmetic cannot silently produce an unbounded admission budget", 
 });
 
 test("shared controlled budget rejects an oversized write before creating its inode", async () => {
-  const root = await mkdtemp(join(realpathSync(tmpdir()), "allagents-acquisition-budget-"));
+  const root = await mkdtemp(join(realpathSync.native(tmpdir()), "allagents-acquisition-budget-"));
   try {
     const maximum = controlledAcquisitionPhysicalReservation(limits);
     const writer = await PhysicalWriter.create(root, maximum);

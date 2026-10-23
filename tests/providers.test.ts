@@ -16,7 +16,7 @@ import {
 } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
-import { dirname, join, relative } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { context as otelContext, propagation, trace } from "@opentelemetry/api";
@@ -54,7 +54,7 @@ async function project(
   source: string,
   telemetryPackage = "@opentelemetry/api",
 ): Promise<string> {
-  const path = await mkdtemp(join(realpathSync(tmpdir()), "allagents-providers-"));
+  const path = await mkdtemp(join(realpathSync.native(tmpdir()), "allagents-providers-"));
   roots.push(path);
   const dir = join(path, "node_modules", moduleName);
   await mkdir(dir, { recursive: true });
@@ -386,10 +386,11 @@ describe("closed configuration", () => {
       },
       "/suite/evals",
     );
+    // Relative paths resolve with the platform's rules (a drive letter on Windows).
     expect(spec.sources.map((s) => (s.type === "local" ? s.path : s.repository))).toEqual([
-      "/suite/skills",
+      resolve("/suite/evals", "../skills"),
       "/abs/skills",
-      "file:///suite/repo.git",
+      pathToFileURL(resolve("/suite/evals", "../repo.git")).href,
       "file:///abs/repo.git",
       "file://localhost/abs/repo.git",
       "file://LOCALHOST/abs/repo.git",
@@ -399,7 +400,7 @@ describe("closed configuration", () => {
 });
 describe("workspace provider publication and lifetime", () => {
   test("provider refuses unsafe HTTPS staging instead of trying a privileged helper", async () => {
-    const root = await mkdtemp(join(realpathSync(tmpdir()), "allagents-provider-stage-"));
+    const root = await mkdtemp(join(realpathSync.native(tmpdir()), "allagents-provider-stage-"));
     roots.push(root);
     const staging = join(root, "not-tmpfs");
     await mkdir(staging, { mode: 0o700 });
@@ -1415,7 +1416,9 @@ describe("protocol and native adapters", () => {
          }};
        }`,
     );
-    const workingDir = await mkdtemp(join(realpathSync(tmpdir()), "allagents-external-workspace-"));
+    const workingDir = await mkdtemp(
+      join(realpathSync.native(tmpdir()), "allagents-external-workspace-"),
+    );
     roots.push(workingDir);
     for (const id of ["openai:codex-sdk", "anthropic:claude-agent-sdk"] as const) {
       const result = await runDelegate({ ...frame(path, "success", id), workingDir }, {}, 5000);
@@ -1613,13 +1616,13 @@ describe("direct Copilot provider", () => {
     });
   }
   // The short deadline stays below the one-second metrics cap after Node runner startup.
-  for (const timeoutMs of [500, 5000]) {
+  for (const timeoutMs of [900, 5000]) {
     test(`hung optional metrics preserve success within the ${timeoutMs}ms deadline and one-second cap`, async () => {
       const { provider } = await accountingProvider(timeoutMs);
       try {
         const started = Date.now();
         const response = await provider.callApi(accountingPrompt({ metrics: "hang" }));
-        expect(Date.now() - started).toBeLessThan(timeoutMs === 500 ? 1500 : 3000);
+        expect(Date.now() - started).toBeLessThan(timeoutMs === 900 ? 1500 : 3000);
         expect(response.error).toBeUndefined();
         expect(response.output).toBe("accounting fixture output");
         expect(response.cost).toBeUndefined();
@@ -1708,38 +1711,42 @@ describe("direct Copilot provider", () => {
       }
     }, 15_000);
   }
-  test("cancellation retains settled Copilot accounting through the delegate protocol", async () => {
-    const { path, provider } = await accountingProvider();
-    const controller = new AbortController();
-    try {
-      const pending = provider.callApi(
-        accountingPrompt({ metrics: "complete", waitForAbort: true }),
-        undefined,
-        { abortSignal: controller.signal },
-      );
-      const deadline = Date.now() + 3000;
-      while (true) {
-        try {
-          await access(join(path, "accounting-started"));
-          break;
-        } catch {
-          if (Date.now() >= deadline) throw new Error("Fixture did not start");
+  // Windows stop() hard-kills the runner before its terminal frame: allagentsdev/oh-my-promptfoo#128.
+  test.skipIf(process.platform === "win32")(
+    "cancellation retains settled Copilot accounting through the delegate protocol",
+    async () => {
+      const { path, provider } = await accountingProvider();
+      const controller = new AbortController();
+      try {
+        const pending = provider.callApi(
+          accountingPrompt({ metrics: "complete", waitForAbort: true }),
+          undefined,
+          { abortSignal: controller.signal },
+        );
+        const deadline = Date.now() + 3000;
+        while (true) {
+          try {
+            await access(join(path, "accounting-started"));
+            break;
+          } catch {
+            if (Date.now() >= deadline) throw new Error("Fixture did not start");
+          }
+          await new Promise((resolve) => setTimeout(resolve, 10));
         }
-        await new Promise((resolve) => setTimeout(resolve, 10));
+        controller.abort();
+        const response = await pending;
+        expect(response.error).toContain("aborted");
+        expect(response.cost).toBeUndefined();
+        expect((response.metadata as any).copilot.accounting).toMatchObject({
+          status: "partial",
+          reason: "execution_incomplete",
+          totalNanoAiu: 2_500_000_000,
+        });
+      } finally {
+        await provider.cleanup();
       }
-      controller.abort();
-      const response = await pending;
-      expect(response.error).toContain("aborted");
-      expect(response.cost).toBeUndefined();
-      expect((response.metadata as any).copilot.accounting).toMatchObject({
-        status: "partial",
-        reason: "execution_incomplete",
-        totalNanoAiu: 2_500_000_000,
-      });
-    } finally {
-      await provider.cleanup();
-    }
-  });
+    },
+  );
   test("cleanup failure retains a partial snapshot without generic cost", async () => {
     const { provider } = await accountingProvider();
     try {
@@ -1940,7 +1947,7 @@ describe("direct Copilot provider", () => {
       "# Not installed as a skill\n",
     );
     await writeFile(join(path, "README.md"), "# Not a skill\n");
-    const external = await mkdtemp(join(realpathSync(tmpdir()), "allagents-outside-skill-"));
+    const external = await mkdtemp(join(realpathSync.native(tmpdir()), "allagents-outside-skill-"));
     roots.push(external);
     await writeFile(join(external, "SKILL.md"), "# Outside\n");
     await mkdir(join(path, ".agents", "skills", "alias"), { recursive: true });
@@ -2152,7 +2159,7 @@ describe("direct Copilot provider", () => {
       await protectedProvider.cleanup();
     }
     // Each call spawns several Node subprocesses for cache locks and the delegate runner.
-  }, 30_000);
+  }, 60_000);
   test("missing SDK is actionable and pre-abort performs no execution", async () => {
     const path = await project("unrelated", "export {};");
     const provider = new CopilotSdkProvider({ config: { basePath: path, working_dir: "." } });

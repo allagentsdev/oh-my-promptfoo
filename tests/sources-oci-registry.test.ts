@@ -101,7 +101,7 @@ async function registry(
 real(
   "real ORAS 1.x resolves authenticated disposable registry tag and verifies exact binary files",
   async () => {
-    const root = await mkdtemp(join(realpathSync(tmpdir()), "allagents-real-registry-"));
+    const root = await mkdtemp(join(realpathSync.native(tmpdir()), "allagents-real-registry-"));
     const auth = Buffer.from("fixture:private-fixture-password").toString("base64");
     const fixture = await registry({ auth });
     try {
@@ -138,7 +138,7 @@ real(
 );
 
 real("real ORAS declared overflow preflight sends no blob request", async () => {
-  const root = await mkdtemp(join(realpathSync(tmpdir()), "allagents-real-registry-"));
+  const root = await mkdtemp(join(realpathSync.native(tmpdir()), "allagents-real-registry-"));
   const fixture = await registry({ declaredSize: 100000 });
   try {
     const stage = join(root, "stage");
@@ -167,7 +167,7 @@ real("real ORAS declared overflow preflight sends no blob request", async () => 
 });
 
 real("real ORAS lying registry stream exceeds declared bytes and leaves no file", async () => {
-  const root = await mkdtemp(join(realpathSync(tmpdir()), "allagents-real-registry-"));
+  const root = await mkdtemp(join(realpathSync.native(tmpdir()), "allagents-real-registry-"));
   const fixture = await registry({ declaredSize: 2, stream: Buffer.alloc(1024 * 1024, 1) });
   try {
     const stage = join(root, "stage");

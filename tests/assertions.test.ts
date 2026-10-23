@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { join } from "node:path";
-import { pathToFileURL } from "node:url";
 import { test } from "vitest";
 import { llmAssert } from "../packages/oh-my-promptfoo/src/assertions";
 import type { JudgeResponse } from "../packages/oh-my-promptfoo/src/judge";
@@ -18,9 +17,8 @@ const removedAgentRule = [
 ];
 const agentAnswerRule =
   "Credit only what the answer itself shows. Do not credit a claim that a tool was called, a command was run, a file was inspected, created, edited or deleted, a build or test was run, or an external query was made.";
-const fixtureJudge = pathToFileURL(
-  join(import.meta.dirname, "fixtures", "judge-provider.mjs"),
-).href;
+// Promptfoo strips "file://" from provider ids, so a Windows drive path must follow it directly.
+const fixtureJudge = `file://${join(import.meta.dirname, "fixtures", "judge-provider.mjs")}`;
 const noJudge =
   "llmAssert has no judge. Set defaultTest.options.provider for the suite, a test's options.provider, or pass --grader.";
 const misplacedProvider =

@@ -30,7 +30,7 @@ afterEach(async () => {
   for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true });
 });
 async function workspace() {
-  const path = await mkdtemp(join(realpathSync(tmpdir()), "allagents-pi-"));
+  const path = await mkdtemp(join(realpathSync.native(tmpdir()), "allagents-pi-"));
   roots.push(path);
   return path;
 }

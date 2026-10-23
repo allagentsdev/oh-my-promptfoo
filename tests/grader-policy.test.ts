@@ -21,7 +21,7 @@ async function withReadPolicy(
     call: (delegate: CallFrame["delegate"], model?: string) => Promise<Record<string, unknown>>;
   }) => Promise<void>,
 ) {
-  const root = await mkdtemp(join(realpathSync(tmpdir()), "allagents-read-policy-"));
+  const root = await mkdtemp(join(realpathSync.native(tmpdir()), "allagents-read-policy-"));
   const workspace = join(root, "candidate.with.dots");
   const outside = join(root, "private");
   const protectedRoot = join(root, "protected");
