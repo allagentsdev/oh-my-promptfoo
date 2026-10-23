@@ -1,5 +1,7 @@
 import { createRequire } from "node:module";
 import {
+  addCompletionDetails,
+  type CompletionDetails,
   JudgeAccountingCollector,
   type JudgeAccountingLedger,
   JudgeFailureContext,
@@ -240,6 +242,7 @@ export interface GraderUsage {
   cached?: unknown;
   numRequests?: unknown;
   cost?: unknown;
+  completionDetails?: unknown;
 }
 
 /** One judge reply, as the caller's request function reports it. */
@@ -393,6 +396,8 @@ export interface RubricTokenUsage {
   cached: number;
   numRequests: number;
   cost?: number;
+  /** Summed judge `completionDetails`, prompt-cache reads and writes included. */
+  completionDetails?: CompletionDetails;
 }
 
 /** The assertion result Promptfoo records for one batched grading. */
@@ -551,7 +556,9 @@ function summarizeUsage(usages: GraderUsage[], cost?: number): RubricTokenUsage 
   let totalTokens = 0;
   let cachedTokens = 0;
   let measuredTokens = false;
+  let details: CompletionDetails | undefined;
   for (const usage of usages) {
+    details = addCompletionDetails(details, usage.completionDetails);
     const prompt = tokenCount(usage.prompt);
     const completion = tokenCount(usage.completion);
     const total =
@@ -573,5 +580,6 @@ function summarizeUsage(usages: GraderUsage[], cost?: number): RubricTokenUsage 
     cached: cachedTokens,
     numRequests: requestCount(usages),
     ...(cost === undefined ? {} : { cost }),
+    ...(details ? { completionDetails: details } : {}),
   };
 }

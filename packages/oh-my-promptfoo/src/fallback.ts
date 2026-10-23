@@ -2,6 +2,8 @@ import { createHash } from "node:crypto";
 import { resolve } from "node:path";
 import { isJudge, type Judge, type JudgeResponse, judgeName, loadJudge } from "./judge.js";
 import {
+  addCompletionDetails,
+  type CompletionDetails,
   JudgeAccountingCollector,
   JudgeFailureContext,
   judgeFailureMessage,
@@ -235,7 +237,14 @@ export class Fallback {
         ),
       ];
     const attempts: FallbackAttempt[] = [];
-    const usage = { total: 0, prompt: 0, completion: 0, cached: 0, numRequests: 0 };
+    const usage: {
+      total: number;
+      prompt: number;
+      completion: number;
+      cached: number;
+      numRequests: number;
+      completionDetails?: CompletionDetails;
+    } = { total: 0, prompt: 0, completion: 0, cached: 0, numRequests: 0 };
     const accounting = new JudgeAccountingCollector();
     let lastMetadata: JudgeResponse["metadata"];
     for (const { spec, index, key } of order) {
@@ -282,6 +291,8 @@ export class Fallback {
         const value = tokens[field];
         if (typeof value === "number" && Number.isFinite(value)) usage[field] += value;
       }
+      const details = addCompletionDetails(usage.completionDetails, tokens.completionDetails);
+      if (details) usage.completionDetails = details;
       usage.numRequests +=
         typeof tokens.numRequests === "number" ? tokens.numRequests : response.cached ? 0 : 1;
       accounting.record(response.metadata, response.cached, response.cost);

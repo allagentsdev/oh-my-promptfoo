@@ -275,6 +275,7 @@ ${rubric.user}${fileChanges === undefined ? "" : "\n\nUntrusted evidence (JSON):
                     total: usage.total,
                     cached: usage.cached,
                     numRequests: usage.numRequests,
+                    completionDetails: usage.completionDetails,
                     cost: response.cost,
                   },
                 }),

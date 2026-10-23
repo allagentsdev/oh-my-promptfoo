@@ -167,18 +167,28 @@ response cache, and `cached` equals its total tokens. Such a reply
 ### Formula
 
 For one reply, or one assertion's summed judge usage, take `prompt` and
-`completion`, the cache reads $R$ (`cacheReadInputTokens`, 0 when absent) and, when
-reported, the cache writes $W$ (`cacheCreationInputTokens`). When the API reports
-cache writes:
+`completion`, the cache reads $R$ (`cacheReadInputTokens`, 0 when absent) and the
+cache writes $W$ (`cacheCreationInputTokens`). Count cache writes as reported only
+when $W > 0$:
 
 $$\text{credits} = \frac{W \times \texttt{cacheWritePrice} + R \times \texttt{cacheReadPrice} + (\text{prompt} - R - W) \times \texttt{inputPrice} + \text{completion} \times \texttt{outputPrice}}{\texttt{batchSize}}$$
 
-When it reports no cache writes, every uncached prompt token is priced as a cache
-write:
+When $W$ is absent or 0, every uncached prompt token ($\text{prompt} - R$) is
+priced at `cacheWritePrice`:
 
 $$\text{credits} = \frac{(\text{prompt} - R) \times \texttt{cacheWritePrice} + R \times \texttt{cacheReadPrice} + \text{completion} \times \texttt{outputPrice}}{\texttt{batchSize}}$$
 
 $$\text{USD} = \text{credits} \times 0.01$$
+
+A zero $W$ is treated as unreported because Promptfoo 0.124.1 zero-fills
+`cacheCreationInputTokens` on a candidate row's `tokenUsage`, so a 0 there cannot
+be told apart from a count the API never reported.
+
+Batched `llmAssert` judges carry their summed cache reads and writes in the
+assertion's `tokensUsed.completionDetails` from this release, across every judge
+attempt, retry and `Fallback` leaf; a field is absent only when no attempt
+reported it. Earlier releases dropped them, which priced a batched judge's whole
+prompt at `cacheWritePrice`.
 
 Copilot reports nearly all uncached input as cache creation, so with reported
 writes the remainder priced at `inputPrice` is small, and without them pricing
