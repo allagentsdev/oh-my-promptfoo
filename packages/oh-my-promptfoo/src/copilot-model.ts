@@ -54,22 +54,29 @@ export interface CopilotTokenPrices {
   longContext?: CopilotTokenPriceTier;
 }
 
+/**
+ * `metadata.copilotEndpoint`: the Copilot API that served the reply, which fixes how its
+ * `tokenUsage` counts tokens.
+ */
+export type CopilotModelEndpoint = "responses" | "chat/completions" | "messages";
+
 /** The native Promptfoo provider that performs inference with discovered credentials. */
-export interface NativeResponsesProvider extends Judge {
+export interface NativeProvider extends Judge {
   cleanup?(): unknown;
 }
 
 /** @internal Seams that keep lifecycle tests free of the SDK and of model calls. */
 export interface CopilotModelDependencies {
   createEndpointClient?: () => CopilotEndpointClient;
-  loadProvider?: (id: string, context: { options: object }) => Promise<NativeResponsesProvider>;
+  loadProvider?: (id: string, context: { options: object }) => Promise<NativeProvider>;
   now?: () => number;
 }
 
 type ProviderReply = JudgeResponse & Record<string, unknown>;
 
 interface Generation {
-  provider: NativeResponsesProvider;
+  provider: NativeProvider;
+  endpoint: CopilotModelEndpoint;
   prices?: CopilotTokenPrices;
   refreshAt: number;
   active: number;
@@ -127,16 +134,35 @@ export function copilotModelConfig(input: unknown): Readonly<CopilotModelConfig>
   });
 }
 
+const describe = (value: unknown) => (typeof value === "string" ? JSON.stringify(value) : "none");
+
+/** The Copilot API a discovery snapshot describes; anything but the three HTTP APIs is rejected. */
+function endpointOf(snapshot: CopilotEndpoint, model: string): CopilotModelEndpoint {
+  const { type, wireApi, transport } = (snapshot ?? {}) as Partial<CopilotEndpoint>;
+  let endpoint: CopilotModelEndpoint | undefined;
+  if (transport === undefined || transport === "http") {
+    if (type === "openai" && (wireApi === undefined || wireApi === "responses"))
+      endpoint = "responses";
+    else if (type === "openai" && wireApi === "completions") endpoint = "chat/completions";
+    else if (type === "anthropic" && wireApi === undefined) endpoint = "messages";
+  }
+  if (!endpoint)
+    throw new Error(
+      `Copilot serves ${model} over an unsupported API (type ${describe(type)}, wireApi ${describe(wireApi)}, transport ${describe(transport)}); CopilotModel supports OpenAI Responses, OpenAI Chat Completions and Anthropic Messages over HTTP.`,
+    );
+  return endpoint;
+}
+
+interface Connection {
+  endpoint: CopilotModelEndpoint;
+  headers: Record<string, string>;
+  refreshAt: number;
+}
+
 /** Validate a discovery snapshot and build its request headers and refresh deadline. */
-function connection(
-  snapshot: CopilotEndpoint,
-  model: string,
-  now: () => number,
-): { headers: Record<string, string>; refreshAt: number } {
+function connection(snapshot: CopilotEndpoint, model: string, now: () => number): Connection {
+  const endpoint = endpointOf(snapshot, model);
   if (
-    snapshot?.type !== "openai" ||
-    (snapshot.wireApi !== undefined && snapshot.wireApi !== "responses") ||
-    (snapshot.transport !== undefined && snapshot.transport !== "http") ||
     typeof snapshot.baseUrl !== "string" ||
     !snapshot.baseUrl ||
     (snapshot.apiKey !== undefined && (typeof snapshot.apiKey !== "string" || !snapshot.apiKey)) ||
@@ -144,7 +170,21 @@ function connection(
     typeof snapshot.headers !== "object" ||
     Array.isArray(snapshot.headers)
   )
-    throw new Error("Copilot discovery returned an unsupported Responses endpoint.");
+    throw new Error("Copilot discovery returned an unsupported endpoint.");
+  if (endpoint === "messages") {
+    // Promptfoo's Anthropic provider falls back to ANTHROPIC_API_KEY without a key, and
+    // the Anthropic SDK appends `/v1/messages` to the base URL as a string.
+    if (snapshot.apiKey === undefined)
+      throw new Error("Copilot discovery returned no credential for the Messages endpoint.");
+    let url: URL | undefined;
+    try {
+      url = new URL(snapshot.baseUrl);
+    } catch {
+      // Reported below.
+    }
+    if (!url || url.search || url.hash)
+      throw new Error("Copilot discovery returned an unsupported Messages endpoint.");
+  }
   const headers = new Map<string, [string, string]>();
   const addHeader = (name: string, value: unknown) => {
     try {
@@ -183,7 +223,105 @@ function connection(
       if (refreshAt <= now()) throw new Error("Copilot session credential expires too soon.");
     }
   }
-  return { headers: Object.fromEntries(headers.values()), refreshAt };
+  // The OpenAI targets send the key as a bearer token; Messages gets the same one.
+  if (endpoint === "messages" && !headers.has("authorization"))
+    addHeader("Authorization", `Bearer ${snapshot.apiKey}`);
+  return { endpoint, headers: Object.fromEntries(headers.values()), refreshAt };
+}
+
+/**
+ * Promptfoo's Anthropic config for a reasoning effort: adaptive thinking at that effort,
+ * applied only when Copilot's model list says the model takes the effort.
+ */
+function anthropicReasoning(
+  models: unknown,
+  model: string,
+  effort: CopilotReasoningEffort,
+): { thinking: { type: "adaptive" }; effort: CopilotReasoningEffort } {
+  if (!Array.isArray(models))
+    throw new Error(
+      `CopilotModel cannot apply config.reasoning_effort to ${model}: Copilot's model list is unavailable, so its reasoning support is unknown.`,
+    );
+  const entry = (models as CopilotModelInfo[]).find((candidate) => candidate?.id === model);
+  if (entry?.capabilities?.supports?.reasoningEffort !== true)
+    throw new Error(
+      `CopilotModel config.reasoning_effort is not supported for ${model}: Copilot's model list does not report reasoning effort support for it.`,
+    );
+  const supported = entry.supportedReasoningEfforts;
+  if (Array.isArray(supported) && !supported.includes(effort))
+    throw new Error(
+      `CopilotModel config.reasoning_effort ${effort} is not supported for ${model}; Copilot reports: ${supported.filter((value) => typeof value === "string").join(", ")}.`,
+    );
+  return { thinking: { type: "adaptive" }, effort };
+}
+
+/** The Promptfoo provider id and options that send `config` to the discovered endpoint. */
+function nativeProvider(
+  config: Readonly<CopilotModelConfig>,
+  snapshot: CopilotEndpoint,
+  { endpoint, headers }: Connection,
+  models: unknown,
+): { id: string; options: object } {
+  const { model, reasoning_effort, response_format } = config;
+  if (endpoint === "messages") {
+    if (response_format !== undefined)
+      throw new Error(
+        `CopilotModel config.response_format is not supported for ${model}: Copilot serves it over the Anthropic Messages API, which has no JSON-object mode.`,
+      );
+    const hasApiKeyHeader = Object.keys(headers).some((name) => name.toLowerCase() === "x-api-key");
+    return {
+      id: `anthropic:messages:${model}`,
+      options: {
+        config: {
+          ...(reasoning_effort === undefined
+            ? {}
+            : anthropicReasoning(models, model, reasoning_effort)),
+          // Only the answer: thinking text would precede a judge's JSON verdict.
+          showThinking: false,
+          apiBaseUrl: snapshot.baseUrl,
+          // Keeps Promptfoo off ANTHROPIC_API_KEY; Copilot authenticates with the
+          // Authorization header, so the SDK's `X-Api-Key` copy is removed.
+          apiKey: snapshot.apiKey,
+          headers: hasApiKeyHeader ? headers : { ...headers, "x-api-key": null },
+        },
+        // A defined value makes Promptfoo null out ambient ANTHROPIC_CUSTOM_HEADERS,
+        // which the Anthropic SDK would otherwise send to Copilot.
+        env: { ANTHROPIC_CUSTOM_HEADERS: "" },
+      },
+    };
+  }
+  const openai = {
+    ...(response_format === undefined ? {} : { response_format }),
+    apiBaseUrl: snapshot.baseUrl,
+    apiKey: snapshot.apiKey,
+    apiKeyRequired: snapshot.apiKey !== undefined,
+    useDefaultApiKey: false,
+    headers,
+  };
+  if (endpoint === "chat/completions")
+    return {
+      id: `openai:chat:${model}`,
+      options: {
+        config: {
+          // Promptfoo sends reasoning_effort on Chat Completions only for model names it
+          // knows reason; the passthrough puts it on the wire for every model.
+          ...(reasoning_effort === undefined
+            ? {}
+            : { reasoning_effort, passthrough: { reasoning_effort } }),
+          ...openai,
+        },
+      },
+    };
+  return {
+    id: `openai:responses:${model}`,
+    options: {
+      config: {
+        ...(reasoning_effort === undefined ? {} : { reasoning_effort }),
+        store: false,
+        ...openai,
+      },
+    },
+  };
 }
 
 /**
@@ -216,20 +354,51 @@ function tokenPrices(models: unknown, model: string): CopilotTokenPrices | undef
   });
 }
 
+const tokenCount = (value: unknown): number | undefined =>
+  typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
+
 /**
- * Promptfoo's native provider prices replies at OpenAI list rates, which is not Copilot
- * billing; the recorded Copilot token prices replace that cost.
+ * Promptfoo reports Responses prompt-cache reads only when they are non-zero; the raw
+ * usage has the reported count, zero included.
  */
-function copilotReply(response: unknown, prices: CopilotTokenPrices | undefined): unknown {
+function cacheReads(reply: ProviderReply, endpoint: CopilotModelEndpoint): ProviderReply {
+  const usage = reply.tokenUsage;
+  if (endpoint !== "responses" || reply.cached || !usage || typeof usage !== "object") return reply;
+  const details = (usage.completionDetails ?? {}) as Record<string, unknown>;
+  const raw = reply.raw as { usage?: { input_tokens_details?: { cached_tokens?: unknown } } };
+  const reads = tokenCount(raw?.usage?.input_tokens_details?.cached_tokens);
+  if (reads === undefined || details.cacheReadInputTokens !== undefined) return reply;
+  return {
+    ...reply,
+    tokenUsage: { ...usage, completionDetails: { ...details, cacheReadInputTokens: reads } },
+  };
+}
+
+/**
+ * Promptfoo's native providers price replies at OpenAI or Anthropic list rates, which is
+ * not Copilot billing; the recorded Copilot token prices replace that cost. Every reply
+ * names the API that served it.
+ */
+function copilotReply(response: unknown, generation: Generation): unknown {
   if (!response || typeof response !== "object") return response;
   const { cost: _listPrice, ...reply } = response as ProviderReply;
-  return prices ? { ...reply, metadata: { ...reply.metadata, copilotTokenPrices: prices } } : reply;
+  return cacheReads(
+    {
+      ...reply,
+      metadata: {
+        ...reply.metadata,
+        copilotEndpoint: generation.endpoint,
+        ...(generation.prices ? { copilotTokenPrices: generation.prices } : {}),
+      },
+    },
+    generation.endpoint,
+  );
 }
 
 const loadNativeProvider = async (
   id: string,
   context: { options: object },
-): Promise<NativeResponsesProvider> => (await promptfooLoader())(id, context);
+): Promise<NativeProvider> => (await promptfooLoader())(id, context);
 
 /**
  * @internal Build a provider class over one SDK worker and native-provider cache. Every
@@ -269,32 +438,30 @@ export function createCopilotModel({
       });
       throw error;
     }
-    const { headers, refreshAt } = connection(snapshot, config.model, now);
-    let prices: CopilotTokenPrices | undefined;
+    const route = connection(snapshot, config.model, now);
+    let models: unknown;
     try {
-      prices = tokenPrices(await owner.models(), config.model);
+      models = await owner.models();
     } catch {
-      // Prices only inform cost reporting; a missing model list leaves them unreported.
+      // Without the model list, prices go unreported and settings that need it fail.
     }
-    const provider = await loadProvider(`openai:responses:${config.model}`, {
-      options: {
-        config: {
-          ...(config.reasoning_effort === undefined
-            ? {}
-            : { reasoning_effort: config.reasoning_effort }),
-          ...(config.response_format === undefined
-            ? {}
-            : { response_format: config.response_format }),
-          store: false,
-          apiBaseUrl: snapshot.baseUrl,
-          apiKey: snapshot.apiKey,
-          apiKeyRequired: snapshot.apiKey !== undefined,
-          useDefaultApiKey: false,
-          headers,
-        },
-      },
-    });
-    const generation: Generation = { provider, prices, refreshAt, active: 0, retired: false };
+    const { id, options } = nativeProvider(config, snapshot, route, models);
+    const { endpoint, refreshAt } = route;
+    const prices = tokenPrices(models, config.model);
+    const provider = await loadProvider(id, { options });
+    // Promptfoo's OpenAI providers send ambient OPENAI_ORGANIZATION as `OpenAI-Organization`
+    // unless a header overrides it, and config cannot unset it; Copilot's headers decide.
+    const organization = provider as { getOrganization?: unknown };
+    if (endpoint !== "messages" && typeof organization.getOrganization === "function")
+      organization.getOrganization = () => undefined;
+    const generation: Generation = {
+      provider,
+      endpoint,
+      prices,
+      refreshAt,
+      active: 0,
+      retired: false,
+    };
     if (now() >= refreshAt) {
       await dispose(generation);
       throw new Error("Copilot session credential expired during provider initialization.");
@@ -345,7 +512,7 @@ export function createCopilotModel({
     }
 
     id(): string {
-      return `copilot:responses:${this.#config.model}`;
+      return `copilot:${this.#config.model}`;
     }
 
     toJSON(): { id: string; config: Readonly<CopilotModelConfig> } {
@@ -359,7 +526,7 @@ export function createCopilotModel({
         try {
           return copilotReply(
             await generation.provider.callApi(prompt, context, options),
-            generation.prices,
+            generation,
           ) as ProviderReply;
         } finally {
           generation.active--;
@@ -402,15 +569,16 @@ export function createCopilotModel({
 }
 
 /**
- * A Promptfoo provider for Copilot inference over the Responses API. GH_TOKEN
- * authenticates a private Copilot SDK worker that discovers the model's endpoint and
- * short-lived credentials; Promptfoo's native `openai:responses` provider then runs the
- * request. Replies carry Copilot's reported token prices instead of an OpenAI list-price
+ * A Promptfoo provider for direct Copilot inference. GH_TOKEN authenticates a private
+ * Copilot SDK worker that discovers the model's endpoint and short-lived credentials;
+ * Promptfoo's native provider for the API Copilot serves the model on
+ * (`openai:responses`, `openai:chat` or `anthropic:messages`) then runs the request.
+ * Replies carry Copilot's reported token prices and endpoint instead of a list-price
  * `cost`. Every instance in a process shares one SDK worker.
  */
 export interface CopilotModel {
   readonly config: Readonly<CopilotModelConfig>;
-  /** `copilot:responses:<model>`. */
+  /** `copilot:<model>`, whichever API serves the model. */
   id(): string;
   /** The provider's id and request settings; never credentials. */
   toJSON(): { id: string; config: Readonly<CopilotModelConfig> };

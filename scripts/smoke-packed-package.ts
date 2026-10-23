@@ -367,8 +367,8 @@ assert.equal(CopilotModel,cp.CopilotModel,'ESM and CJS builds share one provider
 const id='package:oh-my-promptfoo/providers:CopilotModel';
 const config={model:'gpt-6-sol',reasoning_effort:'low',response_format:{type:'json_object'}};
 const provider=await loadApiProvider(id,{basePath:process.cwd(),options:{config}});
-assert.equal(provider.id(),'copilot:responses:gpt-6-sol');
-assert.deepEqual(JSON.parse(JSON.stringify(provider)),{id:'copilot:responses:gpt-6-sol',config});
+assert.equal(provider.id(),'copilot:gpt-6-sol');
+assert.deepEqual(JSON.parse(JSON.stringify(provider)),{id:'copilot:gpt-6-sol',config});
 await assert.rejects(provider.callApi('prompt'),/GH_TOKEN/);
 await provider.cleanup();
 await assert.rejects(loadApiProvider(id,{basePath:process.cwd(),options:{config:{model:'gpt-6-sol',apiBaseUrl:'http://127.0.0.1:9'}}}),/config.apiBaseUrl/);

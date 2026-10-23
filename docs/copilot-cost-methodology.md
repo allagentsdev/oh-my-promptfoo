@@ -104,11 +104,19 @@ every uncached leaf reported one. See
 
 ## Token-price estimate
 
-`CopilotModel` calls a Copilot model over the Responses API without a
-session, so there is no reported usage. Promptfoo's `openai:responses` provider
-would price the reply at OpenAI list prices, which is not Copilot billing. The
-provider removes that `cost` and instead attaches the model's prices as
-`metadata.copilotTokenPrices`
+`CopilotModel` calls a Copilot model directly, without a session, so there is no
+reported usage. It sends the request through Promptfoo's native provider for the
+API Copilot serves the model on, and names that API in `metadata.copilotEndpoint`:
+
+| Copilot endpoint | `metadata.copilotEndpoint` | Promptfoo provider | Models (measured) |
+| --- | --- | --- | --- |
+| `type: openai`, `wireApi: responses` | `responses` | `openai:responses` | GPT, Codex, Grok, MAI |
+| `type: openai`, `wireApi: completions` | `chat/completions` | `openai:chat` | kimi-k3 |
+| `type: anthropic` | `messages` | `anthropic:messages` | Claude |
+
+Those providers would price the reply at OpenAI or Anthropic list prices, which is
+not Copilot billing. `CopilotModel` removes that `cost` on every API and instead
+attaches the model's prices as `metadata.copilotTokenPrices`
 ([`copilot-model.ts`](../packages/oh-my-promptfoo/src/copilot-model.ts)):
 
 ```json
@@ -132,17 +140,50 @@ When `llmAssert` uses this provider as its judge, the reply's metadata, includin
 `copilotTokenPrices`, is copied to the assertion's metadata. The judge ledger
 records a leaf without Copilot accounting, so the assertion has no scalar cost.
 
+### Token usage per endpoint
+
+On every endpoint, `tokenUsage.prompt` counts all input tokens, cache reads and
+writes included, and `tokenUsage.completion` the output tokens. Prompt-cache reads
+and writes are in `tokenUsage.completionDetails` when the API reports them:
+
+| `copilotEndpoint` | `prompt` | `cacheReadInputTokens` | `cacheCreationInputTokens` |
+| --- | --- | --- | --- |
+| `responses` | `input_tokens` | `input_tokens_details.cached_tokens`, zero included | `input_tokens_details.cache_write_tokens` |
+| `chat/completions` | `prompt_tokens` | `prompt_tokens_details.cached_tokens` when non-zero | `prompt_tokens_details.cache_write_tokens` or `cache_write_input_tokens` |
+| `messages` | `input_tokens` + `cache_read_input_tokens` + `cache_creation_input_tokens` | `cache_read_input_tokens` | `cache_creation_input_tokens` |
+
+Promptfoo 0.124.1 maps these itself, except that it omits a zero Responses cache
+read; `CopilotModel` copies the reported count from
+`response.raw.usage.input_tokens_details.cached_tokens`. The Anthropic Messages
+API reports uncached input separately (`input_tokens`), and Promptfoo adds both
+cache counts into `prompt` so that `prompt` means the same on every endpoint; when
+either is reported, `completionDetails` has both. A count that is absent was not
+reported, or (Chat Completions reads) was zero.
+
+`tokenUsage.cached` means something else: the reply was served from Promptfoo's
+response cache, and `cached` equals its total tokens. Such a reply
+(`response.cached: true`) is not a new request and adds no cost.
+
 ### Formula
 
-For one reply, or one assertion's summed judge usage, with `prompt`, `completion`
-and `cached` (prompt-cache read) token counts:
+For one reply, or one assertion's summed judge usage, take `prompt` and
+`completion`, the cache reads $R$ (`cacheReadInputTokens`, 0 when absent) and, when
+reported, the cache writes $W$ (`cacheCreationInputTokens`). When the API reports
+cache writes:
 
-$$\text{credits} = \frac{(\text{prompt} - \text{cached}) \times \texttt{cacheWritePrice} + \text{cached} \times \texttt{cacheReadPrice} + \text{completion} \times \texttt{outputPrice}}{\texttt{batchSize}}$$
+$$\text{credits} = \frac{W \times \texttt{cacheWritePrice} + R \times \texttt{cacheReadPrice} + (\text{prompt} - R - W) \times \texttt{inputPrice} + \text{completion} \times \texttt{outputPrice}}{\texttt{batchSize}}$$
+
+When it reports no cache writes, every uncached prompt token is priced as a cache
+write:
+
+$$\text{credits} = \frac{(\text{prompt} - R) \times \texttt{cacheWritePrice} + R \times \texttt{cacheReadPrice} + \text{completion} \times \texttt{outputPrice}}{\texttt{batchSize}}$$
 
 $$\text{USD} = \text{credits} \times 0.01$$
 
-Uncached prompt tokens are priced at `cacheWritePrice`, not `inputPrice`. This
-rule comes from calibration against Copilot SDK sessions (Copilot CLI 1.0.98,
+Copilot reports nearly all uncached input as cache creation, so with reported
+writes the remainder priced at `inputPrice` is small, and without them pricing
+the uncached input at `cacheWritePrice`, not `inputPrice`, is the calibrated rule.
+That rule comes from calibration against Copilot SDK sessions (Copilot CLI 1.0.98,
 `@github/copilot-sdk` 1.0.22) measured in a downstream consumer's CI. Session
 usage reports cache reads, so each session's token breakdown can be priced and
 compared with its reported `totalNanoAiu` / $10^{11}$. The rule reproduced every
@@ -168,7 +209,8 @@ read, write and output prices, and `inputPrice` from GitHub's published table
 
 The estimate is unavailable when the recorded `model` differs from the model that
 answered, `batchSize` is not a positive integer, or the chosen tier lacks
-`cacheReadPrice`, `cacheWritePrice`, `outputPrice` or `maxPromptTokens`.
+`cacheReadPrice`, `cacheWritePrice`, `outputPrice` or `maxPromptTokens`, or lacks
+`inputPrice` while reported writes leave uncached input over.
 
 ### Pricing tier
 
@@ -178,20 +220,6 @@ answered, `batchSize` is not a positive integer, or the chosen tier lacks
   prompt tokens are at most `longContext.maxPromptTokens`. A summed usage above
   the default limit can't be split between tiers.
 - Otherwise the estimate is unavailable.
-
-### Cached tokens
-
-In Promptfoo 0.124.1, a live `openai:responses` reply's `tokenUsage` has
-`prompt`, `completion`, `total` and `numRequests`, but no prompt-cache reads. The
-count exists only in `response.raw.usage.input_tokens_details.cached_tokens`, and
-`CopilotModel` does not currently copy it into `tokenUsage`. A
-consumer pricing from `tokenUsage` therefore uses `cached = 0` and prices every
-prompt token at `cacheWritePrice`. The result is exact when Copilot served no
-prompt-cache reads, and an upper bound when it did.
-
-`tokenUsage.cached` on a Responses reply means something else: the reply was
-served from Promptfoo's response cache, and `cached` equals its total tokens. Such
-a reply (`response.cached: true`) is not a new request and adds no cost.
 
 ## Totals
 
