@@ -323,7 +323,8 @@ after YAML frontmatter removal. Copilot redacts secret-shaped text in that body,
 including prose such as `Bearer authentication`, as `******`. A redacted body
 still matches only when every visible character is unchanged and in order, each
 mask hides one non-empty single-line span of at most 256 characters, there are at
-most 64 masks, and at least 90% of the file body stays visible. Only skill names,
+most 64 masks, and at least 90% of the file body stays visible. Alignments that
+exceed a fixed search budget are rejected. Only skill names,
 paths, and provenance leave the runner; loaded content does not. Failed or
 unfinished reads, bare Skill invocations, text mentions, mismatched content, MCP
 reads, and paths outside the workspace do not count.

@@ -2008,10 +2008,11 @@ describe("direct Copilot provider", () => {
       recursive: true,
     });
     // Long enough that one masked phrase leaves over 90% of the body visible, so each
-    // rejected variant below fails on its own rule rather than on visibility.
+    // rejected variant below fails on its own rule rather than on visibility. The literal
+    // ****** line must still align when another phrase is redacted.
     await writeFile(
       join(repository, skill),
-      `# SQL migration\nSend Bearer authentication;\nKeep the column inventory.\n${"Inventory first. ".repeat(30)}\n`,
+      `# SQL migration\nSend Bearer authentication;\nKeep the column inventory.\nExample ****** stays literal.\n${"Inventory first. ".repeat(30)}\n${"Review each column before migrating.\n".repeat(80)}`,
     );
     const git = promisify(execFile);
     await git("git", ["init", "-q", repository]);
@@ -2083,6 +2084,8 @@ describe("direct Copilot provider", () => {
         [":masked-multiline", false],
         [":masked-altered", false],
         [":masked-most", false],
+        [":masked-long-span", false],
+        [":masked-too-many", false],
       ] as const) {
         const result = await provider.callApi(`auto-skill-review${variant}`);
         expect(result.error).toBeUndefined();

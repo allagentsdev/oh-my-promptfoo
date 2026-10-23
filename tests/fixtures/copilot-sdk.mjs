@@ -143,12 +143,20 @@ export class CopilotClient {
               .replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, "")
               .trim();
             // Copilot CLI masks secret-shaped prose such as "Bearer authentication".
+            const maskFirst = (body, pattern, count) => {
+              let masked = 0;
+              return body.replace(pattern, (match) => (masked++ < count ? "******" : match));
+            };
             const masked = {
               ":masked": (body) => body.replace("Bearer authentication", "******"),
               ":masked-multiline": (body) => body.replace("Bearer authentication;\nKeep", "******"),
               ":masked-altered": (body) =>
                 body.replace("Bearer authentication", "******").replace("Keep", "Drop"),
-              ":masked-most": () => "******",
+              // Short single-line masks that together hide over 10% of the body.
+              ":masked-most": (body) =>
+                maskFirst(body, /Review each column before migrating\./g, 12),
+              ":masked-long-span": (body) => body.replace("Inventory first. ".repeat(16), "******"),
+              ":masked-too-many": (body) => maskFirst(body, /^R(?=eview)/gm, 65),
             }[prompt.slice("auto-skill-review".length)];
             invokedSkills.push({
               name: "cw-sql-schema-migration",

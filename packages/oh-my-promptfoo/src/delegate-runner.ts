@@ -415,6 +415,7 @@ interface ClientLike {
 const REDACTION_MASK = "******";
 const MAX_MASKS = 64;
 const MAX_MASKED_SPAN = 256;
+const MAX_ALIGNMENT_STEPS = 1_000_000;
 
 /**
  * Exact equality, or a bounded redaction of the local body: every visible character
@@ -429,14 +430,16 @@ function matchesLoadedBody(body: string, content: string): boolean {
   if (masks === 0 || masks > MAX_MASKS || visible * 10 < body.length * 9) return false;
   if (!body.startsWith(parts[0]!)) return false;
   const failed = new Set<string>();
-  // Masked spans are bounded, so trying each candidate alignment stays small.
+  let steps = 0;
+  // Memoized states still multiply with masks and span length on crafted single-line
+  // bodies, so a fixed step budget rejects them instead of blocking the runner.
   const align = (index: number, position: number): boolean => {
     if (index === masks) return position === body.length;
     const key = `${index}:${position}`;
     if (failed.has(key)) return false;
     const next = parts[index + 1]!;
     for (let span = 1; span <= MAX_MASKED_SPAN && position + span <= body.length; span++) {
-      if (body[position + span - 1] === "\n") break;
+      if (body[position + span - 1] === "\n" || ++steps > MAX_ALIGNMENT_STEPS) break;
       const start = position + span;
       if (body.startsWith(next, start) && align(index + 1, start + next.length)) return true;
     }
