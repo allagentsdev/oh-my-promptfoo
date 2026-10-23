@@ -7,6 +7,26 @@ import {
   safeMultiplier,
 } from "./copilot-accounting.js";
 
+/** Numeric `tokenUsage.completionDetails` fields, such as prompt-cache reads and writes. */
+export type CompletionDetails = Record<string, number>;
+
+/**
+ * Add one judge reply's `completionDetails` into `into`, field by field, the way
+ * `prompt` and `completion` are summed. A field stays absent until a reply reports it.
+ */
+export function addCompletionDetails(
+  into: CompletionDetails | undefined,
+  details: unknown,
+): CompletionDetails | undefined {
+  if (!details || typeof details !== "object" || Array.isArray(details)) return into;
+  for (const [field, value] of Object.entries(details)) {
+    if (typeof value !== "number" || !Number.isFinite(value) || value < 0) continue;
+    into ??= {};
+    into[field] = (into[field] ?? 0) + value;
+  }
+  return into;
+}
+
 export interface JudgeAttemptAccounting {
   cached: boolean;
   accounting?: CopilotAccounting;
@@ -22,7 +42,7 @@ export interface JudgeAccountingLedger {
 interface JudgeFailureEvidence {
   error: unknown;
   ledger: JudgeAccountingLedger;
-  usage: Record<string, number>;
+  usage: Record<string, unknown>;
 }
 
 // Providers and assertions are independently bundled in ESM and CJS. Share only the

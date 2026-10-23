@@ -1201,6 +1201,68 @@ test("a malformed verdict is asked again past the response cache, billing both r
   });
 });
 
+test("judge prompt-cache reads and writes are summed into tokensUsed.completionDetails", async () => {
+  const usage = (prompt: number, completionDetails?: Record<string, number>) => ({
+    tokenUsage: {
+      prompt,
+      completion: 2,
+      total: prompt + 2,
+      numRequests: 1,
+      ...(completionDetails ? { completionDetails } : {}),
+    },
+  });
+  const retried = stub([
+    {
+      output: "not JSON",
+      ...usage(100, { cacheReadInputTokens: 60, cacheCreationInputTokens: 40 }),
+    },
+    { output: verdict(), ...usage(100, { cacheReadInputTokens: 90 }) },
+  ]);
+  const result = await llmAssert("answer", judgedBy(retried.provider));
+  assert.equal(result.pass, true);
+  assert.deepEqual(result.tokensUsed?.completionDetails, {
+    cacheReadInputTokens: 150,
+    cacheCreationInputTokens: 40,
+  });
+
+  // Fallback leaves are summed the same way before llmAssert sees them.
+  const down = stub(
+    [
+      {
+        error: "API error: 503 Service Unavailable",
+        metadata: { http: { status: 503 } },
+        ...usage(50, { cacheCreationInputTokens: 50 }),
+      },
+    ],
+    "details-down",
+  );
+  const up = stub(
+    [
+      {
+        output: verdict(),
+        ...usage(50, { cacheReadInputTokens: 30, cacheCreationInputTokens: 0 }),
+      },
+    ],
+    "details-up",
+  );
+  const chain = new Fallback({
+    config: { providers: [down.provider, up.provider], cooldownMs: 0 },
+  });
+  const rescued = await llmAssert("answer", judgedBy(chain));
+  assert.equal(rescued.pass, true);
+  assert.deepEqual(rescued.tokensUsed?.completionDetails, {
+    cacheCreationInputTokens: 50,
+    cacheReadInputTokens: 30,
+  });
+
+  const plain = stub([
+    { output: verdict(), ...usage(10) },
+    { output: verdict(), ...usage(10) },
+  ]);
+  const absent = await llmAssert("answer", judgedBy(plain.provider));
+  assert.equal(Object.hasOwn(absent.tokensUsed!, "completionDetails"), false);
+});
+
 test("a verdict keeps the judge's metadata and reports only the provider's own cache hit", async () => {
   const custom = stub([
     {
