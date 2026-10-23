@@ -13,8 +13,9 @@ provider before writing assertions:
 - `package:oh-my-promptfoo/providers:CopilotSdk` runs Copilot in an existing
   directory that the caller owns; it does not stage sources.
 - `package:oh-my-promptfoo/providers:CopilotModel` calls a Copilot
-  model directly over the Responses API, as an LLM candidate or a judge; it has
-  no workspace or tools. Set `config.model` and export `GH_TOKEN`.
+  model directly over the API Copilot serves it on (Responses, Chat Completions or
+  Anthropic Messages), as an LLM candidate or a judge; it has no workspace or
+  tools. Set `config.model` and export `GH_TOKEN`.
 - `package:oh-my-promptfoo/assertions:llmAssert` grades named semantic criteria
   independently of either provider.
 - `package:oh-my-promptfoo/assertions:agentAssert` grades the live case workspace

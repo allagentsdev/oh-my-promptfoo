@@ -11,14 +11,12 @@ import type {
 import {
   type CopilotModelDependencies,
   createCopilotModel,
-  type NativeResponsesProvider,
+  type NativeProvider,
 } from "../packages/oh-my-promptfoo/src/copilot-model";
+import { judgeName } from "../packages/oh-my-promptfoo/src/judge";
 import { CopilotModel } from "../packages/oh-my-promptfoo/src/providers";
 
-type LoadApiProvider = (
-  id: string,
-  context: { options: object },
-) => Promise<NativeResponsesProvider>;
+type LoadApiProvider = (id: string, context: { options: object }) => Promise<NativeProvider>;
 let loadApiProvider: LoadApiProvider;
 beforeAll(async () => {
   // No cached replies or external services, set before Promptfoo reads them.
@@ -48,8 +46,31 @@ interface Observation {
   body: Record<string, any>;
 }
 
-function reply(response: ServerResponse) {
+/** A reply in the shape of the API the request reached, with that API's usage fields. */
+function reply(response: ServerResponse, path = "/responses", usage?: Record<string, unknown>) {
   response.setHeader("content-type", "application/json");
+  if (path.includes("/chat/completions"))
+    return response.end(
+      JSON.stringify({
+        id: "loopback-chat",
+        object: "chat.completion",
+        choices: [
+          { index: 0, finish_reason: "stop", message: { role: "assistant", content: verdict } },
+        ],
+        usage: usage ?? { prompt_tokens: 4, completion_tokens: 5, total_tokens: 9 },
+      }),
+    );
+  if (path.includes("/v1/messages"))
+    return response.end(
+      JSON.stringify({
+        id: "loopback-message",
+        type: "message",
+        role: "assistant",
+        content: [{ type: "text", text: verdict }],
+        stop_reason: "end_turn",
+        usage: usage ?? { input_tokens: 4, output_tokens: 5 },
+      }),
+    );
   response.end(
     JSON.stringify({
       id: "loopback-response",
@@ -63,14 +84,14 @@ function reply(response: ServerResponse) {
           content: [{ type: "output_text", text: verdict, annotations: [] }],
         },
       ],
-      usage: { input_tokens: 4, output_tokens: 5, total_tokens: 9 },
+      usage: usage ?? { input_tokens: 4, output_tokens: 5, total_tokens: 9 },
     }),
   );
 }
 
 async function loopback(
-  handle: (request: Observation, response: ServerResponse) => void = (_request, response) =>
-    reply(response),
+  handle: (request: Observation, response: ServerResponse) => void = (request, response) =>
+    reply(response, request.path),
 ) {
   const requests: Observation[] = [];
   const server = createServer(async (request, response) => {
@@ -96,7 +117,12 @@ async function loopback(
       }),
   );
   const { port } = server.address() as AddressInfo;
-  return { requests, baseUrl: `http://127.0.0.1:${port}/sdk/v1?fixture=discovered` };
+  return {
+    requests,
+    baseUrl: `http://127.0.0.1:${port}/sdk/v1?fixture=discovered`,
+    /** Copilot's measured base URL shape: the host root. */
+    root: `http://127.0.0.1:${port}/`,
+  };
 }
 
 type Discover = (model: string, discovery: number) => Promise<CopilotEndpoint>;
@@ -114,6 +140,9 @@ function consumers(
     constructions: 0,
     closes: 0,
     disposals: [] as number[],
+    /** What Promptfoo's native provider returned, before CopilotModel rewrote it. */
+    native: [] as Record<string, unknown>[],
+    providerIds: [] as string[],
   };
   const Provider = createCopilotModel({
     createEndpointClient(): CopilotEndpointClient {
@@ -132,7 +161,14 @@ function consumers(
     async loadProvider(id, context) {
       evidence.constructions++;
       const generation = evidence.constructions;
+      evidence.providerIds.push(id);
       const provider = await loadApiProvider(id, context);
+      const callApi = provider.callApi.bind(provider);
+      provider.callApi = async (...args) => {
+        const result = await callApi(...args);
+        evidence.native.push(result as Record<string, unknown>);
+        return result;
+      };
       const cleanup = provider.cleanup?.bind(provider);
       provider.cleanup = async () => {
         evidence.disposals.push(generation);
@@ -158,6 +194,18 @@ function ambientOpenAi() {
     OPENAI_BASE_URL: "http://invalid-ambient-azure.invalid",
     OPENAI_API_HOST: "invalid-ambient-azure.invalid",
     OPENAI_ORGANIZATION: "ambient-organization",
+  };
+  for (const [name, value] of Object.entries(values)) vi.stubEnv(name, value);
+  return values;
+}
+
+function ambientAnthropic() {
+  const values = {
+    ANTHROPIC_API_KEY: "ambient-anthropic-key",
+    ANTHROPIC_AUTH_TOKEN: "ambient-anthropic-token",
+    ANTHROPIC_BASE_URL: "http://invalid-ambient-anthropic.invalid",
+    ANTHROPIC_CUSTOM_HEADERS:
+      "X-Ambient-Gateway: ambient-gateway-secret\nAuthorization: Bearer ambient-custom-bearer",
   };
   for (const [name, value] of Object.entries(values)) vi.stubEnv(name, value);
   return values;
@@ -205,7 +253,7 @@ test("instances coalesce authentication without exposing credentials or inheriti
     assert.equal(request.body.store, false);
   }
   for (const provider of [f.first, f.second]) {
-    assert.equal(provider.id(), `copilot:responses:${model}`);
+    assert.equal(provider.id(), `copilot:${model}`);
     const serialized = [
       JSON.stringify(provider),
       JSON.stringify(provider.config),
@@ -327,7 +375,7 @@ test("instances with distinct request settings share one SDK worker but keep the
   assert.equal(bodies[model]!.text.format.type, "json_object");
   assert.equal(bodies["gpt-5.6-sol"]!.reasoning.effort, "medium");
   assert.notEqual(bodies["gpt-5.6-sol"]!.text?.format?.type, "json_object");
-  assert.equal(candidate.id(), "copilot:responses:gpt-5.6-sol");
+  assert.equal(candidate.id(), "copilot:gpt-5.6-sol");
   for (const [result, expected] of [
     [graded, model],
     [answer, "gpt-5.6-sol"],
@@ -354,7 +402,7 @@ test("config accepts only an explicit model, a reasoning effort and a JSON-objec
     },
   } as object);
   assert.deepEqual(accepted.toJSON(), {
-    id: `copilot:responses:${model}`,
+    id: `copilot:${model}`,
     config: { model, reasoning_effort: "high", response_format: { type: "json_object" } },
   });
   for (const config of [
@@ -538,15 +586,323 @@ test("cancellation leaves sibling requests and the shared client alive; final cl
   await assert.rejects(f.second.callApi("Already closed"), /closed/);
 });
 
+const claude = "claude-opus-5.5";
+const kimi = "kimi-k3";
+
+/** Copilot's measured snapshot for each API, over one loopback server. */
+function snapshots(http: Awaited<ReturnType<typeof loopback>>) {
+  const headers = {
+    "X-SDK-Required": "fixture-sdk-header",
+    "Copilot-Integration-Id": "fixture-integration",
+  };
+  return {
+    [model]: {
+      type: "openai",
+      wireApi: "responses",
+      baseUrl: http.baseUrl,
+      apiKey: "fixture-openai-key",
+      headers: { ...headers, Authorization: "Bearer fixture-openai-key" },
+    },
+    [kimi]: {
+      type: "openai",
+      wireApi: "completions",
+      baseUrl: http.baseUrl,
+      apiKey: "fixture-openai-key",
+      headers: { ...headers, Authorization: "Bearer fixture-openai-key" },
+    },
+    [claude]: {
+      type: "anthropic",
+      baseUrl: http.root,
+      apiKey: "fixture-anthropic-key",
+      headers: { ...headers, Authorization: "Bearer fixture-anthropic-key" },
+    },
+  } as Record<string, CopilotEndpoint>;
+}
+
+const reasoningModels = async (): Promise<CopilotModelInfo[]> =>
+  [model, kimi, claude].map((id) => ({
+    id,
+    capabilities: { supports: { reasoningEffort: true } },
+    supportedReasoningEfforts: ["low", "medium", "high"],
+  }));
+
+test("every snapshot kind reaches the API Copilot serves it on, with Copilot's credentials only", async () => {
+  const ambient = { ...ambientOpenAi(), ...ambientAnthropic() };
+  const http = await loopback();
+  const endpoints = snapshots(http);
+  const expected = {
+    [model]: ["openai:responses", "/sdk/v1/responses?fixture=discovered", "responses"],
+    [kimi]: ["openai:chat", "/sdk/v1/chat/completions?fixture=discovered", "chat/completions"],
+    [claude]: ["anthropic:messages", "/v1/messages", "messages"],
+  } as const;
+  for (const [selected, [providerId, path, endpoint]] of Object.entries(expected)) {
+    const f = consumers(async (chosen) => endpoints[chosen]!, {}, undefined, {
+      config: { model: selected },
+    });
+    const result = await f.first.callApi("Grade local candidate");
+    assert.equal(result.error, undefined);
+    assert.equal(JSON.parse(result.output as string).pass, true);
+    assert.deepEqual(f.evidence.providerIds, [`${providerId}:${selected}`]);
+    assert.equal(result.metadata?.copilotEndpoint, endpoint);
+    assert.equal(f.first.id(), `copilot:${selected}`);
+    const request = http.requests.at(-1)!;
+    assert.equal(request.path, path);
+    assert.equal(request.body.model, selected);
+    const key = endpoints[selected]!.apiKey;
+    assert.equal(request.headers.authorization, `Bearer ${key}`);
+    assert.equal(request.headers["x-sdk-required"], "fixture-sdk-header");
+    assert.equal(request.headers["copilot-integration-id"], "fixture-integration");
+    assert.equal(request.headers["x-api-key"], undefined, "Copilot authenticates by bearer only");
+    assert.equal(request.headers["api-key"], undefined);
+    assert.equal(request.headers["x-ambient-gateway"], undefined);
+    assert.equal(request.headers["openai-organization"], undefined);
+    const sent = JSON.stringify(request);
+    for (const value of Object.values(ambient))
+      assert.equal(sent.includes(value), false, `Ambient ${value} must not reach Copilot`);
+  }
+});
+
+test("a Messages snapshot without an Authorization header sends its key as the bearer token", async () => {
+  ambientAnthropic();
+  const http = await loopback();
+  const f = consumers(
+    async () => ({
+      type: "anthropic",
+      baseUrl: http.root,
+      apiKey: "fixture-anthropic-key",
+      headers: {},
+      sessionToken: { token: "fixture-session", header: "X-Session-Token", model: claude },
+    }),
+    {},
+    undefined,
+    { config: { model: claude } },
+  );
+  await f.first.callApi("Grade local candidate");
+  const [request] = http.requests;
+  assert.equal(request!.path, "/v1/messages");
+  assert.equal(request!.headers.authorization, "Bearer fixture-anthropic-key");
+  assert.equal(request!.headers["x-session-token"], "fixture-session");
+  assert.equal(request!.headers["x-api-key"], undefined);
+});
+
+test("snapshots CopilotModel cannot serve fail with the reported API before any request", async () => {
+  ambientOpenAi();
+  ambientAnthropic();
+  const http = await loopback();
+  for (const [snapshot, message] of [
+    [
+      { type: "azure", baseUrl: http.baseUrl, headers: {} },
+      /Copilot serves fixture-model over an unsupported API \(type "azure", wireApi none/,
+    ],
+    [
+      { type: "openai", transport: "websockets", baseUrl: http.baseUrl, headers: {} },
+      /transport "websockets"/,
+    ],
+    [{ type: "openai", wireApi: "realtime", baseUrl: http.baseUrl, headers: {} }, /"realtime"/],
+    [
+      { type: "anthropic", wireApi: "responses", baseUrl: http.root, apiKey: "k", headers: {} },
+      /type "anthropic", wireApi "responses"/,
+    ],
+    [{ type: "anthropic", baseUrl: http.root, headers: {} }, /no credential for the Messages/],
+    [
+      { type: "anthropic", baseUrl: http.baseUrl, apiKey: "k", headers: {} },
+      /unsupported Messages endpoint/,
+    ],
+  ] as const) {
+    const f = consumers(async () => snapshot as CopilotEndpoint, {}, undefined, {
+      config: { model: "fixture-model" },
+    });
+    await assert.rejects(f.first.callApi("Must not answer"), message);
+    assert.equal(f.evidence.constructions, 0);
+  }
+  assert.equal(http.requests.length, 0);
+});
+
+test("reasoning effort and JSON format reach each API in its own shape", async () => {
+  ambientOpenAi();
+  ambientAnthropic();
+  const http = await loopback();
+  const endpoints = snapshots(http);
+  const bodies: Record<string, Record<string, any>> = {};
+  for (const selected of [model, kimi, claude]) {
+    const f = consumers(async (chosen) => endpoints[chosen]!, {}, reasoningModels, {
+      config: {
+        model: selected,
+        reasoning_effort: "low",
+        ...(selected === claude ? {} : { response_format: { type: "json_object" } }),
+      },
+    });
+    const result = await f.first.callApi("Grade local candidate");
+    assert.equal(result.error, undefined);
+    bodies[selected] = http.requests.at(-1)!.body;
+  }
+  assert.equal(bodies[model]!.reasoning.effort, "low");
+  assert.equal(bodies[model]!.text.format.type, "json_object");
+  assert.equal(bodies[kimi]!.reasoning_effort, "low");
+  assert.deepEqual(bodies[kimi]!.response_format, { type: "json_object" });
+  assert.deepEqual(bodies[claude]!.thinking, { type: "adaptive" });
+  assert.deepEqual(bodies[claude]!.output_config, { effort: "low" });
+  assert.equal(bodies[claude]!.temperature, undefined, "Thinking requests carry no temperature");
+});
+
+test("Anthropic settings Copilot or Promptfoo cannot honor fail naming the model", async () => {
+  ambientAnthropic();
+  const http = await loopback();
+  const endpoints = snapshots(http);
+  for (const [models, config, message] of [
+    [
+      reasoningModels,
+      { model: claude, response_format: { type: "json_object" } },
+      /response_format is not supported for claude-opus-5\.5: .*Anthropic Messages/,
+    ],
+    [
+      async () => [{ id: claude, capabilities: { supports: { reasoningEffort: false } } }],
+      { model: claude, reasoning_effort: "high" },
+      /reasoning_effort is not supported for claude-opus-5\.5/,
+    ],
+    [
+      async () => [],
+      { model: claude, reasoning_effort: "high" },
+      /reasoning_effort is not supported for claude-opus-5\.5/,
+    ],
+    [
+      async () => {
+        throw new Error("model list unavailable");
+      },
+      { model: claude, reasoning_effort: "high" },
+      /cannot apply config\.reasoning_effort to claude-opus-5\.5: Copilot's model list is unavailable/,
+    ],
+    [
+      async () => [
+        {
+          id: claude,
+          capabilities: { supports: { reasoningEffort: true } },
+          supportedReasoningEfforts: ["medium", "high"],
+        },
+      ],
+      { model: claude, reasoning_effort: "low" },
+      /reasoning_effort low is not supported for claude-opus-5\.5; Copilot reports: medium, high/,
+    ],
+  ] as const) {
+    const f = consumers(
+      async () => endpoints[claude]!,
+      {},
+      models as () => Promise<CopilotModelInfo[]>,
+      { config },
+    );
+    await assert.rejects(f.first.callApi("Must not answer"), message);
+    assert.equal(f.evidence.constructions, 0);
+  }
+  assert.equal(http.requests.length, 0);
+});
+
+test("every API's reply drops Promptfoo's list price and carries Copilot prices and endpoint", async () => {
+  ambientOpenAi();
+  ambientAnthropic();
+  const http = await loopback();
+  // Model names Promptfoo has list prices for, so a native cost exists to strip.
+  const priced = {
+    "gpt-5": [{ type: "openai", wireApi: "responses", baseUrl: http.baseUrl }, "responses"],
+    "gpt-4o-mini": [
+      { type: "openai", wireApi: "completions", baseUrl: http.baseUrl },
+      "chat/completions",
+    ],
+    "claude-sonnet-4-5": [
+      { type: "anthropic", baseUrl: http.root, apiKey: "fixture-key" },
+      "messages",
+    ],
+  } as const;
+  const tokenPrices = { inputPrice: 200, outputPrice: 1000, batchSize: 1_000_000 };
+  for (const [selected, [snapshot, endpoint]] of Object.entries(priced)) {
+    const f = consumers(
+      async () => ({ headers: {}, ...snapshot }),
+      {},
+      async () => [{ id: selected, billing: { tokenPrices } }],
+      { config: { model: selected } },
+    );
+    const result = await f.first.callApi("Grade local candidate");
+    assert.equal(typeof f.evidence.native[0]!.cost, "number", `Promptfoo prices ${selected}`);
+    assert.equal("cost" in result, false, "A list price is not Copilot billing");
+    assert.deepEqual(result.metadata?.copilotTokenPrices, {
+      model: selected,
+      batchSize: 1_000_000,
+      default: { inputPrice: 200, outputPrice: 1000 },
+    });
+    assert.equal(result.metadata?.copilotEndpoint, endpoint);
+  }
+});
+
+test("token usage carries prompt-cache reads and writes from each API", async () => {
+  ambientOpenAi();
+  ambientAnthropic();
+  const usages: Record<string, Record<string, unknown>> = {
+    "/responses": {
+      input_tokens: 10,
+      input_tokens_details: { cached_tokens: 6, cache_write_tokens: 3 },
+      output_tokens: 2,
+      total_tokens: 12,
+    },
+    "/chat/completions": {
+      prompt_tokens: 10,
+      prompt_tokens_details: { cached_tokens: 6, cache_write_tokens: 3 },
+      completion_tokens: 2,
+      total_tokens: 12,
+    },
+    "/v1/messages": {
+      input_tokens: 1,
+      cache_read_input_tokens: 6,
+      cache_creation_input_tokens: 3,
+      output_tokens: 2,
+    },
+  };
+  let usage = (path: string) => usages[Object.keys(usages).find((key) => path.includes(key))!];
+  const http = await loopback((request, response) =>
+    reply(response, request.path, usage(request.path!)),
+  );
+  const endpoints = snapshots(http);
+  for (const selected of [model, kimi, claude]) {
+    const f = consumers(async (chosen) => endpoints[chosen]!, {}, undefined, {
+      config: { model: selected },
+    });
+    const { tokenUsage } = await f.first.callApi("Grade local candidate");
+    assert.equal(tokenUsage?.prompt, 10, `${selected}: prompt counts every input token`);
+    assert.equal(tokenUsage?.completion, 2);
+    assert.equal(tokenUsage?.cached, undefined, "cached means a Promptfoo response-cache hit");
+    assert.deepEqual(
+      {
+        reads: (tokenUsage?.completionDetails as any)?.cacheReadInputTokens,
+        writes: (tokenUsage?.completionDetails as any)?.cacheCreationInputTokens,
+      },
+      { reads: 6, writes: 3 },
+      selected,
+    );
+  }
+  // Promptfoo omits a zero Responses cache read; the raw usage still reports it.
+  usage = () => ({
+    input_tokens: 10,
+    input_tokens_details: { cached_tokens: 0 },
+    output_tokens: 2,
+    total_tokens: 12,
+  });
+  const f = consumers(async () => endpoints[model]!, {}, undefined, { config: { model } });
+  const { tokenUsage } = await f.first.callApi("Grade local candidate");
+  assert.equal((tokenUsage?.completionDetails as any)?.cacheReadInputTokens, 0);
+});
+
 test("constructing and serializing the exported provider is connection-free", async () => {
   vi.stubEnv("GH_TOKEN", "");
   const first = new CopilotModel({ config: { model } });
   const second = new CopilotModel({ config: { model } });
   assert.equal(first.id(), second.id());
   assert.deepEqual(JSON.parse(JSON.stringify(first)), {
-    id: `copilot:responses:${model}`,
+    id: `copilot:${model}`,
     config: { model },
   });
+  assert.equal(
+    judgeName({ id: "package:oh-my-promptfoo/providers:CopilotModel", config: { model } }, first),
+    `copilot:${model}`,
+    "An unlabeled judge's metadata.judge is the endpoint-neutral id",
+  );
   await first.cleanup();
   await second.cleanup();
 });

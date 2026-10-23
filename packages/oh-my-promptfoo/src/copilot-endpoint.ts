@@ -8,7 +8,7 @@ import { resolvePeer } from "./protocol.js";
 const DEADLINE_MS = 90_000;
 const SHUTDOWN_DEADLINE_MS = 5_000;
 
-/** A session credential the Copilot runtime issued for one model's Responses endpoint. */
+/** A session credential the Copilot runtime issued for one model's endpoint. */
 export interface CopilotSessionToken {
   token: string;
   /** The request header that carries `token`. */
@@ -19,7 +19,10 @@ export interface CopilotSessionToken {
   expiresAt?: string;
 }
 
-/** The Responses endpoint snapshot `session.rpc.provider.getEndpoint` reports. */
+/**
+ * The endpoint snapshot `session.rpc.provider.getEndpoint` reports: `type` and `wireApi`
+ * name the API (`openai` with `responses` or `completions`, or `anthropic`).
+ */
 export interface CopilotEndpoint {
   type: string;
   wireApi?: string;
@@ -34,13 +37,18 @@ export interface CopilotEndpoint {
 /** A model entry from the SDK's `listModels()`, as far as this package reads it. */
 export interface CopilotModelInfo {
   id: string;
+  capabilities?: { supports?: { reasoningEffort?: boolean } & Record<string, unknown> } & Record<
+    string,
+    unknown
+  >;
+  supportedReasoningEfforts?: string[];
   billing?: { tokenPrices?: Record<string, unknown> } & Record<string, unknown>;
   [key: string]: unknown;
 }
 
 /** A private Copilot SDK worker that discovers inference endpoints for `GH_TOKEN`. */
 export interface CopilotEndpointClient {
-  /** The Responses endpoint for `model`, or the runtime's default model when omitted. */
+  /** The inference endpoint for `model`, or the runtime's default model when omitted. */
   endpoint(model?: string): Promise<CopilotEndpoint>;
   /** The SDK's model list, including Copilot's reported token prices. */
   models(): Promise<CopilotModelInfo[]>;

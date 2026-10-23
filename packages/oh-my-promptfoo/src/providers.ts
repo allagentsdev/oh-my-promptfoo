@@ -33,6 +33,7 @@ export {
   CopilotModel,
   type CopilotModelConfig,
   type CopilotModelConstructor,
+  type CopilotModelEndpoint,
   type CopilotModelOptions,
   type CopilotReasoningEffort,
   type CopilotTokenPrices,

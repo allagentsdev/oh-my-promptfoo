@@ -111,7 +111,7 @@ Every provider comes from the `oh-my-promptfoo/providers` entry:
 | --- | --- |
 | `package:oh-my-promptfoo/providers:Agent` | Prepares a private workspace per test and runs a coding agent (`delegate`) in it |
 | `package:oh-my-promptfoo/providers:CopilotSdk` | Runs Copilot in an existing `working_dir` |
-| `package:oh-my-promptfoo/providers:CopilotModel` | Calls a Copilot model over the Responses API, as a candidate or a judge |
+| `package:oh-my-promptfoo/providers:CopilotModel` | Calls a Copilot model over the API Copilot serves it on, as a candidate or a judge |
 | `package:oh-my-promptfoo/providers:Fallback` | Tries judges in order and fails over on rate limits and outages |
 
 The assertions are `package:oh-my-promptfoo/assertions:llmAssert` and
@@ -123,7 +123,7 @@ no longer resolve (see the
 ## Copilot models without an agent
 
 `package:oh-my-promptfoo/providers:CopilotModel` sends a prompt
-straight to a Copilot model over the Responses API: no workspace, tools or
+straight to a Copilot model: no workspace, tools or
 agent loop. Use it as an LLM candidate, or as the judge for `llmAssert` and
 `llm-rubric`. It needs `@github/copilot-sdk@1.0.22` installed and `GH_TOKEN`
 exported, and it does not run on Windows.
@@ -147,17 +147,39 @@ defaultTest:
 
 Those three keys are the whole config. The endpoint and credentials always come
 from Copilot: a private Copilot SDK process signs in with `GH_TOKEN` (never your
-stored logins or `OPENAI_*`/`AZURE_*` settings), asks Copilot for the model's
-endpoint and short-lived credentials, and refreshes them before they expire.
-Promptfoo's own `openai:responses` provider then makes the request, so usage
-counting and cancellation work as usual. Every instance in a run shares that
-one SDK process. The provider id is `copilot:responses:<model>`, and neither
-it nor the serialized provider contains credentials.
+stored logins or `OPENAI_*`, `ANTHROPIC_*` or `AZURE_*` settings), asks Copilot for
+the model's endpoint and short-lived credentials, and refreshes them before they
+expire. Promptfoo's own provider for the API Copilot serves the model on then
+makes the request, so usage counting and cancellation work as usual:
 
-Replies have no `cost`, because Promptfoo would price them at OpenAI's list
-rates, which is not what Copilot bills. Instead, when Copilot's model list
-reports prices for the model, each reply carries them in
-`metadata.copilotTokenPrices`:
+| Copilot serves the model over | Promptfoo provider | Request path | `metadata.copilotEndpoint` |
+| --- | --- | --- | --- |
+| OpenAI Responses (GPT, Codex, Grok, MAI) | `openai:responses` | `/responses` | `responses` |
+| OpenAI Chat Completions (kimi-k3) | `openai:chat` | `/chat/completions` | `chat/completions` |
+| Anthropic Messages (Claude) | `anthropic:messages` | `/v1/messages` | `messages` |
+
+Any other endpoint Copilot reports, such as another API or a WebSocket
+transport, fails the call with an error that names it. The settings reach each
+API in its own shape:
+
+- `reasoning_effort` is the Responses `reasoning.effort` and the Chat Completions
+  `reasoning_effort`. For Claude it turns on adaptive thinking at that effort, but
+  only when Copilot's model list says the model takes a reasoning effort (and
+  that level, when it lists levels); otherwise the call fails and names the model.
+- `response_format: { type: json_object }` works on Responses and Chat
+  Completions. The Anthropic Messages API has no JSON-object mode, so a Claude
+  model with `response_format` fails and names the model.
+- Claude replies contain only the answer, not its thinking.
+
+Every instance in a run shares that one SDK process. The provider id is
+`copilot:<model>` on every API (before 1.22.0 it also named the Responses API),
+and an unlabeled judge appears under that id in `llmAssert`'s `metadata.judge`.
+Neither the id nor the serialized provider contains credentials.
+
+Replies have no `cost`, because Promptfoo would price them at OpenAI's or
+Anthropic's list rates, which is not what Copilot bills. Each reply names the
+API that served it in `metadata.copilotEndpoint`, and when Copilot's model list
+reports prices for the model, carries them in `metadata.copilotTokenPrices`:
 
 ```json
 {
@@ -173,8 +195,14 @@ copied as reported: prices per `batchSize` tokens, with `default` from the top
 level and `longContext` from its long-context tier when there is one. Only
 numeric fields are copied, and nothing is converted or summed into a cost. When
 Copilot reports no prices, or the model list can't be read, replies still
-succeed without the field. To turn these prices, or Copilot's reported session
-usage, into dollars, see the
+succeed without the field.
+
+`tokenUsage.prompt` counts every input token, cache reads and writes included,
+on all three APIs. Prompt-cache reads and writes are in
+`tokenUsage.completionDetails.cacheReadInputTokens` and `cacheCreationInputTokens`
+when the API reports them; `tokenUsage.cached` instead counts a reply served from
+Promptfoo's own response cache. To turn these prices and token counts, or
+Copilot's reported session usage, into dollars, see the
 [Copilot cost methodology](https://github.com/allagentsdev/oh-my-promptfoo/blob/main/docs/copilot-cost-methodology.md).
 
 To read Copilot's model list or endpoint yourself, `createCopilotEndpointClient()`
