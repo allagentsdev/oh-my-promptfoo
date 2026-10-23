@@ -23,7 +23,7 @@ type LoadContext = { options?: object; basePath?: string; env?: object };
 type LoadApiProvider = (providerPath: string, context?: LoadContext) => Promise<Judge>;
 
 export const JUDGE_LIST_ERROR =
-  "A list of judges is not a provider: to try judges in order, use package:oh-my-promptfoo/providers:FallbackProvider with config.providers";
+  "A list of judges is not a provider: to try judges in order, use package:oh-my-promptfoo/providers:Fallback with config.providers";
 
 type Peer = { load: LoadApiProvider; entry: string };
 

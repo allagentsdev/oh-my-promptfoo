@@ -10,7 +10,7 @@ The intermediate scoped npm package shipped on 2026-10-02. The repository alread
 
 ## Decision
 
-Rename the GitHub repository to `allagentsdev/oh-my-promptfoo` and publish the unscoped package `oh-my-promptfoo`, starting at 1.6.0. The unscoped name matches the repository and keeps installation and YAML references short. Keep the Promptfoo provider IDs explicit: `package:oh-my-promptfoo:Provider` and `package:oh-my-promptfoo:CopilotSdkProvider`.
+Rename the GitHub repository to `allagentsdev/oh-my-promptfoo` and publish the unscoped package `oh-my-promptfoo`, starting at 1.6.0. The unscoped name matches the repository and keeps installation and YAML references short. Keep the Promptfoo provider IDs explicit, in the form `package:oh-my-promptfoo/<entry>:<Export>`; since 1.22.0 every provider is in the `providers` entry, as the [README](../../README.md#providers) lists.
 
 The earlier scoped npm packages have since been removed from the registry. Do not reuse their names for new releases.
 

@@ -28,21 +28,23 @@ import {
   object,
   promptConfig,
   resolveSourcePaths,
+  validateAgentConfig,
   validateCopilotConfig,
   validateDelegateConfig,
-  validateProviderConfig,
 } from "../packages/oh-my-promptfoo/src/config";
-import {
-  CopilotSdkProvider,
-  Provider,
-  type WorkspaceMetadata,
-} from "../packages/oh-my-promptfoo/src/index";
+import * as rootEntry from "../packages/oh-my-promptfoo/src/index";
 import {
   type CallFrame,
   jsonSafe,
   runDelegate,
   wireContext,
 } from "../packages/oh-my-promptfoo/src/protocol";
+import * as providerEntry from "../packages/oh-my-promptfoo/src/providers";
+import {
+  Agent,
+  CopilotSdk,
+  type WorkspaceMetadata,
+} from "../packages/oh-my-promptfoo/src/providers";
 import { atomicJson, MARKER, protect, removeTree } from "../packages/workspace-core/src/fs";
 
 const roots: string[] = [];
@@ -127,16 +129,29 @@ function frame(
   };
 }
 describe("closed configuration", () => {
-  test("default-unwrapping package loaders retain both named provider constructors", () => {
-    expect(Provider.Provider).toBe(Provider);
-    expect(Provider.CopilotSdkProvider).toBe(CopilotSdkProvider);
+  test("providers export from ./providers alone, without a Provider suffix", () => {
+    expect(Object.keys(providerEntry).sort()).toEqual([
+      "Agent",
+      "CopilotModel",
+      "CopilotSdk",
+      "Fallback",
+      "createCopilotEndpointClient",
+    ]);
+    for (const Entity of [
+      providerEntry.Agent,
+      providerEntry.CopilotSdk,
+      providerEntry.CopilotModel,
+      providerEntry.Fallback,
+    ])
+      expect(typeof Entity).toBe("function");
+    expect(Object.keys(rootEntry)).toEqual([]);
   });
   test("rejects unknown, recursive and reserved fields at authored layers", () => {
     const workspace = {
       sources: [{ type: "git", repository: "file:///tmp/repo", ref: "HEAD", destination: "repo" }],
     };
     expect(() =>
-      validateProviderConfig({ delegate: { id: "allagents:workspace" }, workspace }),
+      validateAgentConfig({ delegate: { id: "allagents:workspace" }, workspace }),
     ).toThrow();
     for (const id of [
       "openai:codex-sdk",
@@ -161,7 +176,7 @@ describe("closed configuration", () => {
       expect(() => promptConfig({ prompt: { config: { delegate: { id } } } }, id, {})).toThrow();
     }
     expect(() =>
-      validateProviderConfig({
+      validateAgentConfig({
         delegate: { id: "copilot-sdk", env: { ALLAGENTS_GIT_TOKEN: "secret" } },
         workspace,
       }),
@@ -175,11 +190,11 @@ describe("closed configuration", () => {
       "repo\\nested",
     ])
       expect(() =>
-        validateProviderConfig({ delegate: { id: "openai:codex-sdk" }, workspace, workingDir }),
+        validateAgentConfig({ delegate: { id: "openai:codex-sdk" }, workspace, workingDir }),
       ).toThrow(/config\.workingDir/);
   });
   test("keeps workspace preparation and agent call deadlines separate", () => {
-    const config = validateProviderConfig({
+    const config = validateAgentConfig({
       delegate: { id: "copilot-sdk" },
       workspace: { sources: [] },
       timeoutMs: 1_800_000,
@@ -188,7 +203,7 @@ describe("closed configuration", () => {
     expect(config.timeoutMs).toBe(1_800_000);
     expect(config.workspaceTimeoutMs).toBe(3_600_000);
     for (const timeout of [0, -1, 3_600_001, "3600000"])
-      expect(() => validateProviderConfig({ ...config, workspaceTimeoutMs: timeout })).toThrow(
+      expect(() => validateAgentConfig({ ...config, workspaceTimeoutMs: timeout })).toThrow(
         /config\.workspaceTimeoutMs/,
       );
   });
@@ -217,7 +232,7 @@ describe("closed configuration", () => {
       baseUrl: "http://localhost:8080/v1",
     };
     expect(
-      validateProviderConfig({
+      validateAgentConfig({
         delegate: { id: "pi-sdk", config },
         workspace: { sources: [] },
       }).delegate.config,
@@ -229,7 +244,7 @@ describe("closed configuration", () => {
       { provider: " ", model: "model" },
     ])
       expect(() =>
-        validateProviderConfig({
+        validateAgentConfig({
           delegate: { id: "pi-sdk", config: partial },
           workspace: { sources: [] },
         }),
@@ -406,9 +421,9 @@ describe("workspace provider publication and lifetime", () => {
     await mkdir(staging, { mode: 0o700 });
     const prior = process.env.ALLAGENTS_NO_PRIVILEGED_HELPER;
     process.env.ALLAGENTS_NO_PRIVILEGED_HELPER = "1";
-    let provider: Provider | undefined;
+    let provider: Agent | undefined;
     try {
-      provider = new Provider({
+      provider = new Agent({
         config: {
           delegate: { id: "openai:codex-sdk" },
           workspace: {
@@ -521,7 +536,7 @@ describe("workspace provider publication and lifetime", () => {
         ALLAGENTS_NO_PRIVILEGED_HELPER: "1",
       },
     };
-    const provider = new Provider(options);
+    const provider = new Agent(options);
     const events: Record<string, unknown>[] = [];
     const listener = (message: unknown) => {
       if (message && typeof message === "object" && "phase" in message)
@@ -635,7 +650,7 @@ describe("workspace provider publication and lifetime", () => {
           { repository: secondUrl, commit, destination: "secondary" },
         ],
       });
-      const concurrent = new Provider({
+      const concurrent = new Agent({
         ...options,
         config: {
           ...options.config,
@@ -681,7 +696,7 @@ describe("workspace provider publication and lifetime", () => {
           sources: [{ repository: repositoryUrl, commit, destination: "repo" }],
         });
       }
-      const mixed = new Provider({
+      const mixed = new Agent({
         ...options,
         config: {
           ...options.config,
@@ -750,7 +765,7 @@ describe("workspace provider publication and lifetime", () => {
           ],
           [[], "manifest does not match"],
         ] as const) {
-          const mismatch = new Provider({
+          const mismatch = new Agent({
             ...options,
             config: {
               ...options.config,
@@ -797,7 +812,7 @@ describe("workspace provider publication and lifetime", () => {
         caseIndex: tamperCase,
         outcome: "error",
       });
-      const metadataProvider = new Provider({
+      const metadataProvider = new Agent({
         ...options,
         env: { ...options.env, ALLAGENTS_PREBUILT_ROOT: metadataPrepared },
       });
@@ -896,7 +911,7 @@ describe("workspace provider publication and lifetime", () => {
       "fixture",
     ]);
     const { stdout } = await git("git", ["-C", repository, "rev-parse", "HEAD"]);
-    const provider = new Provider({
+    const provider = new Agent({
       config: {
         basePath: path,
         delegate: { id: "openai:codex-sdk" },
@@ -1121,7 +1136,7 @@ describe("workspace provider publication and lifetime", () => {
           ALLAGENTS_WORKSPACE_ROOT: join(root, "runtime"),
         },
       };
-      const provider = new Provider(options);
+      const provider = new Agent(options);
       try {
         const [first, parallel] = await Promise.all([
           provider.callApi("read-local-skill"),
@@ -1164,7 +1179,7 @@ describe("workspace provider publication and lifetime", () => {
         expect((same.metadata as { workspace: WorkspaceMetadata }).workspace.sources[0]).toEqual(
           sourceMetadata,
         );
-        const fresh = new Provider(options);
+        const fresh = new Agent(options);
         try {
           const updated = await fresh.callApi("read-local-skill");
           expect(updated.error).toBeUndefined();
@@ -1195,7 +1210,7 @@ describe("workspace provider publication and lifetime", () => {
           `# ${name} skill\n`,
         );
       }
-      const provider = new Provider({
+      const provider = new Agent({
         config: {
           basePath: root,
           delegate: { id: "openai:codex-sdk" as const },
@@ -1256,7 +1271,7 @@ describe("workspace provider publication and lifetime", () => {
     path: string,
     localRoot?: string,
   ): Promise<{ output?: unknown; error?: unknown; metadata?: unknown }> {
-    const provider = new Provider({
+    const provider = new Agent({
       config: {
         basePath,
         delegate: { id: "openai:codex-sdk" as const },
@@ -1367,7 +1382,7 @@ describe("workspace provider publication and lifetime", () => {
       "fixture",
     ]);
     const { stdout } = await git("git", ["-C", repository, "rev-parse", "HEAD"]);
-    const provider = new Provider({
+    const provider = new Agent({
       config: {
         basePath: evals,
         delegate: { id: "openai:codex-sdk" },
@@ -1533,7 +1548,7 @@ describe("direct Copilot provider", () => {
     const path = await project("@github/copilot-sdk", fixture);
     return {
       path,
-      provider: new CopilotSdkProvider({
+      provider: new CopilotSdk({
         config: { basePath: path, working_dir: ".", model, timeoutMs },
       }),
     };
@@ -1661,7 +1676,7 @@ describe("direct Copilot provider", () => {
       const path = await project("@github/copilot-sdk", fixture);
       const provider =
         mode === "direct"
-          ? new CopilotSdkProvider({
+          ? new CopilotSdk({
               config: {
                 basePath: path,
                 working_dir: ".",
@@ -1669,7 +1684,7 @@ describe("direct Copilot provider", () => {
                 timeoutMs: 5000,
               },
             })
-          : new Provider({
+          : new Agent({
               config: {
                 basePath: path,
                 delegate: { id: "copilot-sdk", config: { model: "fixture-requested" } },
@@ -1812,10 +1827,10 @@ describe("direct Copilot provider", () => {
       await provider.cleanup();
     }
   });
-  test("workspace Provider serializes session accounting through the Copilot delegate", async () => {
+  test("workspace Agent serializes session accounting through the Copilot delegate", async () => {
     const fixture = await readFile(new URL("./fixtures/copilot-sdk.mjs", import.meta.url), "utf8");
     const path = await project("@github/copilot-sdk", fixture);
-    const provider = new Provider({
+    const provider = new Agent({
       config: {
         basePath: path,
         delegate: { id: "copilot-sdk", config: { model: "fixture-requested" } },
@@ -1870,7 +1885,7 @@ describe("direct Copilot provider", () => {
         "fixture",
       ]);
       const { stdout } = await git("git", ["-C", repository, "rev-parse", "HEAD"]);
-      const provider = new Provider({
+      const provider = new Agent({
         config: {
           basePath: path,
           delegate: { id: "copilot-sdk" },
@@ -1910,7 +1925,7 @@ describe("direct Copilot provider", () => {
     }, 15_000);
   test("passes BYOK object, applies permission policy, and emits usage without invented skills", async () => {
     const path = await project("@github/copilot-sdk", sdk);
-    const provider = new CopilotSdkProvider({
+    const provider = new CopilotSdk({
       config: {
         basePath: path,
         working_dir: ".",
@@ -1976,7 +1991,7 @@ describe("direct Copilot provider", () => {
         join(path, ".agents", "skills", "linked"),
       );
     }
-    const provider = new CopilotSdkProvider({ config: { basePath: path, working_dir: "." } });
+    const provider = new CopilotSdk({ config: { basePath: path, working_dir: "." } });
     const call = (request: object) => provider.callApi(`read:${JSON.stringify(request)}`);
     try {
       for (const request of [
@@ -2025,7 +2040,7 @@ describe("direct Copilot provider", () => {
       await provider.cleanup();
     }
   });
-  test("workspace Provider records only SDK-loaded matching local skill content", async () => {
+  test("workspace Agent records only SDK-loaded matching local skill content", async () => {
     const fixture = await readFile(new URL("./fixtures/copilot-sdk.mjs", import.meta.url), "utf8");
     const path = await project("@github/copilot-sdk", fixture);
     const repository = join(path, "source");
@@ -2055,7 +2070,7 @@ describe("direct Copilot provider", () => {
       "fixture",
     ]);
     const { stdout } = await git("git", ["-C", repository, "rev-parse", "HEAD"]);
-    const provider = new Provider({
+    const provider = new Agent({
       config: {
         basePath: path,
         delegate: { id: "copilot-sdk" },
@@ -2134,7 +2149,7 @@ describe("direct Copilot provider", () => {
     } finally {
       await provider.cleanup();
     }
-    const protectedProvider = new Provider({
+    const protectedProvider = new Agent({
       config: {
         basePath: path,
         delegate: { id: "copilot-sdk" },
@@ -2179,7 +2194,7 @@ describe("direct Copilot provider", () => {
   }, 60_000);
   test("missing SDK is actionable and pre-abort performs no execution", async () => {
     const path = await project("unrelated", "export {};");
-    const provider = new CopilotSdkProvider({ config: { basePath: path, working_dir: "." } });
+    const provider = new CopilotSdk({ config: { basePath: path, working_dir: "." } });
     const missing = await provider.callApi("test");
     expect(missing.error).toContain("@github/copilot-sdk");
     expect(missing.error).toContain(path);

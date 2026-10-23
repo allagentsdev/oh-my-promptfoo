@@ -33,10 +33,10 @@ converted to dollars or added to a cost.
 
 These calls run in a Copilot SDK session:
 
-- `CopilotSdkProvider`
-- the workspace `Provider` with the `copilot-sdk` delegate
+- `CopilotSdk`
+- the workspace `Agent` with the `copilot-sdk` delegate
 - `agentAssert` with a Copilot grader
-- `llmAssert` and `FallbackProvider` whose judges are Copilot SDK sessions
+- `llmAssert` and `Fallback` whose judges are Copilot SDK sessions
 
 After the session settles, the runner reads the session's
 `session.rpc.usage.getMetrics` snapshot and records it at
@@ -69,7 +69,7 @@ zero. The full schema and its limits are in
 
 ### Judge ledgers
 
-`llmAssert`, `agentAssert` and `FallbackProvider` can call more than one judge, or
+`llmAssert`, `agentAssert` and `Fallback` can call more than one judge, or
 the same judge twice. They record every leaf call in `metadata.judgeAccounting`
 ([`judge-accounting.ts`](../packages/oh-my-promptfoo/src/judge-accounting.ts)):
 
@@ -97,19 +97,19 @@ Rules for reading the ledger:
   and its total is unavailable.
 
 `llmAssert` and `agentAssert` report that total, when it exists, as
-`tokensUsed.cost`; `FallbackProvider` reports it as `cost`. A ledger with only
+`tokensUsed.cost`; `Fallback` reports it as `cost`. A ledger with only
 non-Copilot leaves reports the sum of their native costs instead, and only when
 every uncached leaf reported one. See
 [Judge accounting v1](grading-guide.md#judge-accounting-v1).
 
 ## Token-price estimate
 
-`CopilotResponsesProvider` calls a Copilot model over the Responses API without a
+`CopilotModel` calls a Copilot model over the Responses API without a
 session, so there is no reported usage. Promptfoo's `openai:responses` provider
 would price the reply at OpenAI list prices, which is not Copilot billing. The
 provider removes that `cost` and instead attaches the model's prices as
 `metadata.copilotTokenPrices`
-([`copilot-responses.ts`](../packages/oh-my-promptfoo/src/copilot-responses.ts)):
+([`copilot-model.ts`](../packages/oh-my-promptfoo/src/copilot-model.ts)):
 
 ```json
 {
@@ -184,7 +184,7 @@ answered, `batchSize` is not a positive integer, or the chosen tier lacks
 In Promptfoo 0.124.1, a live `openai:responses` reply's `tokenUsage` has
 `prompt`, `completion`, `total` and `numRequests`, but no prompt-cache reads. The
 count exists only in `response.raw.usage.input_tokens_details.cached_tokens`, and
-`CopilotResponsesProvider` does not currently copy it into `tokenUsage`. A
+`CopilotModel` does not currently copy it into `tokenUsage`. A
 consumer pricing from `tokenUsage` therefore uses `cached = 0` and prices every
 prompt token at `cacheWritePrice`. The result is exact when Copilot served no
 prompt-cache reads, and an upper bound when it did.

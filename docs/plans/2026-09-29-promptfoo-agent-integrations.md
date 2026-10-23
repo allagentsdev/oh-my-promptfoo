@@ -7,6 +7,8 @@ status: proposed
 
 > Historical plan: The current repository and npm package are `oh-my-promptfoo`; see [ADR 0003](../adr/0003-rename-oh-my-promptfoo.md).
 
+> Current provider ids: 1.22.0 moved every provider under `oh-my-promptfoo/providers`; see the [README](../../README.md#providers).
+
 # Promptfoo agent integrations implementation plan
 
 ## Goal

@@ -6,14 +6,14 @@ import { afterEach, beforeAll, test, vi } from "vitest";
 import type {
   CopilotEndpoint,
   CopilotEndpointClient,
-  CopilotModel,
+  CopilotModelInfo,
 } from "../packages/oh-my-promptfoo/src/copilot-endpoint";
 import {
-  type CopilotResponsesDependencies,
-  createCopilotResponsesProvider,
+  type CopilotModelDependencies,
+  createCopilotModel,
   type NativeResponsesProvider,
-} from "../packages/oh-my-promptfoo/src/copilot-responses";
-import { CopilotResponsesProvider } from "../packages/oh-my-promptfoo/src/providers";
+} from "../packages/oh-my-promptfoo/src/copilot-model";
+import { CopilotModel } from "../packages/oh-my-promptfoo/src/providers";
 
 type LoadApiProvider = (
   id: string,
@@ -104,8 +104,8 @@ type Discover = (model: string, discovery: number) => Promise<CopilotEndpoint>;
 /** Two providers over one fake SDK worker and Promptfoo's real native provider. */
 function consumers(
   endpoint: Discover,
-  extra: CopilotResponsesDependencies = {},
-  models?: () => Promise<CopilotModel[]>,
+  extra: CopilotModelDependencies = {},
+  models?: () => Promise<CopilotModelInfo[]>,
   options: object = judge,
 ) {
   const evidence = {
@@ -115,7 +115,7 @@ function consumers(
     closes: 0,
     disposals: [] as number[],
   };
-  const Provider = createCopilotResponsesProvider({
+  const Provider = createCopilotModel({
     createEndpointClient(): CopilotEndpointClient {
       evidence.bootstraps++;
       return {
@@ -289,7 +289,7 @@ test("instances with distinct request settings share one SDK worker but keep the
   const http = await loopback();
   const evidence = { bootstraps: 0, discoveries: [] as string[] };
   const tokenPrices = { inputPrice: 200, outputPrice: 1000, batchSize: 1_000_000 };
-  const Provider = createCopilotResponsesProvider({
+  const Provider = createCopilotModel({
     createEndpointClient() {
       evidence.bootstraps++;
       return {
@@ -340,7 +340,7 @@ test("instances with distinct request settings share one SDK worker but keep the
 });
 
 test("config accepts only an explicit model, a reasoning effort and a JSON-object format", () => {
-  const Provider = createCopilotResponsesProvider({
+  const Provider = createCopilotModel({
     createEndpointClient() {
       throw new Error("Construction must not connect");
     },
@@ -540,8 +540,8 @@ test("cancellation leaves sibling requests and the shared client alive; final cl
 
 test("constructing and serializing the exported provider is connection-free", async () => {
   vi.stubEnv("GH_TOKEN", "");
-  const first = new CopilotResponsesProvider({ config: { model } });
-  const second = new CopilotResponsesProvider({ config: { model } });
+  const first = new CopilotModel({ config: { model } });
+  const second = new CopilotModel({ config: { model } });
   assert.equal(first.id(), second.id());
   assert.deepEqual(JSON.parse(JSON.stringify(first)), {
     id: `copilot:responses:${model}`,
@@ -553,7 +553,7 @@ test("constructing and serializing the exported provider is connection-free", as
 
 test("the exported provider rejects a call without GH_TOKEN instead of using stored logins", async () => {
   vi.stubEnv("GH_TOKEN", "");
-  const provider = new CopilotResponsesProvider({ config: { model } });
+  const provider = new CopilotModel({ config: { model } });
   cleanups.push(() => provider.cleanup());
   await assert.rejects(provider.callApi("Answer this"), /GH_TOKEN/);
 });

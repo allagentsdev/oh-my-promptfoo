@@ -38,7 +38,7 @@ One further observation affects `file://` Git URLs. Promptfoo dereferences every
    - `workingDir` stays relative to the prepared workspace. It selects a materialized directory that exists only after acquisition.
    - OCI `repository` is a registry reference, and HTTPS Git URLs are not paths.
    - Delegate configs accept no path fields; delegate working directories are rejected.
-   - `CopilotSdkProvider` `working_dir` has resolved relative values against the loader `basePath` since the first release. Its contract does not change; the documentation used to say only "use an absolute path" and now describes the existing behaviour.
+   - `CopilotSdk` `working_dir` has resolved relative values against the loader `basePath` since the first release. Its contract does not change; the documentation used to say only "use an absolute path" and now describes the existing behaviour.
 3. `ALLAGENTS_LOCAL_SOURCE_ROOT` becomes optional. When it is unset, the containment boundary is the root of the Git repository containing the base: the nearest ancestor with a `.git` entry, which is a file in linked worktrees and submodules. Outside any repository, the boundary is the base itself. When the variable is set, it must be absolute and replaces the default rather than intersecting with it. Shared runners use it to narrow the boundary, and runners that already set a root outside the config's repository keep working.
 4. Every existing check still applies to the resolved path and boundary: `..` is normalised before the containment check, Git metadata cannot be selected, symlink ancestors of the boundary and source are rejected, traversal stays descriptor-anchored, and symlinks, special files, hard links and byte budgets are enforced.
 

@@ -31,7 +31,7 @@ Add a `promptfooconfig.yaml` next to your `skills` folder:
 ```yaml
 prompts: ["{{task}}"]
 providers:
-  - id: package:oh-my-promptfoo:Provider
+  - id: package:oh-my-promptfoo/providers:Agent
     config:
       delegate:
         id: copilot-sdk
@@ -98,14 +98,31 @@ pinned Git and OCI sources, and larger runs.
 - **Grade what the agent did, not what it says it did.** `agentAssert` sends a
   read-only agent into the workspace to check the changes. Turn on
   `fileChanges` to read them in your own JavaScript assertions.
-- **Run Copilot in a folder you already have.** `CopilotSdkProvider` runs
+- **Run Copilot in a folder you already have.** `CopilotSdk` runs
   Copilot where you point it, without creating a workspace.
-- **Use a Copilot model as a candidate or a judge.** `CopilotResponsesProvider`
+- **Use a Copilot model as a candidate or a judge.** `CopilotModel`
   calls a Copilot model directly, with your `GH_TOKEN` and no API key.
+
+## Providers
+
+Every provider comes from the `oh-my-promptfoo/providers` entry:
+
+| Provider id | What it does |
+| --- | --- |
+| `package:oh-my-promptfoo/providers:Agent` | Prepares a private workspace per test and runs a coding agent (`delegate`) in it |
+| `package:oh-my-promptfoo/providers:CopilotSdk` | Runs Copilot in an existing `working_dir` |
+| `package:oh-my-promptfoo/providers:CopilotModel` | Calls a Copilot model over the Responses API, as a candidate or a judge |
+| `package:oh-my-promptfoo/providers:Fallback` | Tries judges in order and fails over on rate limits and outages |
+
+The assertions are `package:oh-my-promptfoo/assertions:llmAssert` and
+`package:oh-my-promptfoo/assertions:agentAssert`. Version 1.22.0 moved the
+providers here and dropped their `Provider` suffix; the ids of earlier versions
+no longer resolve (see the
+[changelog](https://github.com/allagentsdev/oh-my-promptfoo/blob/main/CHANGELOG.md)).
 
 ## Copilot models without an agent
 
-`package:oh-my-promptfoo/providers:CopilotResponsesProvider` sends a prompt
+`package:oh-my-promptfoo/providers:CopilotModel` sends a prompt
 straight to a Copilot model over the Responses API: no workspace, tools or
 agent loop. Use it as an LLM candidate, or as the judge for `llmAssert` and
 `llm-rubric`. It needs `@github/copilot-sdk@1.0.22` installed and `GH_TOKEN`
@@ -113,7 +130,7 @@ exported, and it does not run on Windows.
 
 ```yaml
 providers:
-  - id: package:oh-my-promptfoo/providers:CopilotResponsesProvider
+  - id: package:oh-my-promptfoo/providers:CopilotModel
     label: gpt-5.6-sol
     config:
       model: gpt-5.6-sol           # required, exactly as Copilot lists it
@@ -121,7 +138,7 @@ providers:
 defaultTest:
   options:
     provider:
-      id: package:oh-my-promptfoo/providers:CopilotResponsesProvider
+      id: package:oh-my-promptfoo/providers:CopilotModel
       config:
         model: gpt-6-sol
         reasoning_effort: low

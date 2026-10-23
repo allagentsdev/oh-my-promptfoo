@@ -79,7 +79,7 @@ the same test, put it in that assertion's `config.provider`:
 ```
 
 It takes an id, a provider object or a `{ text: … }` map, including a
-`FallbackProvider` chain, and it beats the test's `options.provider`,
+`Fallback` chain, and it beats the test's `options.provider`,
 `--grader` and `defaultTest.options.provider`, the way an assertion's
 `provider:` does for `llm-rubric`. An empty value (`provider:` with nothing
 after it, or `""`) counts as unset, as it does for `llm-rubric`. A provider
@@ -97,7 +97,7 @@ error, and the row is an ERROR:
 
 ### A fallback chain
 
-`FallbackProvider` tries judges in order and moves to the next one only after a
+`Fallback` tries judges in order and moves to the next one only after a
 retryable failure such as a rate limit or an outage. It is an ordinary provider,
 so it goes anywhere a judge goes, and native `llm-rubric` in the same suite uses
 it too:
@@ -106,7 +106,7 @@ it too:
 defaultTest:
   options:
     provider:
-      id: package:oh-my-promptfoo/providers:FallbackProvider
+      id: package:oh-my-promptfoo/providers:Fallback
       config:
         providers:                      # tried in order
           - id: openai:chat:gpt-6-sol
@@ -159,7 +159,7 @@ A judge can be written in the shapes Promptfoo accepts for a grader:
 - a provider instance, used as it is;
 - a `{ text: … }` map, of which `llmAssert` uses `text`.
 
-A list of judges is rejected with a message that points to `FallbackProvider`.
+A list of judges is rejected with a message that points to `Fallback`.
 Promptfoo rejects lists here too, so a list would also break every
 `llm-rubric` that shares the setting. Promptfoo renders `{{ env.NAME }}`
 templates in the id and config before `llmAssert` sees them.
@@ -184,7 +184,7 @@ for why the judge works this way.
   error is one of the transient errors above. A cancelled evaluation is
   re-thrown too: it never moves on to the next judge or cools a judge down.
 - **Retries.** Each judge is called once per request and keeps its own
-  retries, so attempts don't multiply. `FallbackProvider` declares
+  retries, so attempts don't multiply. `Fallback` declares
   `handlesOwnRetries`, so Promptfoo's scheduler doesn't re-run the whole chain
   either.
 - **Cooldown.** A judge that failed retryably is skipped by later requests in
@@ -216,7 +216,7 @@ for why the judge works this way.
 | --- | --- |
 | The judge returns an error: an HTTP error, a 429 after its own retries, a timeout or a network failure | FAIL: score 0, the error as the reason, `metadata.graderError: true`. The row's other assertion results are kept |
 | The judge returns an empty reply | FAIL with `graderError`, as above |
-| Every judge in a `FallbackProvider` chain fails | FAIL with `graderError`; the reason lists each attempt |
+| Every judge in a `Fallback` chain fails | FAIL with `graderError`; the reason lists each attempt |
 | The verdict can't be parsed | One retry that bypasses the cache, then FAIL with `graderError` |
 | The judge's provider throws, for example no API key or an unknown provider id | Row ERROR, as for `llm-rubric`, unless a prior Copilot attempt's accounting must be retained (see below) |
 | No judge configured, `provider:` beside `config:`, a list of judges, or invalid `llmAssert` config | Row ERROR |
@@ -246,11 +246,11 @@ FAIL separately will see judge outages move from one count to the other.
 `llmAssert` reports the judge's token usage back to Promptfoo, which records it
 under `tokenUsage.assertions`: grader spend, separate from the agent under
 test. `tokensUsed` adds up every judge call the assertion made, including each
-`FallbackProvider` attempt and the malformed-verdict retry. Scalar `cost` is
+`Fallback` attempt and the malformed-verdict retry. Scalar `cost` is
 present only when every executed attempt has complete, compatible accounting;
 native-only provider scalars are never mixed with Copilot usage values.
 `numRequests` counts the calls
-`llmAssert` and `FallbackProvider` sent; a provider's own transport retries are
+`llmAssert` and `Fallback` sent; a provider's own transport retries are
 not visible, the same limit `llm-rubric` has. A failed grade always carries
 `tokensUsed`, counting the requests made even when the judge measured nothing.
 A graded result from a judge that reports no usage reports nothing rather than
@@ -260,7 +260,7 @@ request and the result carries `metadata.cachedResponse: true`.
 
 ### Judge accounting v1
 
-`llmAssert`, `agentAssert` and `FallbackProvider` preserve an ordered,
+`llmAssert`, `agentAssert` and `Fallback` preserve an ordered,
 JSON-safe leaf ledger at `metadata.judgeAccounting`:
 
 ```ts
@@ -299,7 +299,7 @@ error behavior; no unreported spend is inferred from them.
 See [Copilot runtime accounting v1](provider-guide.md#copilot-runtime-accounting-v1)
 for the exact nano-AIU schema, conversion and runtime/invoice limitations, and the
 [Copilot cost methodology](copilot-cost-methodology.md) for turning ledgers and
-`CopilotResponsesProvider` token prices into dollar totals.
+`CopilotModel` token prices into dollar totals.
 
 
 ### Caching
@@ -315,7 +315,7 @@ reply.
 ([promptfoo/promptfoo#11918](https://github.com/promptfoo/promptfoo/issues/11918)):
 a package loaded during an eval gets its own copy of Promptfoo's cache state,
 and the flag only turns off the CLI's copy. That includes the judges inside a
-`FallbackProvider`. Set `PROMPTFOO_CACHE_ENABLED=false` in the environment
+`Fallback`. Set `PROMPTFOO_CACHE_ENABLED=false` in the environment
 instead, which both copies read.
 
 ### Relative `file://` and `package:` judges
@@ -333,7 +333,7 @@ package code, for the same reason. It resolves a relative `file://` or a
 
 So `promptfoo` can run from a repository root while the eval project, with
 Promptfoo, oh-my-promptfoo and the judge's package, is installed in `evals/`.
-The inner judges of a `FallbackProvider` that `llmAssert` loads resolve from
+The inner judges of a `Fallback` that `llmAssert` loads resolve from
 the same directory.
 
 ### Azure OpenAI
@@ -513,7 +513,7 @@ assert:
           value: No files outside src/parser.ts and its test were modified.
 ```
 
-Use this with the workspace `Provider`; a missing or released
+Use this with the workspace `Agent`; a missing or released
 `metadata.workspace.path` fails instead of falling back to the answer text.
 Enable provider `fileChanges: true` to give the judge changed-file paths and
 metadata plus the diff, not captured base64 contents. The answer goes in the
