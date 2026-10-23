@@ -26,6 +26,14 @@
 * Exercise the real Pi SDK with local model-service responses, including chunked streaming, bounded output, guarded directory and screenshot reads, credential errors, cancellation, skill evidence, and retained billing. Verify native Codex skill gates with two live SDK sessions, without tracing.
 * Remove obsolete `@types/diff`; workspace file-change capture uses the declarations bundled with `diff@9`.
 
+## [1.22.0](https://github.com/allagentsdev/oh-my-promptfoo/compare/v1.21.2...v1.22.0) (2026-10-23)
+
+
+### Features
+
+* **providers:** move every provider under ./providers without the Provider suffix ([#135](https://github.com/allagentsdev/oh-my-promptfoo/issues/135)) ([6247490](https://github.com/allagentsdev/oh-my-promptfoo/commit/6247490e98e25fe41caf079185a09455d47f4795))
+* **providers:** route CopilotModel to each model's Copilot API ([#137](https://github.com/allagentsdev/oh-my-promptfoo/issues/137)) ([aea64fd](https://github.com/allagentsdev/oh-my-promptfoo/commit/aea64fd748593144f9dc42e34006cc772055f3d5))
+
 ## [1.21.2](https://github.com/allagentsdev/oh-my-promptfoo/compare/v1.21.1...v1.21.2) (2026-10-23)
 
 
