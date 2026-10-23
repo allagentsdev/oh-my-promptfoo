@@ -142,10 +142,22 @@ export class CopilotClient {
             const content = (await readFile(file, "utf8"))
               .replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, "")
               .trim();
+            // Copilot CLI masks secret-shaped prose such as "Bearer authentication".
+            const masked = {
+              ":masked": (body) => body.replace("Bearer authentication", "******"),
+              ":masked-multiline": (body) => body.replace("Bearer authentication;\nKeep", "******"),
+              ":masked-altered": (body) =>
+                body.replace("Bearer authentication", "******").replace("Keep", "Drop"),
+              ":masked-most": () => "******",
+            }[prompt.slice("auto-skill-review".length)];
             invokedSkills.push({
               name: "cw-sql-schema-migration",
               path: file,
-              content: prompt.endsWith(":mismatch") ? "wrong skill content" : content,
+              content: prompt.endsWith(":mismatch")
+                ? "wrong skill content"
+                : masked
+                  ? masked(content)
+                  : content,
               invokedAtTurn: 1,
             });
             if (prompt.endsWith(":dual")) {
