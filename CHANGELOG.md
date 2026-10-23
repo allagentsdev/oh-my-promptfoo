@@ -22,6 +22,7 @@
 * Verify packed ESM/CJS assertion metadata remains extensible while retaining unknown native judge-attempt accounting without inventing monetary totals.
 * Verify `skill-used` with tracing disabled for Claude, Codex, and Copilot, including failed skill loads and text-only claims. Document native skill metadata preservation and that no OpenTelemetry collector is required.
 * Exercise the real Pi SDK with local model-service responses, including chunked streaming, bounded output, guarded directory and screenshot reads, credential errors, cancellation, skill evidence, and retained billing. Verify native Codex skill gates with two live SDK sessions, without tracing.
+* Remove obsolete `@types/diff`; workspace file-change capture uses the declarations bundled with `diff@9`.
 
 ## [1.20.3](https://github.com/allagentsdev/oh-my-promptfoo/compare/v1.20.2...v1.20.3) (2026-10-23)
 
