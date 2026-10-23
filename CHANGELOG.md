@@ -26,6 +26,13 @@
 * Exercise the real Pi SDK with local model-service responses, including chunked streaming, bounded output, guarded directory and screenshot reads, credential errors, cancellation, skill evidence, and retained billing. Verify native Codex skill gates with two live SDK sessions, without tracing.
 * Remove obsolete `@types/diff`; workspace file-change capture uses the declarations bundled with `diff@9`.
 
+## [1.21.2](https://github.com/allagentsdev/oh-my-promptfoo/compare/v1.21.1...v1.21.2) (2026-10-23)
+
+
+### Bug Fixes
+
+* **judge:** resolve judge providers from the eval's install, not the working directory ([#132](https://github.com/allagentsdev/oh-my-promptfoo/issues/132)) ([a79426d](https://github.com/allagentsdev/oh-my-promptfoo/commit/a79426dd7a6a4b53cb6c4111adbdff6ec017b103))
+
 ## [1.21.1](https://github.com/allagentsdev/oh-my-promptfoo/compare/v1.21.0...v1.21.1) (2026-10-23)
 
 
