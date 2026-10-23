@@ -156,7 +156,8 @@ export class CopilotClient {
               ":masked-most": (body) =>
                 maskFirst(body, /Review each column before migrating\./g, 12),
               ":masked-long-span": (body) => body.replace("Inventory first. ".repeat(16), "******"),
-              ":masked-too-many": (body) => maskFirst(body, /^R(?=eview)/gm, 65),
+              // 64 redactions plus the body's literal ****** make 65 masks, one past the limit.
+              ":masked-too-many": (body) => maskFirst(body, /^R(?=eview)/gm, 64),
             }[prompt.slice("auto-skill-review".length)];
             invokedSkills.push({
               name: "cw-sql-schema-migration",
