@@ -15,6 +15,8 @@ interface LlmAssertionContext {
   vars?: Record<string, unknown>;
   /** Promptfoo merges test `options.provider`, `--grader` and `defaultTest` into this. */
   test?: { options?: { provider?: unknown }; assert?: unknown };
+  /** The provider under test; Promptfoo loads it with the eval's `config.basePath`. */
+  provider?: { config?: { basePath?: unknown } };
 }
 
 const SELF = /^package:oh-my-promptfoo\/assertions:llmAssert$/;
@@ -64,7 +66,10 @@ function judgeSpec(context: LlmAssertionContext | undefined): unknown {
 export async function llmAssert(output: unknown, context?: LlmAssertionContext) {
   const rubric = prepareRubric(output, context);
   const spec = judgeSpec(context);
-  const judge = await loadJudge(spec);
+  // Promptfoo gives every provider it loads the eval's base path, the directory its own
+  // grader resolves judges from; the provider under test carries it to package code.
+  const basePath = context?.provider?.config?.basePath;
+  const judge = await loadJudge(spec, typeof basePath === "string" ? { basePath } : {});
   const prompt = JSON.stringify([
     { role: "system", content: rubric.system },
     { role: "user", content: rubric.user },

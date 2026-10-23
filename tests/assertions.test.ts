@@ -865,7 +865,7 @@ test("a judge may be an id, provider options, a provider instance or a { text } 
   assert.equal(byMappedOptions.componentResults[0].reason, "Configured graded accuracy");
 });
 
-test("a judge id resolves from the project Promptfoo is installed in, not the working directory", async () => {
+test("a judge id resolves from the eval's base path or the Promptfoo install, not the working directory", async () => {
   // Promptfoo runs from a directory without the judge, as from a repository root whose
   // eval project, with Promptfoo and the judge, is installed in a subdirectory.
   const elsewhere = await mkdtemp(join(realpathSync(tmpdir()), "judge-cwd-"));
@@ -882,10 +882,19 @@ test("a judge id resolves from the project Promptfoo is installed in, not the wo
         label: "llmAssert",
       });
     }
-    // An explicit base path, as FallbackProvider passes its config's, still wins.
-    const own = await loadJudge("file://judge-provider.mjs", {
-      basePath: join(import.meta.dirname, "fixtures"),
+    // The eval's base path, which Promptfoo gives the provider under test, comes first.
+    const fixtures = join(import.meta.dirname, "fixtures");
+    const fromEval = await llmAssert("answer", {
+      ...judgedBy("file://judge-provider.mjs"),
+      provider: { config: { basePath: fixtures } },
     });
+    assert.deepEqual(fromEval.metadata.fixture, {
+      id: "file://judge-provider.mjs",
+      config: { basePath: fixtures },
+      label: "llmAssert",
+    });
+    // An explicit base path, as FallbackProvider passes its config's, still wins.
+    const own = await loadJudge("file://judge-provider.mjs", { basePath: fixtures });
     assert.equal(own.id(), "file://judge-provider.mjs");
   } finally {
     process.chdir(previous);
@@ -899,7 +908,8 @@ test("the install root is the parent of the outermost node_modules", () => {
   assert.equal(installRoot(join(project, "node_modules", peer)), project);
   const pnpm = join(project, "node_modules", ".pnpm", "promptfoo@0.124.1", "node_modules", peer);
   assert.equal(installRoot(pnpm), project);
-  assert.throws(() => installRoot(join(project, peer)), /not installed in node_modules/);
+  // A linked peer sits outside node_modules: Promptfoo's own default applies.
+  assert.equal(installRoot(join(project, peer)), undefined);
 });
 
 test("llmAssert names a missing, listed or misplaced judge before any request", async () => {

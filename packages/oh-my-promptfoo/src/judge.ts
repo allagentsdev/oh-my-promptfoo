@@ -25,19 +25,20 @@ type LoadApiProvider = (providerPath: string, context?: LoadContext) => Promise<
 export const JUDGE_LIST_ERROR =
   "A list of judges is not a provider: to try judges in order, use package:oh-my-promptfoo/providers:FallbackProvider with config.providers";
 
-type Peer = { load: LoadApiProvider; installRoot: string };
+type Peer = { load: LoadApiProvider; entry: string };
 
 let peer: Promise<Peer> | undefined;
 
 /**
  * The project a Promptfoo peer at `entry` is installed in: the parent of the outermost
  * `node_modules` on its path, so pnpm's `node_modules/.pnpm/…/node_modules` store still
- * names the project that installed it.
+ * names the project that installed it. A linked peer (`npm link`, pnpm `link:`) resolves
+ * to its own checkout, outside any `node_modules`, and names no project.
  */
-export function installRoot(entry: string): string {
+export function installRoot(entry: string): string | undefined {
   const parts = entry.split(sep);
   const index = parts.indexOf("node_modules");
-  if (index < 1) throw new Error(`The Promptfoo peer ${entry} is not installed in node_modules`);
+  if (index < 1) return undefined;
   const root = parts.slice(0, index).join(sep);
   return index === 1 ? root + sep : root;
 }
@@ -54,7 +55,7 @@ function promptfooPeer(): Promise<Peer> {
     if (typeof load !== "function")
       throw new Error("The consumer Promptfoo peer does not export loadApiProvider");
     const typed: LoadApiProvider = load;
-    return { load: typed, installRoot: installRoot(entry) };
+    return { load: typed, entry };
   })().catch((error) => {
     peer = undefined;
     throw error;
@@ -88,9 +89,10 @@ export function isJudge(value: unknown): value is Judge {
  * an `ApiProvider` instance, or a `{ text: … }` map.
  *
  * Ids resolve from `context.basePath`, else from the project the Promptfoo peer is
- * installed in. Promptfoo's grader passes its eval base path (`cliState.basePath`), but
- * the CLI keeps that state in its own bundle: the library entry loaded here holds a
- * separate, unset copy, and its `loadApiProvider` would fall back to `process.cwd()`.
+ * installed in, else as Promptfoo's `loadApiProvider` does unaided, from the working
+ * directory. Promptfoo's grader passes its eval base path (`cliState.basePath`), but the
+ * CLI keeps that state in its own bundle: the library entry loaded here holds a
+ * separate, unset copy. Callers that can see the eval base path pass it.
  */
 export async function loadJudge(
   spec: unknown,
@@ -100,8 +102,9 @@ export async function loadJudge(
   if (isJudge(spec)) return spec;
   const load = async (id: string, options?: object) => {
     const promptfoo = await promptfooPeer();
+    const basePath = context.basePath || installRoot(promptfoo.entry);
     return promptfoo.load(id, {
-      basePath: context.basePath || promptfoo.installRoot,
+      ...(basePath ? { basePath } : {}),
       ...(context.env ? { env: context.env } : {}),
       ...(options ? { options } : {}),
     });

@@ -318,16 +318,21 @@ instead, which both copies read.
 
 ### Relative `file://` and `package:` judges
 
-`llmAssert` loads its judge itself, and the eval config's base path doesn't
-reach package code, for the same reason. A relative `file://` or a `package:`
-judge therefore resolves from the project the Promptfoo peer is installed in:
-the directory holding the `node_modules` that contains `promptfoo`. It never
-resolves from the working directory, so `promptfoo` can run from a repository
-root while the eval project, with Promptfoo, oh-my-promptfoo and the judge's
-package, is installed in `evals/`. That includes the inner judges of a
-`FallbackProvider` that `llmAssert` loads. When native `llm-rubric` uses the
-same setting, Promptfoo passes the config's directory instead. Keep the eval
-config beside its install, or use an absolute path, so both resolve the same.
+`llmAssert` loads its judge itself, and Promptfoo's grading state doesn't reach
+package code, for the same reason. It resolves a relative `file://` or a
+`package:` judge from the first of:
+
+1. the eval config's directory, which Promptfoo gives the provider under test
+   as `config.basePath`, the directory native `llm-rubric` resolves from;
+2. the project the Promptfoo peer is installed in, the directory holding the
+   `node_modules` that contains `promptfoo`;
+3. the working directory, when Promptfoo is linked from a checkout outside any
+   `node_modules`.
+
+So `promptfoo` can run from a repository root while the eval project, with
+Promptfoo, oh-my-promptfoo and the judge's package, is installed in `evals/`.
+The inner judges of a `FallbackProvider` that `llmAssert` loads resolve from
+the same directory.
 
 ### Azure OpenAI
 
