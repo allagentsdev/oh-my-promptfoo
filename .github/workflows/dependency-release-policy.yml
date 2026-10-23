@@ -1,0 +1,38 @@
+name: Dependency release policy
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+permissions:
+  contents: read
+jobs:
+  dependency-release-policy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .node-version
+      - name: Fetch pinned commit histories
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! "$BASE_SHA" =~ ^[0-9a-f]{40}$ || ! "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::Invalid pull request commit SHA"
+            exit 1
+          fi
+          shallow=$(git rev-parse --is-shallow-repository)
+          fetch_options=(--no-tags)
+          if [[ "$shallow" == true ]]; then
+            fetch_options+=(--unshallow)
+          fi
+          git fetch "${fetch_options[@]}" origin "$BASE_SHA" "$HEAD_SHA"
+      - name: Check runtime dependency release intent
+        run: node scripts/check-dependency-release.mjs "$BASE_SHA" "$HEAD_SHA" "$GITHUB_EVENT_PATH"

@@ -607,36 +607,33 @@ describe("OCI manifest and streaming defenses", () => {
     await materializeSources(sources, staging, DEFAULT_LIMITS, { ALLAGENTS_ORAS_PATH: oras });
     expect(await readFile(join(staging, "data", "data.txt"))).toEqual(bytes);
   });
-  test.each([
-    "../escape",
-    "/escape",
-    "a/../escape",
-    "a\\escape",
-    "C:/escape",
-  ])("rejects malicious title %s before any blob fetch", async (title) => {
-    const root = await temporary();
-    const bytes = Buffer.from("x");
-    const manifest = manifestFor(bytes, title);
-    const oras = await fakeOras(root, manifest, { [digest(bytes)]: bytes.toString("base64") });
-    const staging = join(root, "stage");
-    await mkdir(staging);
-    await expect(
-      materializeSources(
-        [
-          {
-            type: "oci",
-            repository: "registry.test/fixture",
-            digest: digest(manifest),
-            destination: "data",
-          },
-        ],
-        staging,
-        DEFAULT_LIMITS,
-        { ALLAGENTS_ORAS_PATH: oras },
-      ),
-    ).rejects.toThrow("containment");
-    expect(await readdir(root)).not.toContain("blob-calls");
-  });
+  test.each(["../escape", "/escape", "a/../escape", "a\\escape", "C:/escape"])(
+    "rejects malicious title %s before any blob fetch",
+    async (title) => {
+      const root = await temporary();
+      const bytes = Buffer.from("x");
+      const manifest = manifestFor(bytes, title);
+      const oras = await fakeOras(root, manifest, { [digest(bytes)]: bytes.toString("base64") });
+      const staging = join(root, "stage");
+      await mkdir(staging);
+      await expect(
+        materializeSources(
+          [
+            {
+              type: "oci",
+              repository: "registry.test/fixture",
+              digest: digest(manifest),
+              destination: "data",
+            },
+          ],
+          staging,
+          DEFAULT_LIMITS,
+          { ALLAGENTS_ORAS_PATH: oras },
+        ),
+      ).rejects.toThrow("containment");
+      expect(await readdir(root)).not.toContain("blob-calls");
+    },
+  );
   test("declared overflow rejects before blob subprocess, lying stream is stopped and removed", async () => {
     const root = await temporary();
     const bytes = Buffer.alloc(1000, 65);

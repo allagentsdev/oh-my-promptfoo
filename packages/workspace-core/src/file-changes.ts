@@ -4,7 +4,7 @@ import { lstat, mkdtemp, open, opendir, readlink, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createTwoFilesPatch } from "diff";
-import ignore, { type Ignore } from "ignore";
+import ignore from "ignore";
 import { hash as contentHash } from "./fs.js";
 import type { WorkspaceHandle } from "./types";
 
@@ -26,9 +26,13 @@ interface Entry {
   bytes?: Buffer;
   omittedCode?: string;
 }
+// Frozen matchers expose only the capture contract, not the bundled ignore package's types.
+interface PathIgnoreRules {
+  test(path: string): { ignored: boolean; unignored: boolean };
+}
 export interface Baseline {
   entries: Map<string, Entry>;
-  ignored: { base: string; rules: Ignore }[];
+  ignored: { base: string; rules: PathIgnoreRules }[];
   incomplete: boolean;
   tracked: Set<string>;
   protectedLinks: Map<string, string>;
@@ -115,7 +119,7 @@ async function readEntry(path: string): Promise<Entry | undefined> {
 }
 async function walk(
   handle: WorkspaceHandle,
-  ignored: { base: string; rules: Ignore }[],
+  ignored: Baseline["ignored"],
   freeze: boolean,
   tracked: Set<string>,
   baseline?: Baseline,

@@ -314,7 +314,7 @@ by a time bound.
 ## Prove the run
 
 1. Install the package and the chosen delegate peer; Copilot uses
-   `@github/copilot-sdk@1.0.17` and Pi uses
+   `@github/copilot-sdk@1.0.22` and Pi uses
    `@earendil-works/pi-coding-agent@1.3.0`. Validate the authored config with
    `npx promptfoo validate config -c promptfooconfig.yaml`.
 2. Run `npx promptfoo eval -c promptfooconfig.yaml` with the required agent

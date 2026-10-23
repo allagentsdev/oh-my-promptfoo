@@ -2,10 +2,11 @@ import { readFileSync } from "node:fs";
 import { lstat, realpath, stat } from "node:fs/promises";
 import { isAbsolute, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { context as otelContext, propagation, trace } from "@opentelemetry/api";
+import * as bundledTelemetry from "@opentelemetry/api";
 import { AsyncLocalStorageContextManager } from "@opentelemetry/context-async-hooks";
 import { W3CTraceContextPropagator } from "@opentelemetry/core";
 import { NodeTracerProvider } from "@opentelemetry/sdk-trace-node";
+import { resolve as resolveImport } from "import-meta-resolve";
 import { destination } from "../../workspace-core/src/config.js";
 import { closed, type JsonObject, object, validateDelegateConfig, validateEnv } from "./config.js";
 import {
@@ -38,6 +39,7 @@ let accepted = false,
   buffer = Buffer.alloc(0),
   fatal: Error | undefined;
 let sensitive: string[] = [];
+let telemetryApi = bundledTelemetry;
 // Native Promptfoo agent spans are collected in this child, then replayed on the
 // host's row trace. No unconfigured exporter or separate root trace is created.
 const tracerProvider = new NodeTracerProvider({
@@ -52,7 +54,7 @@ const tracerProvider = new NodeTracerProvider({
           id: `native:${span.spanContext().spanId}`,
           name: redact(span.name, sensitive),
           startTime: span.startTime,
-          parentId: `native:${trace.getSpan(parentContext)?.spanContext().spanId ?? ""}`,
+          parentId: `native:${telemetryApi.trace.getSpan(parentContext)?.spanContext().spanId ?? ""}`,
           attributes: JSON.parse(redact(jsonSafe(span.attributes), sensitive)),
         });
       },
@@ -79,10 +81,6 @@ const tracerProvider = new NodeTracerProvider({
       async forceFlush() {},
     },
   ],
-});
-tracerProvider.register({
-  contextManager: new AsyncLocalStorageContextManager(),
-  propagator: new W3CTraceContextPropagator(),
 });
 function fail(error: unknown): void {
   fatal ??= error instanceof Error ? error : new Error(String(error));
@@ -131,6 +129,7 @@ process.stdin.on("end", () => {
 async function execute(input: JsonObject): Promise<void> {
   let response: JsonObject | undefined;
   let error: unknown;
+  let tracingRegistered = false;
   try {
     closed(
       input,
@@ -197,23 +196,52 @@ async function execute(input: JsonObject): Promise<void> {
         string
       >,
     );
+    const nativePeer =
+      frame.delegate === "openai:codex-sdk" || frame.delegate === "anthropic:claude-agent-sdk"
+        ? resolvePeer(frame.basePath, "promptfoo")
+        : undefined;
+    if (nativePeer) {
+      // Register through the actual consumer peer, not our bundled API: newer
+      // API readers cannot see a global registry created by an older minor.
+      telemetryApi = await import(
+        resolveImport("@opentelemetry/api", pathToFileURL(nativePeer).href)
+      );
+    }
+    tracingRegistered = true;
+    telemetryApi.trace.setGlobalTracerProvider(tracerProvider);
+    telemetryApi.context.setGlobalContextManager(new AsyncLocalStorageContextManager().enable());
+    telemetryApi.propagation.setGlobalPropagator(new W3CTraceContextPropagator());
     const carrier: Record<string, string> = {};
     for (const key of ["traceparent", "tracestate"])
       if (typeof frame.context[key] === "string") carrier[key] = frame.context[key] as string;
-    const extracted = propagation.extract(otelContext.active(), carrier);
-    response = await otelContext.with(extracted, () =>
-      frame.delegate === "pi-sdk"
-        ? runPi(frame, controller.signal, emit, sensitive)
-        : frame.delegate === "copilot-sdk"
-          ? runCopilot(frame, controller.signal)
-          : runNative(frame, controller.signal),
+    const extracted = telemetryApi.propagation.extract(telemetryApi.context.active(), carrier);
+    response = await telemetryApi.context.with(extracted, () =>
+      nativePeer
+        ? runNative(frame, controller.signal, nativePeer)
+        : frame.delegate === "pi-sdk"
+          ? runPi(frame, controller.signal, emit, sensitive)
+          : runCopilot(frame, controller.signal),
     );
     jsonSafe(response);
   } catch (e) {
     error = e;
   }
-  await tracerProvider.forceFlush();
-  await tracerProvider.shutdown();
+  try {
+    await tracerProvider.forceFlush();
+  } catch (e) {
+    error ??= e;
+  }
+  try {
+    await tracerProvider.shutdown();
+  } catch (e) {
+    error ??= e;
+  } finally {
+    if (tracingRegistered) {
+      telemetryApi.trace.disable();
+      telemetryApi.propagation.disable();
+      telemetryApi.context.disable();
+    }
+  }
   if (terminal) return;
   terminal = true;
   if (fatal) error = fatal;
@@ -237,8 +265,12 @@ async function execute(input: JsonObject): Promise<void> {
   // Cleanup already finished. The parent kills any orphaned descendants after close.
   process.exitCode = 0;
 }
-async function runNative(frame: CallFrame, signal: AbortSignal): Promise<JsonObject> {
-  const peer = await import(pathToFileURL(resolvePeer(frame.basePath, "promptfoo")).href);
+async function runNative(
+  frame: CallFrame,
+  signal: AbortSignal,
+  peerPath: string,
+): Promise<JsonObject> {
+  const peer = await import(pathToFileURL(peerPath).href);
   const load = peer.loadApiProvider ?? peer.default?.loadApiProvider;
   if (typeof load !== "function")
     throw new Error("The consumer Promptfoo peer does not export loadApiProvider");
@@ -387,7 +419,7 @@ function verifiedSkillLoaderRecord(entry: unknown, workingDir: string): SkillCal
 async function runCopilot(frame: CallFrame, signal: AbortSignal): Promise<JsonObject> {
   const sdk = await import(pathToFileURL(resolvePeer(frame.basePath, "@github/copilot-sdk")).href);
   if (typeof sdk.CopilotClient !== "function")
-    throw new Error("Install the supported @github/copilot-sdk@1.0.17 peer");
+    throw new Error("Install the supported @github/copilot-sdk@1.0.22 peer");
   const skillDirectories = frame.readOnly ? [] : workspaceSkillDirectories(frame.workingDir);
   const allowedRead = frame.readOnly
     ? await graderReadScope(frame.workingDir, frame.readOnly.sourceRoots)
@@ -551,7 +583,7 @@ async function runCopilot(frame: CallFrame, signal: AbortSignal): Promise<JsonOb
         tokenUsage: usage,
         cost,
         metadata: {
-          copilot: { sdkVersion: "1.0.17", skillSupport: true },
+          copilot: { sdkVersion: "1.0.22", skillSupport: true },
           skillCalls,
         },
       };

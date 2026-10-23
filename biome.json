@@ -1,5 +1,5 @@
 {
-  "$schema": "https://biomejs.dev/schemas/2.4.6/schema.json",
+  "$schema": "https://biomejs.dev/schemas/2.5.15/schema.json",
   "files": {
     "includes": ["**", "!**/dist", "!**/node_modules", "!bun.lock", "!docs/adr", "!docs/plans"]
   },
@@ -7,7 +7,7 @@
   "linter": {
     "enabled": true,
     "rules": {
-      "recommended": true,
+      "preset": "recommended",
       "suspicious": { "noExplicitAny": "off" },
       "style": { "noNonNullAssertion": "off" }
     }

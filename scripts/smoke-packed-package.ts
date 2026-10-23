@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { realpathSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -20,6 +20,63 @@ function run(command: string, args: string[], cwd: string) {
     throw new Error(`${command} ${args.join(" ")} failed:\n${result.stdout}\n${result.stderr}`);
   return result.stdout;
 }
+
+async function compileDeclarations(cwd: string) {
+  const consumer = `
+const DefaultProvider: typeof Providers.Provider = Providers.default;
+const provider: Providers.Provider = new DefaultProvider();
+const copilot: Providers.CopilotSdkProvider = new Providers.CopilotSdkProvider();
+const options: Providers.CallOptions = {abortSignal: new AbortController().signal};
+const providerId: string = provider.id();
+const reply: Promise<unknown> = provider.callApi('prompt', undefined, options);
+const copilotReply: Promise<unknown> = copilot.callApi('prompt', undefined, options);
+const rubric: Assertions.LlmAssertConfig = {components: [{metric: 'quality', value: 'Check answer'}]};
+const assertion: Promise<unknown> = Assertions.llmAssert('answer', {config: rubric});
+const agentAssertion: Promise<unknown> = Assertions.agentAssert('answer');
+const fallbackConfig: Fallbacks.FallbackProviderConfig = {providers: ['openai:example'], cooldownMs: 0};
+const fallback = new Fallbacks.FallbackProvider({config: fallbackConfig});
+const fallbackId: string = fallback.id();
+const fallbackReply: Promise<unknown> = fallback.callApi('prompt');
+// @ts-expect-error An AbortSignal, not a string, is required.
+const invalidOptions: Providers.CallOptions = {abortSignal: 'invalid'};
+// @ts-expect-error A rubric metric must be named with a string.
+const invalidComponent: Assertions.RubricComponent = {metric: 42, value: 'Check answer'};
+// @ts-expect-error The fallback chain must be a list.
+const invalidFallback: Fallbacks.FallbackProviderConfig = {providers: 'invalid'};
+`;
+  for (const [extension, imports] of [
+    [
+      "mts",
+      `import * as Providers from 'oh-my-promptfoo';
+import * as Assertions from 'oh-my-promptfoo/assertions';
+import * as Fallbacks from 'oh-my-promptfoo/providers';`,
+    ],
+    [
+      "cts",
+      `import Providers = require('oh-my-promptfoo');
+import Assertions = require('oh-my-promptfoo/assertions');
+import Fallbacks = require('oh-my-promptfoo/providers');`,
+    ],
+  ])
+    await writeFile(join(cwd, `consumer.${extension}`), `${imports}\n${consumer}`);
+  await writeFile(
+    join(cwd, "tsconfig.json"),
+    JSON.stringify({
+      compilerOptions: {
+        target: "ES2022",
+        module: "NodeNext",
+        moduleResolution: "NodeNext",
+        strict: true,
+        noEmit: true,
+        skipLibCheck: false,
+        types: ["node"],
+      },
+      files: ["consumer.mts", "consumer.cts"],
+    }),
+  );
+  // Use the compiler installed in this consumer, with no workspace aliases or symlinks.
+  run("node", ["node_modules/typescript/bin/tsc", "--project", "tsconfig.json"], cwd);
+}
 const temp = await mkdtemp(join(realpathSync(tmpdir()), "allagents-pack-"));
 try {
   const packed = JSON.parse(
@@ -34,12 +91,15 @@ try {
     "dist/index.js",
     "dist/index.cjs",
     "dist/index.d.ts",
+    "dist/index.d.cts",
     "dist/assertions.js",
     "dist/assertions.cjs",
     "dist/assertions.d.ts",
+    "dist/assertions.d.cts",
     "dist/providers.js",
     "dist/providers.cjs",
     "dist/providers.d.ts",
+    "dist/providers.d.cts",
     "dist/delegate-runner.js",
     "dist/workspace-reader.js",
     "dist/cli.js",
@@ -47,8 +107,21 @@ try {
     "README.md",
   ])
     if (!names.includes(name)) throw new Error(`Missing packed file ${name}`);
-  if (names.some((n: string) => /tests|fixtures|workspace-core|\.env/.test(n)))
+  if (
+    names.some((n: string) =>
+      /(?:^|\/)(?:tests|fixtures|workspace-core)(?:\/|$)|(?:^|\/)\.env(?:\.|$)/.test(n),
+    )
+  )
     throw new Error("Private/test files in package");
+  // tsdown splits shared code and declarations. Every emitted artifact must survive packing.
+  const dist = join(repo, "packages/oh-my-promptfoo/dist");
+  for (const file of await readdir(dist, { recursive: true })) {
+    if (
+      (await stat(join(dist, file))).isFile() &&
+      !names.includes(`dist/${file.replaceAll("\\", "/")}`)
+    )
+      throw new Error(`Missing packed build artifact ${file}`);
+  }
   const manifest = JSON.parse(await readFile("packages/oh-my-promptfoo/package.json", "utf8"));
   if (
     manifest.dependencies?.["@allagents/workspace-core"] ||
@@ -56,6 +129,15 @@ try {
     Object.keys(manifest.bin).length !== 1
   )
     throw new Error("Public manifest contract mismatch");
+  const rootManifest = JSON.parse(await readFile(join(repo, "package.json"), "utf8"));
+  const copilotVersion: string = manifest.peerDependencies["@github/copilot-sdk"];
+  if (copilotVersion !== rootManifest.devDependencies["@github/copilot-sdk"])
+    throw new Error("Copilot development and public peer versions differ");
+  const consumerDependencies = [
+    `promptfoo@${rootManifest.devDependencies.promptfoo}`,
+    `typescript@${rootManifest.devDependencies.typescript}`,
+    `@types/node@${rootManifest.devDependencies["@types/node"]}`,
+  ];
   const tarball = join(temp, packed.filename);
   const installation = registryVersion ? `oh-my-promptfoo@${registryVersion}` : tarball;
   const expectedVersion = registryVersion ?? manifest.version;
@@ -67,12 +149,18 @@ try {
     {
       name: "npm",
       command: "npm",
-      args: ["install", "--ignore-scripts", "--legacy-peer-deps", "--no-audit", "--no-fund"],
+      args: ["install", "--ignore-scripts", "--strict-peer-deps", "--no-audit", "--no-fund"],
     },
     {
       name: "pnpm",
       command: pnpm.command,
-      args: [...pnpm.prefix, "add", "--ignore-scripts", "--config.auto-install-peers=false"],
+      args: [
+        ...pnpm.prefix,
+        "add",
+        "--ignore-scripts",
+        "--strict-peer-dependencies",
+        "--config.auto-install-peers=false",
+      ],
     },
     { name: "bun", command: "bun", args: ["add", "--ignore-scripts", "--omit=peer", "--exact"] },
   ]) {
@@ -82,16 +170,30 @@ try {
       join(cwd, "package.json"),
       JSON.stringify({ name: `consumer-${manager.name}`, private: true, type: "module" }),
     );
-    run(manager.command, [...manager.args, installation], cwd);
-    const peer = join(cwd, "node_modules/promptfoo");
-    try {
-      await symlink(join(repo, "node_modules/promptfoo"), peer, "dir");
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-    }
+    // Install real peers in the isolated consumer; strict npm/pnpm resolution must succeed.
+    run(manager.command, [...manager.args, installation, ...consumerDependencies], cwd);
     await writeFile(
       join(cwd, "smoke.mjs"),
-      `import Default,{Provider,CopilotSdkProvider} from 'oh-my-promptfoo';import{createRequire}from'node:module';import{readFileSync}from'node:fs';const require=createRequire(import.meta.url);const c=require('oh-my-promptfoo');if(Default!==Provider||typeof Provider!=='function'||typeof CopilotSdkProvider!=='function'||typeof c.Provider!=='function'||typeof c.CopilotSdkProvider!=='function')throw Error('Exports');const manifest=JSON.parse(readFileSync(new URL('../package.json',import.meta.resolve('oh-my-promptfoo')),'utf8'));if(manifest.version!==${JSON.stringify(expectedVersion)})throw Error('Loaded package version mismatch');if(process.argv[2]==='without-copilot'){let absent=false;try{require.resolve('@github/copilot-sdk');}catch(error){if(error.code!=='MODULE_NOT_FOUND')throw error;absent=true;}if(!absent)throw Error('Copilot SDK unexpectedly installed');}else{const peer=JSON.parse(readFileSync('node_modules/@github/copilot-sdk/package.json','utf8'));if(peer.version!=='1.0.17')throw Error('Copilot SDK version mismatch');/* The optional peer is absent in without-copilot mode, so load it only here. */await import('@github/copilot-sdk');}console.log('exports and loaded version passed');`,
+      `import Default,{Provider,CopilotSdkProvider} from 'oh-my-promptfoo';
+import{createRequire}from'node:module';
+import{readFileSync,statSync}from'node:fs';
+const require=createRequire(import.meta.url);
+const c=require('oh-my-promptfoo');
+if(Default!==Provider||c.default!==c.Provider||typeof Provider!=='function'||typeof CopilotSdkProvider!=='function'||typeof c.Provider!=='function'||typeof c.CopilotSdkProvider!=='function')throw Error('Exports');
+const packageUrl=new URL('../package.json',import.meta.resolve('oh-my-promptfoo'));
+const manifest=JSON.parse(readFileSync(packageUrl,'utf8'));
+if(manifest.version!==${JSON.stringify(expectedVersion)})throw Error('Loaded package version mismatch');
+for(const entry of Object.values(manifest.exports))for(const target of Object.values(entry))if(!statSync(new URL(target,packageUrl)).isFile())throw Error('Missing installed export '+target);
+if(process.argv[2]==='without-copilot'){
+  let absent=false;
+  try{require.resolve('@github/copilot-sdk');}catch(error){if(error.code!=='MODULE_NOT_FOUND')throw error;absent=true;}
+  if(!absent)throw Error('Copilot SDK unexpectedly installed');
+}else{
+  const peer=JSON.parse(readFileSync('node_modules/@github/copilot-sdk/package.json','utf8'));
+  if(peer.version!==${JSON.stringify(copilotVersion)})throw Error('Copilot SDK version mismatch');
+  await import('@github/copilot-sdk');
+}
+console.log('exports and loaded version passed');`,
     );
     await writeFile(
       join(cwd, "assertions-smoke.mjs"),
@@ -208,15 +310,17 @@ assert.equal(value(10).text,'protected source');assert.equal(readFileSync(join(r
 `,
     );
     run("node", ["smoke.mjs", "without-copilot"], cwd);
+    await compileDeclarations(cwd);
     run("node", ["node_modules/oh-my-promptfoo/dist/cli.js", "--help"], cwd);
     run("node", ["assertions-smoke.mjs"], cwd);
     if (manager.name === "bun") run("bun", ["assertions-smoke.mjs"], cwd);
     run("node", ["workspace-reader-smoke.mjs"], cwd);
-    run(manager.command, [...manager.args, "@github/copilot-sdk@1.0.17"], cwd);
+    run(manager.command, [...manager.args, `@github/copilot-sdk@${copilotVersion}`], cwd);
     run("node", ["smoke.mjs", "with-copilot"], cwd);
     run("node", ["node_modules/oh-my-promptfoo/dist/cli.js", "--help"], cwd);
+    await compileDeclarations(cwd);
     console.log(
-      `${manager.name}: ${registryVersion ? "registry" : "packed"} ${expectedVersion} provider and assertion exports, CLI, and actual Copilot SDK 1.0.17 passed`,
+      `${manager.name}: ${registryVersion ? "registry" : "packed"} ${expectedVersion} provider and assertion exports, declarations, CLI, and actual Copilot SDK ${copilotVersion} passed`,
     );
   }
   console.log(`Pack surface passed: ${names.length} files, ${packed.size} compressed bytes`);

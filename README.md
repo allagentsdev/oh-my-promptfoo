@@ -22,7 +22,7 @@ You need Node 22.22 or later and Promptfoo 0.122 or 0.124.
 
 ```sh
 npm install --save-dev promptfoo@0.124.1 oh-my-promptfoo
-npm install --save-dev @github/copilot-sdk@1.0.17               # only if you use Copilot
+npm install --save-dev @github/copilot-sdk@1.0.22               # only if you use Copilot
 npm install --save-dev @earendil-works/pi-coding-agent@1.3.0    # only if you use Pi
 ```
 
