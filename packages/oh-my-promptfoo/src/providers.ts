@@ -1,7 +1,12 @@
 import { createHash } from "node:crypto";
 import { resolve } from "node:path";
 import { isJudge, type Judge, type JudgeResponse, judgeName, loadJudge } from "./judge.js";
-import { JudgeAccountingCollector } from "./judge-accounting.js";
+import {
+  JudgeAccountingCollector,
+  JudgeFailureContext,
+  judgeFailureMessage,
+  preserveJudgeFailure,
+} from "./judge-accounting.js";
 
 export interface FallbackProviderConfig {
   /** Judges to try in order: provider ids, provider objects, or `{ text: … }` maps. */
@@ -247,25 +252,30 @@ export class FallbackProvider {
       // A transient throw was classified on the error itself, code included.
       let threwTransient = false;
       let threwPermanent = false;
+      let propagation: { error: unknown } | undefined;
+      const failureContext = new JudgeFailureContext();
       try {
         const judge = await this.judge(index);
         loaded = true;
         name = judgeName(spec, judge);
-        response = await judge.callApi(prompt, context, callOptions);
+        response = await failureContext.run(() => judge.callApi(prompt, context, callOptions));
       } catch (error) {
         signal?.throwIfAborted();
-        // Preserve an earlier session's accounting if the next provider throws, without
-        // failing over past a permanent error or changing native-only throw behavior.
-        threwTransient = loaded && transient(error);
+        if (error instanceof Error && error.name === "AbortError") throw error;
+        const evidence = failureContext.forError(error);
+        // Evidence is published only by a nested fallback's permanent throw. Do not
+        // reclassify it by message or replace its executed leaves with one attempt.
+        threwTransient = loaded && evidence === undefined && transient(error);
         if (!threwTransient) {
-          if (
-            (error instanceof Error && error.name === "AbortError") ||
-            !accounting.ledger.attempts.some((leaf) => leaf.accounting !== undefined)
-          )
-            throw error;
           threwPermanent = true;
+          if (!accounting.hasCopilotAccounting) propagation = { error };
         }
-        response = { error: error instanceof Error ? error.message : String(error) };
+        response = {
+          ...(propagation ? {} : { error: judgeFailureMessage(error) }),
+          ...(evidence
+            ? { tokenUsage: evidence.usage, metadata: { judgeAccounting: evidence.ledger } }
+            : {}),
+        };
       }
       const tokens = response.tokenUsage ?? {};
       for (const field of ["total", "prompt", "completion", "cached"] as const) {
@@ -275,6 +285,12 @@ export class FallbackProvider {
       usage.numRequests +=
         typeof tokens.numRequests === "number" ? tokens.numRequests : response.cached ? 0 : 1;
       accounting.record(response.metadata, response.cached, response.cost);
+      if (propagation) {
+        // Native-only calls still throw the exact value, including frozen objects
+        // and primitives; an enclosing accounted call can retain their evidence.
+        preserveJudgeFailure({ error: propagation.error, ledger: accounting.ledger, usage });
+        throw propagation.error;
+      }
       if (threwPermanent) {
         // The previous reply's transport status is not the throwing attempt's status.
         const { http: _http, ...diagnostics } = lastMetadata ?? {};

@@ -37,6 +37,7 @@ interface Reply {
   error?: string;
   /** The fake SDK throws this message instead of answering. */
   throws?: string;
+  executionError?: string;
   forbidden?: "write" | "shell" | "url";
 }
 interface RecordedCall {
@@ -139,6 +140,7 @@ export class CopilotClient {
    }
    if(next.tokenUsage)listener({type:'assistant.usage',data:{inputTokens:next.tokenUsage.prompt,outputTokens:next.tokenUsage.completion,cacheReadTokens:next.tokenUsage.cached,cost:next.cost}});
    listener({type:'assistant.message',data:{content:next.output}});
+   if(next.executionError!==undefined)throw Error(next.executionError);
    return {data:{content:next.output}};
   },async abort(){},async disconnect(){if(last?.cleanupDelayMs)await new Promise(resolve=>setTimeout(resolve,last.cleanupDelayMs));}
  };}
@@ -707,6 +709,51 @@ test("agentAssert forwards Copilot session metadata on successful and failed jud
       assert.equal(result.tokensUsed?.cost, failed ? undefined : 0.01);
       assert.equal(result.metadata.graderError, failed ? true : undefined);
     }
+  });
+}, 15_000);
+
+test("agentAssert rejects a passing retained verdict after an empty-message Copilot execution failure", async () => {
+  await withGrader(async ({ queue, calls, context }) => {
+    await queue([
+      {
+        output: verdict(),
+        executionError: "",
+        tokenUsage: { prompt: 10, completion: 2, cached: 1 },
+        metrics: { totalNanoAiu: 1_000_000_000 },
+      },
+    ]);
+    const result = await agentAssert("candidate answer", context("copilot-sdk"));
+    assert.equal(result.pass, false);
+    assert.equal(result.score, 0);
+    assert.equal(result.metadata.graderError, true);
+    assert.ok(result.reason.trim().length > 0);
+    assert.deepEqual(result.componentResults, []);
+    const accounting = {
+      version: 1,
+      source: "session.rpc.usage.getMetrics",
+      scope: "session",
+      unit: "nano-AIU",
+      status: "partial",
+      reason: "execution_incomplete",
+      totalNanoAiu: 1_000_000_000,
+      requestedModel: "fake-grader",
+    };
+    assert.deepEqual(result.metadata.judgeAccounting, {
+      version: 1,
+      attempts: [{ cached: false, accounting }],
+    });
+    const copilot = result.metadata.copilot;
+    assert.ok(copilot && typeof copilot === "object" && "accounting" in copilot);
+    assert.deepEqual(copilot.accounting, accounting);
+    assert.equal(result.tokensUsed?.cost, undefined);
+    assert.deepEqual(result.tokensUsed, {
+      prompt: 10,
+      completion: 2,
+      total: 12,
+      cached: 1,
+      numRequests: 1,
+    });
+    assert.equal((await calls()).length, 1);
   });
 }, 15_000);
 

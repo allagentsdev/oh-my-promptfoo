@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import {
   type CopilotAccounting,
   copilotUsageValue,
@@ -14,6 +15,50 @@ export interface JudgeAttemptAccounting {
 export interface JudgeAccountingLedger {
   version: 1;
   attempts: JudgeAttemptAccounting[];
+}
+
+interface JudgeFailureEvidence {
+  error: unknown;
+  ledger: JudgeAccountingLedger;
+  usage: Record<string, number>;
+}
+
+// Providers and assertions are independently bundled in ESM and CJS. Share only the
+// async context; each invocation owns its evidence, never the thrown value.
+const failureKey = Symbol.for("oh-my-promptfoo.JudgeFailureContext");
+const shared = globalThis as typeof globalThis & {
+  [failureKey]?: AsyncLocalStorage<JudgeFailureContext>;
+};
+shared[failureKey] ??= new AsyncLocalStorage<JudgeFailureContext>();
+const failureContexts = shared[failureKey];
+
+export class JudgeFailureContext {
+  evidence?: JudgeFailureEvidence;
+
+  forError(error: unknown): JudgeFailureEvidence | undefined {
+    return this.evidence && Object.is(this.evidence.error, error) ? this.evidence : undefined;
+  }
+
+  run<T>(request: () => Promise<T>): Promise<T> {
+    return failureContexts.run(this, request);
+  }
+}
+
+/** Carry a native-only permanent failure to an enclosing judge without wrapping it. */
+export function preserveJudgeFailure(evidence: JudgeFailureEvidence): void {
+  const context = failureContexts.getStore();
+  if (context) context.evidence = evidence;
+}
+
+/** Diagnostics must not replace a throwing provider's original failure. */
+export function judgeFailureMessage(error: unknown): string {
+  try {
+    const message = error instanceof Error ? error.message : String(error);
+    if (typeof message === "string" && message.trim()) return message;
+  } catch {
+    // Opaque thrown values need not support string coercion.
+  }
+  return "Judge execution failed";
 }
 
 const MAX_ATTEMPTS = 1024;
@@ -71,10 +116,17 @@ export class JudgeAccountingCollector {
   private overflow = false;
   private nanoAiu = 0;
   private nativeCost = 0;
+  private copilotAccountingSeen = false;
+
+  get hasCopilotAccounting(): boolean {
+    return this.copilotAccountingSeen;
+  }
 
   record(metadata: unknown, cached = false, cost?: unknown): void {
-    if (this.overflow) return;
+    if (this.overflow && this.copilotAccountingSeen) return;
     const reply = replyAccounting(metadata, cached);
+    this.copilotAccountingSeen ||= reply.attempts.some((leaf) => leaf.accounting !== undefined);
+    if (this.overflow) return;
     if (this.ledger.attempts.length + reply.attempts.length > MAX_ATTEMPTS) {
       // A prefix would look complete to consumers. One unknown leaf fails all totals closed.
       this.ledger.attempts = [{ cached: false }];

@@ -10,6 +10,7 @@
 
 * **copilot:** capture bounded final session nano-AIU metrics with versioned units and completeness; export USD usage value only for complete reported totals instead of treating premium-request multipliers as money. Preserve partial/error accounting and distinguish measured zero from unavailable telemetry.
 * **grading:** retain a bounded, authoritative Copilot attempt ledger across rubric retries and judge fallbacks, including failures; exclude cached usage and reject incomplete or mixed-unit monetary totals without duplicating batched criterion spend.
+* **accounting:** preserve empty-message execution failures, retain failure history after ledger overflow, and carry nested failed-attempt usage across bundled entrypoints without changing native-only throws or cancellation.
 
 * **workspace:** remove a half-made runtime root when initialization fails after creating it, so later runs no longer refuse it. Recovery now names an unmarked runtime root and says it is a leftover from an interrupted run that is safe to delete when no eval is running, instead of a bare `ENOENT` ([#95](https://github.com/allagentsdev/oh-my-promptfoo/issues/95)).
 * **dependencies:** update the development Promptfoo peer to `0.124.1`, override get-uri's FTP client to patched `6.2.3`, and pin Forge's canonical RSA DigestInfo fix by immutable source commit. Add real-dependency rejection regressions to daily audits; document the Git audit coverage limit and intentional separate-host PASV restriction.

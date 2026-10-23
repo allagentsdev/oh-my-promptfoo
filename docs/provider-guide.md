@@ -378,6 +378,8 @@ workspace validation fails. `unavailable` has no valid monetary total and a
 fixed reason code. Partial and unavailable responses omit generic `cost`.
 Snapshot metadata and measured tokens survive errors when the runner can return
 a valid result; a forcibly killed process cannot supply missing telemetry.
+An execution failure remains a failure even when its error message is empty;
+retained assistant text does not turn that failed call into a successful grade.
 
 Only a complete snapshot supplies generic `response.cost`: **USD usage value**
 `totalNanoAiu / 100_000_000_000`. One billion nano-AIU is one AI credit; one

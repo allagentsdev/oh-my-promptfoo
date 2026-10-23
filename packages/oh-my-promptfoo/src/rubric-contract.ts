@@ -1,5 +1,11 @@
 import { createRequire } from "node:module";
-import { JudgeAccountingCollector, type JudgeAccountingLedger } from "./judge-accounting.js";
+import {
+  JudgeAccountingCollector,
+  type JudgeAccountingLedger,
+  JudgeFailureContext,
+  judgeFailureMessage,
+  preserveJudgeFailure,
+} from "./judge-accounting.js";
 
 export interface RubricComponent {
   metric: string;
@@ -333,24 +339,23 @@ export async function gradeRubric(
   let previousReply: GraderReply | undefined;
   for (let attempt = 0; attempt < 2; attempt++) {
     let reply: GraderReply;
+    const failureContext = new JudgeFailureContext();
     try {
-      reply = await request(attempt);
+      reply = await failureContext.run(() => request(attempt));
     } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") throw error;
+      const evidence = failureContext.forError(error);
       // Native provider misconfiguration still fails the row. Once session accounting
-      // exists, retain it if the malformed-verdict retry throws instead of replying.
-      if (
-        (error instanceof Error && error.name === "AbortError") ||
-        !accounting.ledger.attempts.some((leaf) => leaf.accounting !== undefined)
-      )
+      // exists, retain every nested retry attempt without changing the thrown value.
+      if (!accounting.hasCopilotAccounting) {
+        if (evidence) preserveJudgeFailure(evidence);
         throw error;
-      accounting.record(undefined);
-      usages.push({ numRequests: 1 });
-      return gradingFailure(
-        error instanceof Error ? error.message : String(error),
-        usages,
-        accounting,
-        { metadata: previousReply?.metadata },
-      );
+      }
+      accounting.record(evidence ? { judgeAccounting: evidence.ledger } : undefined);
+      usages.push(evidence?.usage ?? { numRequests: 1 });
+      return gradingFailure(judgeFailureMessage(error), usages, accounting, {
+        metadata: previousReply?.metadata,
+      });
     }
     previousReply = reply;
     accounting.record(reply.metadata, reply.cached, reply.usage?.cost);

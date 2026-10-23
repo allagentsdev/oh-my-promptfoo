@@ -71,7 +71,7 @@ export class CopilotClient {
             callback({ type: "assistant.usage", data: { inputTokens: 3, outputTokens: 2, cost } });
           callback({ type: "session.usage_info", data: { totalNanoAiu: 7_000_000_000 } });
           callback({ type: "session.shutdown", data: { totalNanoAiu: 6_000_000_000 } });
-          const content = "accounting fixture output";
+          const content = scenario.output ?? "accounting fixture output";
           callback({ type: "assistant.message", data: { content } });
           if (scenario.waitForAbort) {
             await new Promise((_, reject) => {
@@ -87,7 +87,8 @@ export class CopilotClient {
             await writeFile(target, "modified protected source");
           }
           settled = true;
-          if (scenario.executionError) throw Error("fixture execution failed");
+          if (scenario.executionError)
+            throw Error(scenario.executionError === "empty" ? "" : "fixture execution failed");
           return { data: { content } };
         }
         if (prompt.includes("AGENT_ASSERT_E2E:")) {

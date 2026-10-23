@@ -1609,6 +1609,65 @@ describe("direct Copilot provider", () => {
       await provider.cleanup();
     }
   });
+  for (const mode of ["direct", "workspace"] as const) {
+    test(`empty-message execution failures retain nonempty errors and partial accounting in ${mode} Copilot calls`, async () => {
+      const fixture = await readFile(
+        new URL("./fixtures/copilot-sdk.mjs", import.meta.url),
+        "utf8",
+      );
+      const path = await project("@github/copilot-sdk", fixture);
+      const provider =
+        mode === "direct"
+          ? new CopilotSdkProvider({
+              config: {
+                basePath: path,
+                working_dir: ".",
+                model: "fixture-requested",
+                timeoutMs: 5000,
+              },
+            })
+          : new Provider({
+              config: {
+                basePath: path,
+                delegate: { id: "copilot-sdk", config: { model: "fixture-requested" } },
+                workspace: { sources: [] },
+                timeoutMs: 5000,
+              },
+              env: {
+                ALLAGENTS_CACHE_ROOT: join(path, "cache"),
+                ALLAGENTS_WORKSPACE_ROOT: join(path, "runtime"),
+              },
+            });
+      const passingVerdict = JSON.stringify({
+        components: [{ metric: "accuracy", pass: true, score: 1, reason: "Verified" }],
+      });
+      try {
+        const response = await provider.callApi(
+          accountingPrompt({
+            metrics: "complete",
+            executionError: "empty",
+            output: passingVerdict,
+          }),
+        );
+        expect(response.output).toBe(passingVerdict);
+        expect(typeof response.error === "string" && response.error.trim().length > 0).toBe(true);
+        expect(response.cost).toBeUndefined();
+        expect((response.metadata as any).copilot.accounting).toMatchObject({
+          status: "partial",
+          reason: "execution_incomplete",
+          totalNanoAiu: 2_500_000_000,
+        });
+        expect(response.tokenUsage).toMatchObject({
+          prompt: 6,
+          completion: 4,
+          total: 10,
+          numRequests: 2,
+        });
+      } finally {
+        await provider.cleanup();
+      }
+    }, 15_000);
+  }
   test("cancellation retains settled Copilot accounting through the delegate protocol", async () => {
     const { path, provider } = await accountingProvider();
     const controller = new AbortController();

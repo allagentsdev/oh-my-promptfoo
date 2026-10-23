@@ -226,6 +226,10 @@ affect every row and should not pass for ordinary failed grades. After a prior
 Copilot attempt reported accounting, a later call/load throw instead returns a
 failed grade retaining that evidence and an unknown final leaf. It does not try
 another judge past the permanent error. Explicit cancellation still propagates.
+Native-only throws preserve their original value, including frozen or opaque
+objects. An enclosing accounted fallback or rubric retry retains the nested
+attempts, tokens and requests without wrapping that value. Ledger overflow does
+not erase the earlier Copilot history used to retain subsequent failures.
 
 ### Re-running after a judge outage
 

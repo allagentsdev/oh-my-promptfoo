@@ -636,11 +636,10 @@ async function runCopilot(frame: CallFrame, signal: AbortSignal): Promise<JsonOb
   const error = cleanupErrors.length
     ? "Copilot cleanup failed"
     : callFailed
-      ? callError instanceof Error
-        ? callError.message
-        : String(callError)
+      ? (callError instanceof Error ? callError.message : String(callError)) ||
+        "Copilot execution failed"
       : sessionError;
-  if ((error || signal.aborted) && accounting.status === "complete") {
+  if ((callFailed || error || signal.aborted) && accounting.status === "complete") {
     accounting.status = "partial";
     accounting.reason = "execution_incomplete";
   }
