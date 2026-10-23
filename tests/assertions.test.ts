@@ -1149,12 +1149,11 @@ test("a verdict keeps the judge's metadata and reports only the provider's own c
   const fresh = await llmAssert("answer", judgedBy(custom.provider));
   assert.equal(fresh.pass, true);
   // A judge's metadata cannot claim a cache hit; only the response's cached flag does.
-  assert.deepEqual(fresh.metadata, {
-    model: "fixture-model",
-    trace: { id: "t-1" },
-    renderedGradingPrompt: custom.calls[0].prompt,
-    judge: "stub",
-  });
+  assert.equal(fresh.metadata.model, "fixture-model");
+  assert.deepEqual(fresh.metadata.trace, { id: "t-1" });
+  assert.equal(fresh.metadata.renderedGradingPrompt, custom.calls[0].prompt);
+  assert.equal(fresh.metadata.judge, "stub");
+  assert.equal(Object.hasOwn(fresh.metadata, "cachedResponse"), false);
 
   const cached = stub([{ output: verdict(), cached: true, tokenUsage: { cached: 40, total: 40 } }]);
   const replayed = await llmAssert("answer", judgedBy(cached.provider));
@@ -1196,4 +1195,80 @@ test("a verdict keeps the judge's metadata and reports only the provider's own c
     ],
   );
   assert.equal(rescued.tokensUsed?.numRequests, 2);
+});
+
+test("a cached fallback verdict keeps earlier live judge accounting through llmAssert", async () => {
+  const live = {
+    version: 1,
+    source: "session.rpc.usage.getMetrics",
+    scope: "session",
+    unit: "nano-AIU",
+    status: "complete",
+    totalNanoAiu: 1_000_000_000,
+  } as const;
+  const down = stub(
+    [
+      {
+        error: "API error: 503",
+        metadata: { http: { status: 503 }, copilot: { accounting: live } },
+      },
+    ],
+    "live-down",
+  );
+  const up = stub([{ output: verdict(), cached: true }], "cached-up");
+  const chain = new FallbackProvider({
+    config: { providers: [down.provider, up.provider], cooldownMs: 0 },
+  });
+  const result = await llmAssert("answer", judgedBy(chain));
+  assert.equal(result.pass, true);
+  assert.equal(result.metadata.cachedResponse, undefined);
+  assert.equal(result.tokensUsed?.cost, 0.01);
+  assert.deepEqual(result.metadata.judgeAccounting, {
+    version: 1,
+    attempts: [{ cached: false, accounting: live }, { cached: true }],
+  });
+});
+
+test("batched rubric retries flatten nested fallback accounting once without charging criteria", async () => {
+  const accounting = (totalNanoAiu: number) =>
+    ({
+      version: 1,
+      source: "session.rpc.usage.getMetrics",
+      scope: "session",
+      unit: "nano-AIU",
+      status: "complete",
+      totalNanoAiu,
+    }) as const;
+  const leaves = [1, 2, 3, 4].map((value) => accounting(value * 1_000_000_000));
+  const failed = (index: number): JudgeResponse => ({
+    error: "API error: 503",
+    metadata: { http: { status: 503 }, copilot: { accounting: leaves[index] } },
+  });
+  const primary = stub([failed(0), failed(2)], "primary");
+  const backup = stub(
+    [
+      { output: "not JSON", metadata: { copilot: { accounting: leaves[1] } } },
+      { output: verdict(), metadata: { copilot: { accounting: leaves[3] } } },
+    ],
+    "backup",
+  );
+  const inner = new FallbackProvider({
+    config: { providers: [primary.provider, backup.provider], cooldownMs: 0 },
+  });
+  const outer = new FallbackProvider({ config: { providers: [inner], cooldownMs: 0 } });
+  const result = await llmAssert("answer", judgedBy(outer));
+  assert.equal(result.pass, true);
+  assert.deepEqual(result.metadata.judgeAccounting, {
+    version: 1,
+    attempts: leaves.map((accounting) => ({ cached: false, accounting })),
+  });
+  assert.equal(result.tokensUsed?.cost, 0.1);
+  assert.equal(result.tokensUsed?.numRequests, 4);
+  assert.equal(result.componentResults.length, 2);
+  assert.ok(result.componentResults.every((child) => !Object.hasOwn(child, "metadata")));
+  assert.ok(result.componentResults.every((child) => !Object.hasOwn(child, "tokensUsed")));
+  for (const judge of [primary, backup]) {
+    assert.equal(judge.calls.length, 2);
+    assert.equal(judge.calls[1].context?.bustCache, true);
+  }
 });

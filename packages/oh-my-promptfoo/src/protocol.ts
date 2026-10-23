@@ -12,6 +12,7 @@ import {
 } from "@opentelemetry/api";
 import { resolve as resolveImport } from "import-meta-resolve";
 import { closed, type DelegateId, type JsonObject, object, validateEnv } from "./config.js";
+import { copilotFailure } from "./copilot-accounting.js";
 
 export const MAX_FRAME_BYTES = 16 * 1024 * 1024;
 export const MAX_STDERR_BYTES = 64 * 1024;
@@ -27,6 +28,8 @@ export interface CallFrame {
   context: JsonObject;
   delegateEnvKeys?: string[];
   readOnly?: { sourceRoots: string[]; codexHome?: string };
+  /** Host execution deadline shared with bounded optional runtime telemetry. */
+  deadlineMs?: number;
 }
 export interface TraceFrame {
   version: 1;
@@ -203,7 +206,11 @@ export async function runDelegate(
 ): Promise<JsonObject> {
   if (signal?.aborted) throw new Error("Delegate call aborted before execution");
   validateEnv(env, "delegate.env");
-  const encoded = jsonSafe({ ...frame, delegateEnvKeys: Object.keys(env).sort() });
+  const encoded = jsonSafe({
+    ...frame,
+    deadlineMs: Date.now() + timeoutMs,
+    delegateEnvKeys: Object.keys(env).sort(),
+  });
   const childEnvironment = minimalEnvironment(env);
   const sensitive = secrets(
     frame.config,
@@ -234,6 +241,7 @@ export async function runDelegate(
   let terminal: RunnerFrame | undefined,
     failure: Error | undefined,
     stopping = false;
+  let interrupted = false;
   let escalation: ReturnType<typeof setTimeout> | undefined;
   let completionGrace: ReturnType<typeof setTimeout> | undefined;
   function killGroup(sig: NodeJS.Signals): void {
@@ -246,7 +254,9 @@ export async function runDelegate(
         failure ??= new Error("Unable to terminate delegate process group");
     }
   }
-  function stop(error: Error): void {
+  function stop(error: Error, preserveAccounting = false): void {
+    if (!failure) interrupted = preserveAccounting;
+    else if (!preserveAccounting) interrupted = false;
     failure ??= error;
     if (stopping) return;
     stopping = true;
@@ -254,10 +264,10 @@ export async function runDelegate(
     killGroup("SIGTERM");
     escalation = setTimeout(() => killGroup("SIGKILL"), SHUTDOWN_GRACE_MS);
   }
-  const abort = () => stop(new Error("Delegate call aborted"));
+  const abort = () => stop(new Error("Delegate call aborted"), true);
   signal?.addEventListener("abort", abort, { once: true });
   const timer = setTimeout(
-    () => stop(new Error(`Delegate exceeded timeout of ${timeoutMs} ms`)),
+    () => stop(new Error(`Delegate exceeded timeout of ${timeoutMs} ms`), true),
     timeoutMs,
   );
   child.stdin.on("error", () => {});
@@ -385,7 +395,14 @@ export async function runDelegate(
     // Descendants can outlive their runner even after a valid terminal response.
     killGroup("SIGKILL");
     if (stdout.length) throw new Error("Delegate emitted an unterminated protocol frame");
-    if (failure) throw failure;
+    if (failure) {
+      const retained =
+        interrupted && terminal?.type === "result" && frame.delegate === "copilot-sdk"
+          ? copilotFailure(terminal.response, failure.message)
+          : undefined;
+      if (retained) return JSON.parse(redact(jsonSafe(retained), sensitive)) as JsonObject;
+      throw failure;
+    }
     if (!terminal) throw new Error(`Delegate runner exited without a terminal frame: ${stderr}`);
     if (terminal.type === "error") throw new Error(terminal.error);
     if (terminal.type !== "result") throw new Error("Delegate terminal frame is invalid");

@@ -80,8 +80,9 @@ same-user processes. No chmod or snapshot changes the candidate workspace.
 `queueTimeoutMs` separately bounds queue wait, defaulting to 900,000 ms. Both
 accept integers from 1 to 3,600,000 and are independent of `workspaceTimeoutMs`.
 Sessions serialize within a process, separately from provider workers.
-Multiple evaluation processes have independent queues. Reported tokens, request
-counts and cost from all attempts flow through assertion `tokensUsed`. Promptfoo
+Multiple evaluation processes have independent queues. Measured tokens and request
+counts from all attempts flow through assertion `tokensUsed`; scalar costs require
+complete, compatible [judge accounting](grading-guide.md#judge-accounting-v1). Promptfoo
 0.122 aggregates assertion tokens but not `tokensUsed.cost`; consumers can inspect
 the returned cost directly. A time bound is not a dollar budget. See
 [ADR 0008](adr/0008-agent-assert-workspace-grading.md).
@@ -338,13 +339,80 @@ without a local skills directory keep skill loading disabled.
 | `provider` | No | Configure a BYOK endpoint with `baseUrl` and supported SDK fields |
 | `timeoutMs` | No | Limit the call |
 
+### Copilot runtime accounting v1
+
+Direct and workspace-backed Copilot calls use a fresh session and capture its
+optional experimental `session.rpc.usage.getMetrics` snapshot after execution
+settles, before unsubscribing or disconnecting. Capture waits at most one second,
+also bounded by the configured call timeout and the host's remaining deadline
+(reserving 50 ms for returning the response). An unsupported RPC, missing field,
+error or timeout does not turn a successful model response into a failure.
+Actual telemetry availability depends on the installed SDK/CLI; no account or
+billing API is queried, and no pricing table is used.
+
+The response carries this versioned wire record at
+`metadata.copilot.accounting`:
+
+```ts
+type CopilotAccounting = {
+  version: 1;
+  source: "session.rpc.usage.getMetrics";
+  scope: "session";
+  unit: "nano-AIU";
+  status: "complete" | "partial" | "unavailable";
+  totalNanoAiu?: number;
+  reason?: "unsupported" | "timeout" | "capture_failed" | "missing_total"
+    | "invalid_total" | "execution_incomplete" | "session_not_created";
+  requestedModel?: string;
+  currentModel?: string;
+  totalPremiumRequestCost?: number;
+  totalUserRequests?: number;
+};
+```
+
+`totalNanoAiu` must be a nonnegative safe integer. Reported zero is retained;
+absence, negative/fractional/unsafe values, strings, NaN and infinity are not
+zero. `complete` means a valid final session total after successful execution;
+`partial` retains a valid total when execution, cleanup, cancellation or host
+workspace validation fails. `unavailable` has no valid monetary total and a
+fixed reason code. Partial and unavailable responses omit generic `cost`.
+Snapshot metadata and measured tokens survive errors when the runner can return
+a valid result; a forcibly killed process cannot supply missing telemetry.
+An execution failure remains a failure even when its error message is empty;
+retained assistant text does not turn that failed call into a successful grade.
+
+Only a complete snapshot supplies generic `response.cost`: **USD usage value**
+`totalNanoAiu / 100_000_000_000`. One billion nano-AIU is one AI credit; one
+[AI credit is USD0.01](https://docs.github.com/en/copilot/reference/copilot-billing/models-and-pricing).
+This is not an invoice, net/additional spending, allowance allocation or a
+historical estimate. The session total is never added to usage events, shutdown
+events, per-model totals or parent/subagent breakdowns.
+
+`requestedModel` comes only from the request; `currentModel` comes only from
+reported metrics and is not a per-request model history. Both are bounded model
+identifiers (at most 256 ASCII identifier characters). Raw metrics/model/agent
+maps, prompts, output, auth and opaque errors are not copied into accounting.
+The existing `metadata.copilot.sdkVersion` identifies the supported SDK contract,
+not a detected CLI version.
+
+The RPC's `totalPremiumRequestCost` is a finite, nonnegative user-initiated
+**multiplier** total (fractional values allowed, bounded by MAX_SAFE_INTEGER);
+`totalUserRequests` is its nonnegative safe-integer request count. Neither is USD.
+Separately, `metadata.copilot.premiumRequestUsage` contains
+`{ source: "assistant.usage", scope: "received-events", reportedCost?, numRequests }`.
+Its `reportedCost` sums received per-call multipliers only when every received
+value and the sum are valid; missing/invalid values or no received events omit
+it. These event counters do not establish complete session billing and are
+never exported as generic money.
+
+
 ## Filesystem behavior
 
 In `auto` mode, writable views try verified reflink, then disk-admitted full copy. In `copy-only` mode they directly use admitted full copies, without a reflink probe. Protected read-only checkouts use forced reflinks with full-copy fallback in `auto`, or physical copies in `copy-only`; they are admitted once per distinct source identity and mode and then shared by matching rows. A full writable source copy consumes disk per retained row; a protected read-only copy consumes peak disk in addition to the seed and any other sources. Insufficient capacity fails before copying. Plan capacity for seeds, protected copies, mutable views, Git objects, and temporary acquisition at peak concurrency; large-repository writable rollout depends on actual runner capacity or verified reflinks.
 
 On Windows, protected source trees use scoped NTFS ACLs. Linux-only tmpfs acquisition is not available; HTTPS Git requires capacity-bounded staging and fails closed without it. Workspace cache locks and process identity require the system Windows PowerShell executable.
 
-Existing Git object files remain read-only because Git creates new objects instead of editing them; their directories remain writable. The sparse benchmark measures 1,000 views of one 2 GiB file; it does not predict the metadata or physical copy cost of large source trees. Cache inventories are bounded to one million entries and 512 MiB of JSON. macOS cache locks require Python 3 from Xcode command line tools. Copilot's experimental usage `cost` is forwarded in SDK units and should not be interpreted as a USD price.
+Existing Git object files remain read-only because Git creates new objects instead of editing them; their directories remain writable. The sparse benchmark measures 1,000 views of one 2 GiB file; it does not predict the metadata or physical copy cost of large source trees. Cache inventories are bounded to one million entries and 512 MiB of JSON. macOS cache locks require Python 3 from Xcode command line tools.
 
 ## For maintainers
 

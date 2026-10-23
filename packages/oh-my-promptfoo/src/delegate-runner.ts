@@ -10,6 +10,13 @@ import { resolve as resolveImport } from "import-meta-resolve";
 import { destination } from "../../workspace-core/src/config.js";
 import { closed, type JsonObject, object, validateDelegateConfig, validateEnv } from "./config.js";
 import {
+  type CopilotAccounting,
+  copilotUsageValue,
+  safeCount,
+  safeMultiplier,
+  sessionAccounting,
+} from "./copilot-accounting.js";
+import {
   claudeReadAllowed,
   disabledWorkspaceSkills,
   graderConfig,
@@ -144,6 +151,7 @@ async function execute(input: JsonObject): Promise<void> {
         "context",
         "delegateEnvKeys",
         "readOnly",
+        "deadlineMs",
       ],
       "call",
     );
@@ -165,6 +173,8 @@ async function execute(input: JsonObject): Promise<void> {
       throw new Error("working_dir is not a directory");
     const frame = input as unknown as CallFrame;
     validateDelegateConfig(frame.delegate, frame.config);
+    if (frame.deadlineMs !== undefined && (!safeCount(frame.deadlineMs) || frame.deadlineMs === 0))
+      throw new Error("Call deadline must be a positive safe integer");
     if (frame.readOnly !== undefined) {
       const policy = closed(frame.readOnly, ["sourceRoots", "codexHome"], "readOnly");
       if (!Array.isArray(policy.sourceRoots))
@@ -383,6 +393,7 @@ async function runNative(
 interface SessionLike {
   rpc?: {
     skills?: { getInvoked?: () => Promise<{ skills: unknown }> };
+    usage?: { getMetrics?: () => Promise<unknown> };
   };
   on(callback: (event: { type: string; data: JsonObject }) => void): (() => void) | undefined;
   sendAndWait(
@@ -446,11 +457,16 @@ async function runCopilot(frame: CallFrame, signal: AbortSignal): Promise<JsonOb
   let output = "",
     sessionError: string | undefined;
   const usage = { prompt: 0, completion: 0, total: 0, cached: 0, numRequests: 0 };
-  let cost = 0,
-    events = 0,
+  let premiumCost = 0;
+  let premiumCostComplete = true;
+  let events = 0,
     eventBytes = 0;
-  let result: JsonObject | undefined;
+  let accounting: CopilotAccounting = {
+    ...sessionAccounting(undefined, false, frame.config.model),
+    reason: "session_not_created",
+  };
   let callError: unknown;
+  let callFailed = false;
   const cleanupErrors: unknown[] = [];
   const tools = new Set<string>();
   const skillReads = new Map<string, SkillCall>();
@@ -509,7 +525,9 @@ async function runCopilot(frame: CallFrame, signal: AbortSignal): Promise<JsonOb
           usage.total += input + completion;
           usage.cached += typeof data.cacheReadTokens === "number" ? data.cacheReadTokens : 0;
           usage.numRequests++;
-          cost += typeof data.cost === "number" ? data.cost : 0;
+          if (safeMultiplier(data.cost) && safeMultiplier(premiumCost + data.cost))
+            premiumCost += data.cost;
+          else premiumCostComplete = false;
         } else if (event.type === "session.error")
           sessionError = typeof data.message === "string" ? data.message : "Copilot session failed";
         else if (
@@ -574,25 +592,55 @@ async function runCopilot(frame: CallFrame, signal: AbortSignal): Promise<JsonOb
         // Experimental SDK inventory is optional; explicit read-tool evidence remains valid.
       }
     }
-    if (sessionError)
-      result = { error: sessionError, ...(output ? { output } : {}), tokenUsage: usage, cost };
-    else {
-      output = final?.data?.content ?? output;
-      result = {
-        output,
-        tokenUsage: usage,
-        cost,
-        metadata: {
-          copilot: { sdkVersion: "1.0.22", skillSupport: true },
-          skillCalls,
-        },
-      };
-    }
+    output = final?.data?.content ?? output;
   } catch (error) {
+    callFailed = true;
     callError = error;
   } finally {
+    // The cumulative snapshot is the only monetary source. Capture even after a
+    // failed send, while the session and its subscription are still available.
+    if (session) {
+      const budget = Math.max(
+        0,
+        Math.min(
+          1000,
+          (frame.config.timeoutMs as number | undefined) ?? 900_000,
+          (frame.deadlineMs ?? Infinity) - Date.now() - 50,
+        ),
+      );
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        const getMetrics = session.rpc?.usage?.getMetrics;
+        if (!getMetrics) accounting.reason = "unsupported";
+        else if (!budget) accounting.reason = "timeout";
+        else {
+          const timeout = Symbol("metrics timeout");
+          const metrics = await Promise.race([
+            Promise.resolve().then(() => getMetrics.call(session!.rpc!.usage)),
+            new Promise<symbol>((resolve) => {
+              timer = setTimeout(() => resolve(timeout), budget);
+            }),
+          ]);
+          if (metrics === timeout) accounting.reason = "timeout";
+          else
+            accounting = sessionAccounting(
+              metrics,
+              !callFailed && !sessionError && !signal.aborted,
+              frame.config.model,
+            );
+        }
+      } catch {
+        accounting.reason = "capture_failed";
+      } finally {
+        clearTimeout(timer);
+      }
+    }
     signal.removeEventListener("abort", abort);
-    if (typeof unsubscribe === "function") unsubscribe();
+    try {
+      if (typeof unsubscribe === "function") unsubscribe();
+    } catch (error) {
+      cleanupErrors.push(error);
+    }
     for (const id of tools)
       emit({
         version: 1,
@@ -617,21 +665,35 @@ async function runCopilot(frame: CallFrame, signal: AbortSignal): Promise<JsonOb
       }
     }
   }
-  if (cleanupErrors.length)
-    throw new AggregateError(
-      [...(callError ? [callError] : []), ...cleanupErrors],
-      "Copilot cleanup failed",
-    );
-  if (callError) {
-    if (usage.numRequests || cost > 0)
-      return {
-        error: callError instanceof Error ? callError.message : String(callError),
-        ...(output ? { output } : {}),
-        tokenUsage: usage,
-        cost,
-      };
-    throw callError;
+  const error = cleanupErrors.length
+    ? "Copilot cleanup failed"
+    : callFailed
+      ? (callError instanceof Error ? callError.message : String(callError)) ||
+        "Copilot execution failed"
+      : sessionError;
+  if ((callFailed || error || signal.aborted) && accounting.status === "complete") {
+    accounting.status = "partial";
+    accounting.reason = "execution_incomplete";
   }
-  if (!result) throw new Error("Copilot session returned no result");
-  return result;
+  const cost = copilotUsageValue(accounting);
+  return {
+    ...(error ? { error } : signal.aborted ? { error: "Copilot call aborted" } : {}),
+    output,
+    tokenUsage: usage,
+    ...(cost === undefined ? {} : { cost }),
+    metadata: {
+      copilot: {
+        sdkVersion: "1.0.22",
+        skillSupport: true,
+        accounting,
+        premiumRequestUsage: {
+          source: "assistant.usage",
+          scope: "received-events",
+          numRequests: usage.numRequests,
+          ...(usage.numRequests && premiumCostComplete ? { reportedCost: premiumCost } : {}),
+        },
+      },
+      skillCalls,
+    },
+  };
 }

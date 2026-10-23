@@ -196,10 +196,14 @@ for why the judge works this way.
   account or another provider instance is not skipped. If every judge is
   cooling down, it tries the one whose cooldown ends first. A success clears
   that judge's cooldown.
-- **Result.** The answering judge's reply, with token usage and cost summed
-  over every attempt, and `metadata.fallback`: `answeredBy` (the judge's label,
-  or its id) and `attempts`, one `{ provider, status, error, cached,
-  latencyMs }` per judge tried. `llmAssert` copies it into its result
+- **Result.** The answering judge's reply, with token usage across attempts and
+  scalar cost only for complete compatible accounting, plus `metadata.fallback`:
+  `answeredBy` (the judge's label or id) and `attempts`, one
+  `{ provider, status, error, cached, latencyMs }` per judge tried. A retained
+  permanent call/load failure carries `permanentError: true`; nested fallbacks
+  preserve that disposition instead of retrying from stale earlier HTTP metadata.
+  The wrapper is cached only when all its leaf attempts were cached.
+  `llmAssert` copies these diagnostics into its result
   metadata. If every judge fails, the error lists each one, for example
   `All 3 judges failed: primary: …; …`, and says how many were skipped while
   cooling down.
@@ -214,11 +218,18 @@ for why the judge works this way.
 | The judge returns an empty reply | FAIL with `graderError`, as above |
 | Every judge in a `FallbackProvider` chain fails | FAIL with `graderError`; the reason lists each attempt |
 | The verdict can't be parsed | One retry that bypasses the cache, then FAIL with `graderError` |
-| The judge's provider throws, for example no API key or an unknown provider id | Row ERROR, as for `llm-rubric` |
+| The judge's provider throws, for example no API key or an unknown provider id | Row ERROR, as for `llm-rubric`, unless a prior Copilot attempt's accounting must be retained (see below) |
 | No judge configured, `provider:` beside `config:`, a list of judges, or invalid `llmAssert` config | Row ERROR |
 
-A throw stays an ERROR on purpose: missing credentials affect every row and
-should not pass for ordinary failed grades.
+First-call and native-only configuration throws stay ERROR: missing credentials
+affect every row and should not pass for ordinary failed grades. After a prior
+Copilot attempt reported accounting, a later call/load throw instead returns a
+failed grade retaining that evidence and an unknown final leaf. It does not try
+another judge past the permanent error. Explicit cancellation still propagates.
+Native-only throws preserve their original value, including frozen or opaque
+objects. An enclosing accounted fallback or rubric retry retains the nested
+attempts, tokens and requests without wrapping that value. Ledger overflow does
+not erase the earlier Copilot history used to retain subsequent failures.
 
 ### Re-running after a judge outage
 
@@ -226,8 +237,8 @@ should not pass for ordinary failed grades.
 timeouts, empty replies) are now FAIL rows, so `--retry-errors` skips them.
 Re-run them with `--filter-failing <evalId>`, which takes failures and errors.
 Both re-run the target as well as the judge, as they do for `llm-rubric`.
-Missing credentials and bad provider ids are still ERROR, so `--retry-errors`
-still picks those up once the environment is fixed. CI that counts ERROR and
+First-call/native-only missing credentials and bad provider ids remain ERROR,
+so `--retry-errors` still picks those up once the environment is fixed. CI that counts ERROR and
 FAIL separately will see judge outages move from one count to the other.
 
 ### Token usage
@@ -235,8 +246,10 @@ FAIL separately will see judge outages move from one count to the other.
 `llmAssert` reports the judge's token usage back to Promptfoo, which records it
 under `tokenUsage.assertions`: grader spend, separate from the agent under
 test. `tokensUsed` adds up every judge call the assertion made, including each
-`FallbackProvider` attempt and the malformed-verdict retry, and `cost` is the
-sum of the costs the provider reported. `numRequests` counts the calls
+`FallbackProvider` attempt and the malformed-verdict retry. Scalar `cost` is
+present only when every executed attempt has complete, compatible accounting;
+native-only provider scalars are never mixed with Copilot usage values.
+`numRequests` counts the calls
 `llmAssert` and `FallbackProvider` sent; a provider's own transport retries are
 not visible, the same limit `llm-rubric` has. A failed grade always carries
 `tokensUsed`, counting the requests made even when the judge measured nothing.
@@ -244,6 +257,44 @@ A graded result from a judge that reports no usage reports nothing rather than
 zero, so an unmeasured call is never summed into a run total as a free one.
 When the verdict came from the provider's cache, the cached reply counts no new
 request and the result carries `metadata.cachedResponse: true`.
+
+### Judge accounting v1
+
+`llmAssert`, `agentAssert` and `FallbackProvider` preserve an ordered,
+JSON-safe leaf ledger at `metadata.judgeAccounting`:
+
+```ts
+type JudgeAccounting = {
+  version: 1;
+  attempts: Array<{
+    cached: boolean;
+    accounting?: CopilotAccounting; // The exact record documented in the provider guide.
+  }>;
+};
+```
+
+Nested fallback leaves are flattened once across malformed-verdict retries.
+This ledger is authoritative: do not also add the final reply's
+`metadata.copilot.accounting` or fallback diagnostic attempts. Generated criterion
+children do not own another copy of the batch's spend. Cached snapshots remain
+evidence but contribute no new usage; an executed missing, invalid, partial or
+unavailable leaf prevents a complete Copilot total. Unknown/native leaves stay
+explicitly present rather than being treated as free. All-native scalar costs
+retain their provider-defined basis only when every executed reply reports a
+valid scalar.
+
+The ledger is limited to 1,024 leaves. Invalid/oversized nested ledgers become
+one uncached unknown leaf; cumulative overflow replaces the whole ledger with
+that sentinel and omits scalar cost, never silently truncating a complete total.
+Only whitelisted accounting fields are retained, not raw provider metadata or
+errors. The ledger survives provider errors, empty replies, malformed-verdict
+exhaustion, and later call/load throws after a retained Copilot attempt.
+First-call configuration throws and explicit cancellation keep their existing
+error behavior; no unreported spend is inferred from them.
+
+See [Copilot runtime accounting v1](provider-guide.md#copilot-runtime-accounting-v1)
+for the exact nano-AIU schema, conversion and runtime/invoice limitations.
+
 
 ### Caching
 

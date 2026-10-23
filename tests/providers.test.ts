@@ -1511,6 +1511,364 @@ const sdk = `export class CopilotClient {
  async stop(){return [];} async forceStop(){}
 }`;
 describe("direct Copilot provider", () => {
+  async function accountingProvider(timeoutMs = 5000, model = "fixture-requested") {
+    const fixture = await readFile(new URL("./fixtures/copilot-sdk.mjs", import.meta.url), "utf8");
+    const path = await project("@github/copilot-sdk", fixture);
+    return {
+      path,
+      provider: new CopilotSdkProvider({
+        config: { basePath: path, working_dir: ".", model, timeoutMs },
+      }),
+    };
+  }
+  const accountingPrompt = (scenario: Record<string, unknown>) =>
+    `accounting:${JSON.stringify(scenario)}`;
+  test("session creation failure retains unavailable accounting and stops its client", async () => {
+    const { path, provider } = await accountingProvider(5000, "fixture-create-error");
+    try {
+      const response = await provider.callApi("not sent");
+      expect(response.error).toContain("session creation failed");
+      expect(response.cost).toBeUndefined();
+      expect((response.metadata as any).copilot.accounting).toMatchObject({
+        status: "unavailable",
+        reason: "session_not_created",
+      });
+      expect((response.metadata as any).copilot.accounting.totalNanoAiu).toBeUndefined();
+      expect(await readFile(join(path, "accounting-stopped"), "utf8")).toBe("stopped");
+    } finally {
+      await provider.cleanup();
+    }
+  });
+  test("session accounting uses only the final nano-AIU total and keeps multipliers separate", async () => {
+    const { provider } = await accountingProvider();
+    try {
+      const response = await provider.callApi(accountingPrompt({ metrics: "complete" }));
+      expect(response.error).toBeUndefined();
+      expect(response.output).toBe("accounting fixture output");
+      expect(response.cost).toBe(0.025);
+      const copilot = (response.metadata as any).copilot;
+      expect(copilot.accounting).toEqual({
+        version: 1,
+        source: "session.rpc.usage.getMetrics",
+        scope: "session",
+        unit: "nano-AIU",
+        status: "complete",
+        totalNanoAiu: 2_500_000_000,
+        requestedModel: "fixture-requested",
+        currentModel: "fixture-current",
+        totalPremiumRequestCost: 1.5,
+        totalUserRequests: 2,
+      });
+      expect(copilot.premiumRequestUsage).toEqual({
+        source: "assistant.usage",
+        scope: "received-events",
+        reportedCost: 0.75,
+        numRequests: 2,
+      });
+      expect(JSON.stringify(copilot)).not.toContain("must not escape");
+    } finally {
+      await provider.cleanup();
+    }
+  });
+  for (const [metrics, reason] of [
+    ["zero", undefined],
+    ["missing", "missing_total"],
+    ["invalid", "invalid_total"],
+    ["unsafe", "invalid_total"],
+    ["fractional", "invalid_total"],
+    ["negative", "invalid_total"],
+    ["nan", "invalid_total"],
+    ["infinity", "invalid_total"],
+    ["unsupported", "unsupported"],
+    ["throw", "capture_failed"],
+  ] as const) {
+    test(`session accounting preserves ${metrics} metrics without inventing cost`, async () => {
+      const { provider } = await accountingProvider();
+      try {
+        const response = await provider.callApi(accountingPrompt({ metrics }));
+        expect(response.error).toBeUndefined();
+        expect(response.output).toBe("accounting fixture output");
+        const accounting = (response.metadata as any).copilot.accounting;
+        expect(accounting.status).toBe(metrics === "zero" ? "complete" : "unavailable");
+        expect(accounting.reason).toBe(reason);
+        expect(accounting.totalNanoAiu).toBe(metrics === "zero" ? 0 : undefined);
+        expect(response.cost).toBe(metrics === "zero" ? 0 : undefined);
+      } finally {
+        await provider.cleanup();
+      }
+    });
+  }
+  for (const timeoutMs of [200, 5000]) {
+    test(`hung optional metrics preserve success within the ${timeoutMs}ms deadline and one-second cap`, async () => {
+      const { provider } = await accountingProvider(timeoutMs);
+      try {
+        const started = Date.now();
+        const response = await provider.callApi(accountingPrompt({ metrics: "hang" }));
+        expect(Date.now() - started).toBeLessThan(timeoutMs === 200 ? 1500 : 3000);
+        expect(response.error).toBeUndefined();
+        expect(response.output).toBe("accounting fixture output");
+        expect(response.cost).toBeUndefined();
+        expect((response.metadata as any).copilot.accounting).toMatchObject({
+          status: "unavailable",
+          reason: "timeout",
+        });
+      } finally {
+        await provider.cleanup();
+      }
+    });
+  }
+  test("execution errors retain a partial session snapshot without generic cost", async () => {
+    const { provider } = await accountingProvider();
+    try {
+      const response = await provider.callApi(
+        accountingPrompt({ metrics: "complete", executionError: true }),
+      );
+      expect(response.error).toContain("fixture execution failed");
+      expect(response.cost).toBeUndefined();
+      expect((response.metadata as any).copilot.accounting).toMatchObject({
+        status: "partial",
+        reason: "execution_incomplete",
+        totalNanoAiu: 2_500_000_000,
+      });
+    } finally {
+      await provider.cleanup();
+    }
+  });
+  for (const mode of ["direct", "workspace"] as const) {
+    test(`empty-message execution failures retain nonempty errors and partial accounting in ${mode} Copilot calls`, async () => {
+      const fixture = await readFile(
+        new URL("./fixtures/copilot-sdk.mjs", import.meta.url),
+        "utf8",
+      );
+      const path = await project("@github/copilot-sdk", fixture);
+      const provider =
+        mode === "direct"
+          ? new CopilotSdkProvider({
+              config: {
+                basePath: path,
+                working_dir: ".",
+                model: "fixture-requested",
+                timeoutMs: 5000,
+              },
+            })
+          : new Provider({
+              config: {
+                basePath: path,
+                delegate: { id: "copilot-sdk", config: { model: "fixture-requested" } },
+                workspace: { sources: [] },
+                timeoutMs: 5000,
+              },
+              env: {
+                ALLAGENTS_CACHE_ROOT: join(path, "cache"),
+                ALLAGENTS_WORKSPACE_ROOT: join(path, "runtime"),
+              },
+            });
+      const passingVerdict = JSON.stringify({
+        components: [{ metric: "accuracy", pass: true, score: 1, reason: "Verified" }],
+      });
+      try {
+        const response = await provider.callApi(
+          accountingPrompt({
+            metrics: "complete",
+            executionError: "empty",
+            output: passingVerdict,
+          }),
+        );
+        expect(response.output).toBe(passingVerdict);
+        expect(typeof response.error === "string" && response.error.trim().length > 0).toBe(true);
+        expect(response.cost).toBeUndefined();
+        expect((response.metadata as any).copilot.accounting).toMatchObject({
+          status: "partial",
+          reason: "execution_incomplete",
+          totalNanoAiu: 2_500_000_000,
+        });
+        expect(response.tokenUsage).toMatchObject({
+          prompt: 6,
+          completion: 4,
+          total: 10,
+          numRequests: 2,
+        });
+      } finally {
+        await provider.cleanup();
+      }
+    }, 15_000);
+  }
+  test("cancellation retains settled Copilot accounting through the delegate protocol", async () => {
+    const { path, provider } = await accountingProvider();
+    const controller = new AbortController();
+    try {
+      const pending = provider.callApi(
+        accountingPrompt({ metrics: "complete", waitForAbort: true }),
+        undefined,
+        { abortSignal: controller.signal },
+      );
+      const deadline = Date.now() + 3000;
+      while (true) {
+        try {
+          await access(join(path, "accounting-started"));
+          break;
+        } catch {
+          if (Date.now() >= deadline) throw new Error("Fixture did not start");
+        }
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      controller.abort();
+      const response = await pending;
+      expect(response.error).toContain("aborted");
+      expect(response.cost).toBeUndefined();
+      expect((response.metadata as any).copilot.accounting).toMatchObject({
+        status: "partial",
+        reason: "execution_incomplete",
+        totalNanoAiu: 2_500_000_000,
+      });
+    } finally {
+      await provider.cleanup();
+    }
+  });
+  test("cleanup failure retains a partial snapshot without generic cost", async () => {
+    const { provider } = await accountingProvider();
+    try {
+      const response = await provider.callApi(
+        accountingPrompt({ metrics: "complete", cleanupError: true }),
+      );
+      expect((response.metadata as any).copilot.accounting).toMatchObject({
+        status: "partial",
+        totalNanoAiu: 2_500_000_000,
+      });
+      expect(response.error).toContain("cleanup failed");
+      expect(response.cost).toBeUndefined();
+    } finally {
+      await provider.cleanup();
+    }
+  });
+  test("default fixture multiplier events are not generic money without metrics", async () => {
+    const { provider } = await accountingProvider();
+    try {
+      const response = await provider.callApi("ordinary fixture request");
+      expect(response.error).toBeUndefined();
+      expect(response.cost).toBeUndefined();
+      expect((response.metadata as any).copilot.accounting).toMatchObject({
+        status: "unavailable",
+        reason: "unsupported",
+      });
+      expect((response.metadata as any).copilot.premiumRequestUsage.reportedCost).toBe(0.001);
+    } finally {
+      await provider.cleanup();
+    }
+  });
+  test("missing multiplier events do not imply measured premium-request usage", async () => {
+    const { provider } = await accountingProvider();
+    try {
+      for (const eventCosts of [[], [0.25, null], [-1], [Number.MAX_SAFE_INTEGER, 1]]) {
+        const response = await provider.callApi(
+          accountingPrompt({ metrics: "complete", eventCosts }),
+        );
+        expect(response.error).toBeUndefined();
+        expect(response.cost).toBe(0.025);
+        const premium = (response.metadata as any).copilot.premiumRequestUsage;
+        expect(premium.numRequests).toBe(eventCosts.length);
+        expect(premium.reportedCost).toBeUndefined();
+      }
+    } finally {
+      await provider.cleanup();
+    }
+  });
+  test("workspace Provider serializes session accounting through the Copilot delegate", async () => {
+    const fixture = await readFile(new URL("./fixtures/copilot-sdk.mjs", import.meta.url), "utf8");
+    const path = await project("@github/copilot-sdk", fixture);
+    const provider = new Provider({
+      config: {
+        basePath: path,
+        delegate: { id: "copilot-sdk", config: { model: "fixture-requested" } },
+        workspace: { sources: [] },
+        timeoutMs: 5000,
+      },
+      env: {
+        ALLAGENTS_CACHE_ROOT: join(path, "cache"),
+        ALLAGENTS_WORKSPACE_ROOT: join(path, "runtime"),
+      },
+    });
+    try {
+      const response = await provider.callApi(accountingPrompt({ metrics: "complete" }));
+      expect(response.error).toBeUndefined();
+      expect(response.output).toBe("accounting fixture output");
+      expect(response.cost).toBe(0.025);
+      const metadata = JSON.parse(JSON.stringify(response.metadata));
+      expect(metadata.copilot.accounting).toMatchObject({
+        version: 1,
+        status: "complete",
+        totalNanoAiu: 2_500_000_000,
+        requestedModel: "fixture-requested",
+      });
+      expect(metadata.copilot.premiumRequestUsage.reportedCost).toBe(0.75);
+      expect(typeof metadata.workspace.path).toBe("string");
+    } finally {
+      await provider.cleanup();
+    }
+  }, 15_000);
+  if (process.platform !== "win32")
+    test("workspace integrity failure retains captured Copilot accounting without money", async () => {
+      const fixture = await readFile(
+        new URL("./fixtures/copilot-sdk.mjs", import.meta.url),
+        "utf8",
+      );
+      const path = await project("@github/copilot-sdk", fixture);
+      const repository = join(path, "source");
+      await mkdir(repository);
+      await writeFile(join(repository, "input.txt"), "immutable source");
+      const git = promisify(execFile);
+      await git("git", ["init", "-q", repository]);
+      await git("git", ["-C", repository, "add", "."]);
+      await git("git", [
+        "-C",
+        repository,
+        "-c",
+        "user.name=Fixture",
+        "-c",
+        "user.email=fixture@example.test",
+        "commit",
+        "-qm",
+        "fixture",
+      ]);
+      const { stdout } = await git("git", ["-C", repository, "rev-parse", "HEAD"]);
+      const provider = new Provider({
+        config: {
+          basePath: path,
+          delegate: { id: "copilot-sdk" },
+          timeoutMs: 5000,
+          workspace: {
+            viewMode: "copy-only",
+            sources: [
+              {
+                type: "git",
+                repository: pathToFileURL(repository).href,
+                ref: stdout.trim(),
+                destination: "repo",
+                permissions: "read-only",
+              },
+            ],
+          },
+        },
+        env: {
+          ALLAGENTS_CACHE_ROOT: join(path, "cache"),
+          ALLAGENTS_WORKSPACE_ROOT: join(path, "runtime"),
+        },
+      });
+      try {
+        const response = await provider.callApi(
+          accountingPrompt({ metrics: "complete", mutateProtected: true }),
+        );
+        expect(response.error).toMatch(/Protected source checkout mutated/);
+        expect(response.output).toBeUndefined();
+        expect(response.cost).toBeUndefined();
+        expect((response.metadata as any).copilot.accounting).toMatchObject({
+          status: "partial",
+          totalNanoAiu: 2_500_000_000,
+        });
+      } finally {
+        await provider.cleanup();
+      }
+    }, 15_000);
   test("passes BYOK object, applies permission policy, and emits usage without invented skills", async () => {
     const path = await project("@github/copilot-sdk", sdk);
     const provider = new CopilotSdkProvider({

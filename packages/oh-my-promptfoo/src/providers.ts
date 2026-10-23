@@ -1,6 +1,12 @@
 import { createHash } from "node:crypto";
 import { resolve } from "node:path";
 import { isJudge, type Judge, type JudgeResponse, judgeName, loadJudge } from "./judge.js";
+import {
+  JudgeAccountingCollector,
+  JudgeFailureContext,
+  judgeFailureMessage,
+  preserveJudgeFailure,
+} from "./judge-accounting.js";
 
 export interface FallbackProviderConfig {
   /** Judges to try in order: provider ids, provider objects, or `{ text: … }` maps. */
@@ -77,8 +83,20 @@ function httpStatus(response: JudgeResponse): number | undefined {
   return typeof http.status === "number" ? http.status : undefined;
 }
 
+/** Synthetic permanent failures keep their disposition across nested fallback providers. */
+function permanentError(response: JudgeResponse): boolean {
+  const fallback = response.metadata?.fallback;
+  return (
+    typeof fallback === "object" &&
+    fallback !== null &&
+    "permanentError" in fallback &&
+    fallback.permanentError === true
+  );
+}
+
 /** 408, 429, 5xx and status 0 (network or timeout), else Promptfoo's transient patterns. */
 function retryable(response: JudgeResponse): boolean {
+  if (permanentError(response)) return false;
   const status = httpStatus(response);
   if (status !== undefined)
     return status === 0 || status === 408 || status === 429 || (status >= 500 && status < 600);
@@ -218,24 +236,46 @@ export class FallbackProvider {
       ];
     const attempts: FallbackAttempt[] = [];
     const usage = { total: 0, prompt: 0, completion: 0, cached: 0, numRequests: 0 };
-    let cost: number | undefined;
+    const accounting = new JudgeAccountingCollector();
+    let lastMetadata: JudgeResponse["metadata"];
     for (const { spec, index, key } of order) {
       signal?.throwIfAborted();
-      const judge = await this.judge(index);
-      const name = judgeName(spec, judge);
+      let name = "unloaded judge";
+      if (typeof spec === "string") name = spec;
+      else if (typeof spec === "object" && spec !== null) {
+        if ("label" in spec && typeof spec.label === "string") name = spec.label;
+        else if ("id" in spec && typeof spec.id === "string") name = spec.id;
+      }
+      let loaded = false;
       const started = performance.now();
       let response: JudgeResponse;
       // A transient throw was classified on the error itself, code included.
       let threwTransient = false;
+      let threwPermanent = false;
+      let propagation: { error: unknown } | undefined;
+      const failureContext = new JudgeFailureContext();
       try {
-        response = await judge.callApi(prompt, context, callOptions);
+        const judge = await this.judge(index);
+        loaded = true;
+        name = judgeName(spec, judge);
+        response = await failureContext.run(() => judge.callApi(prompt, context, callOptions));
       } catch (error) {
         signal?.throwIfAborted();
-        // A judge that throws is misconfigured (no key, unknown id) unless the throw is
-        // itself a transient transport failure.
-        if (!transient(error)) throw error;
-        threwTransient = true;
-        response = { error: error instanceof Error ? error.message : String(error) };
+        if (error instanceof Error && error.name === "AbortError") throw error;
+        const evidence = failureContext.forError(error);
+        // Evidence is published only by a nested fallback's permanent throw. Do not
+        // reclassify it by message or replace its executed leaves with one attempt.
+        threwTransient = loaded && evidence === undefined && transient(error);
+        if (!threwTransient) {
+          threwPermanent = true;
+          if (!accounting.hasCopilotAccounting) propagation = { error };
+        }
+        response = {
+          ...(propagation ? {} : { error: judgeFailureMessage(error) }),
+          ...(evidence
+            ? { tokenUsage: evidence.usage, metadata: { judgeAccounting: evidence.ledger } }
+            : {}),
+        };
       }
       const tokens = response.tokenUsage ?? {};
       for (const field of ["total", "prompt", "completion", "cached"] as const) {
@@ -244,8 +284,20 @@ export class FallbackProvider {
       }
       usage.numRequests +=
         typeof tokens.numRequests === "number" ? tokens.numRequests : response.cached ? 0 : 1;
-      if (typeof response.cost === "number" && Number.isFinite(response.cost))
-        cost = (cost ?? 0) + response.cost;
+      accounting.record(response.metadata, response.cached, response.cost);
+      if (propagation) {
+        // Native-only calls still throw the exact value, including frozen objects
+        // and primitives; an enclosing accounted call can retain their evidence.
+        preserveJudgeFailure({ error: propagation.error, ledger: accounting.ledger, usage });
+        throw propagation.error;
+      }
+      if (threwPermanent) {
+        // The previous reply's transport status is not the throwing attempt's status.
+        const { http: _http, ...diagnostics } = lastMetadata ?? {};
+        lastMetadata = diagnostics;
+      } else {
+        lastMetadata = response.metadata;
+      }
       const status = httpStatus(response);
       attempts.push({
         provider: name,
@@ -254,7 +306,7 @@ export class FallbackProvider {
         cached: response.cached === true,
         latencyMs: Math.round(performance.now() - started),
       });
-      if (threwTransient || (response.error && retryable(response))) {
+      if (!threwPermanent && (threwTransient || (response.error && retryable(response)))) {
         // A failure caused by the caller's cancellation neither cools the judge nor moves on.
         signal?.throwIfAborted();
         const coolFor = Math.max(this.cooldownMs, retryAfterMs(response) ?? 0);
@@ -262,21 +314,33 @@ export class FallbackProvider {
         continue;
       }
       if (!response.error) cooldowns.delete(key);
+      const { cost: _responseCost, ...reply } = response;
+      const cost = accounting.cost;
       return {
-        ...response,
+        ...reply,
+        cached: accounting.ledger.attempts.every((leaf) => leaf.cached),
         tokenUsage: usage,
         ...(cost === undefined ? {} : { cost }),
-        metadata: { ...response.metadata, fallback: { answeredBy: name, attempts } },
+        metadata: {
+          ...lastMetadata,
+          judgeAccounting: accounting.ledger,
+          fallback: {
+            answeredBy: name,
+            attempts,
+            ...(threwPermanent || permanentError(response) ? { permanentError: true } : {}),
+          },
+        },
       };
     }
     const skipped = judges.length - attempts.length;
+    const cost = accounting.cost;
     return {
       error: `All ${attempts.length} judges failed${skipped ? ` (${skipped} skipped while cooling down)` : ""}: ${attempts
         .map(({ provider, error }) => `${provider}: ${error}`)
         .join("; ")}`,
       tokenUsage: usage,
       ...(cost === undefined ? {} : { cost }),
-      metadata: { fallback: { attempts } },
+      metadata: { ...lastMetadata, judgeAccounting: accounting.ledger, fallback: { attempts } },
     };
   }
 }
