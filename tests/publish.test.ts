@@ -52,6 +52,11 @@ async function fixture() {
     join(import.meta.dir, "..", "scripts", "publish.ts"),
     join(root, "scripts", "publish.ts"),
   );
+  // Exercise retry/deadline logic without spending the test budget on wall-clock sleeps.
+  await writeFile(
+    join(root, "clock.cjs"),
+    `let elapsed=0;const now=Date.now;Date.now=()=>now()+elapsed;Bun.sleep=async delay=>{if(typeof delay!=='number')throw Error('Unexpected publisher sleep');elapsed+=delay;};`,
+  );
   if (process.platform === "win32") {
     await writeFile(join(root, "bin", "npm.js"), fakeNpm);
     await writeFile(
@@ -94,11 +99,15 @@ function run(
   const probe = spawnSync("npm", ["--fixture-probe"], { cwd: f.root, encoding: "utf8", env });
   if (probe.status !== 0 || probe.stdout.trim() !== "allagents-fake-npm")
     throw new Error("Fake npm shim was not selected; refusing to run release script");
-  return spawnSync(process.execPath, [join(f.root, "scripts", "publish.ts")], {
-    cwd: f.root,
-    encoding: "utf8",
-    env,
-  });
+  return spawnSync(
+    process.execPath,
+    ["--preload", join(f.root, "clock.cjs"), join(f.root, "scripts", "publish.ts")],
+    {
+      cwd: f.root,
+      encoding: "utf8",
+      env,
+    },
+  );
 }
 
 describe("trusted stable release publish", () => {

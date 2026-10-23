@@ -194,7 +194,7 @@ export function resolvePeer(basePath: string, name: string): string {
     );
   } catch {
     throw new Error(
-      `Install ${name}${name === "@github/copilot-sdk" ? "@1.0.17" : name === "@earendil-works/pi-coding-agent" ? "@1.3.0" : "@0.124.1"} in the evaluation project (${basePath})`,
+      `Install ${name}${name === "@github/copilot-sdk" ? "@1.0.22" : name === "@earendil-works/pi-coding-agent" ? "@1.3.0" : "@0.124.1"} in the evaluation project (${basePath})`,
     );
   }
 }

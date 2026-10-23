@@ -319,20 +319,14 @@ jobs:
       - name: Validate source and packed preview
         run: bun run typecheck && bun run lint && bun test && bun run build && bun run pack:check && bun run e2e
       - name: Recheck pending release PR and main source
+        id: recheck
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_PR: ${{ needs.release-please.outputs.pending_pr }}
           RELEASE_PR_SHA: ${{ steps.preview.outputs.pr_sha }}
-        run: |
-          node --input-type=module <<'JS'
-          import { execFileSync } from 'node:child_process';
-          const pr = JSON.parse(execFileSync('gh', ['pr', 'view', process.env.RELEASE_PR, '--json', 'state,headRefOid'], { encoding: 'utf8' }));
-          if (pr.state !== 'OPEN' || pr.headRefOid !== process.env.RELEASE_PR_SHA)
-            throw Error('Pending release PR changed during preview validation');
-          execFileSync('git', ['fetch', '--no-tags', 'origin', 'main'], { stdio: 'pipe' });
-          execFileSync('git', ['merge-base', '--is-ancestor', 'HEAD', 'FETCH_HEAD'], { stdio: 'pipe' });
-          JS
+        run: node scripts/check-preview-publication.mjs
       - name: Publish preview under next
+        if: steps.recheck.outputs.publish == 'true'
         env:
           PREVIEW_VERSION: ${{ steps.preview.outputs.version }}
         run: |
@@ -379,12 +373,14 @@ jobs:
           }
           JS
       - name: Verify registry consumers and Promptfoo E2E
+        if: steps.recheck.outputs.publish == 'true'
         env:
           PREVIEW_VERSION: ${{ steps.preview.outputs.version }}
         run: |
           bun scripts/smoke-packed-package.ts --registry "$PREVIEW_VERSION"
           bun scripts/e2e.ts --registry "$PREVIEW_VERSION"
       - name: Tag and announce verified preview
+        if: steps.recheck.outputs.publish == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           PREVIEW_VERSION: ${{ steps.preview.outputs.version }}

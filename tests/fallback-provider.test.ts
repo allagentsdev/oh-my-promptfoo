@@ -738,48 +738,48 @@ test.each([
   { name: "primitive", permanent: "API key is not set", message: "API key is not set" },
   { name: "opaque", permanent: Object.create(null) },
   { name: "frozen opaque", permanent: Object.freeze(Object.create(null)) },
-])("outer Copilot accounting retains native inner fallback leaves before a permanent throw ($name)", async ({
-  permanent,
-  message,
-}) => {
-  const measured = accounting(1_000_000_000);
-  const first = stub("outer-accounted", {
-    ...failing(503),
-    tokenUsage: { total: 6, prompt: 4, completion: 2, numRequests: 1 },
-    metadata: { http: { status: 503 }, copilot: { accounting: measured } },
-  });
-  const native = stub("inner-native", {
-    ...failing(503),
-    cost: 0.1,
-    tokenUsage: { total: 10, prompt: 7, completion: 3, cached: 2, numRequests: 1 },
-  });
-  const throwing = stub("inner-permanent", () => {
-    throw permanent;
-  });
-  const innerBackup = stub("inner-never", ok());
-  const outerBackup = stub("outer-never", ok());
-  const inner = fallback([native, throwing, innerBackup], { cooldownMs: 0 });
-  const response = await fallback([first, inner, outerBackup], { cooldownMs: 0 }).callApi("p");
-  assert.equal(typeof response.error, "string");
-  assert.ok(response.error!.trim().length > 0);
-  if (message !== undefined) assert.equal(response.error, message);
-  assert.equal(meta(response).permanentError, true);
-  assert.equal(innerBackup.calls.length, 0);
-  assert.equal(outerBackup.calls.length, 0);
-  assert.deepEqual(response.metadata?.judgeAccounting, {
-    version: 1,
-    attempts: [{ cached: false, accounting: measured }, { cached: false }, { cached: false }],
-  });
-  assert.equal(response.cost, undefined);
-  assert.deepEqual(response.tokenUsage, {
-    total: 16,
-    prompt: 11,
-    completion: 5,
-    cached: 2,
-    numRequests: 3,
-  });
-  await assert.rejects(inner.callApi("p"), (error) => error === permanent);
-});
+])(
+  "outer Copilot accounting retains native inner fallback leaves before a permanent throw ($name)",
+  async ({ permanent, message }) => {
+    const measured = accounting(1_000_000_000);
+    const first = stub("outer-accounted", {
+      ...failing(503),
+      tokenUsage: { total: 6, prompt: 4, completion: 2, numRequests: 1 },
+      metadata: { http: { status: 503 }, copilot: { accounting: measured } },
+    });
+    const native = stub("inner-native", {
+      ...failing(503),
+      cost: 0.1,
+      tokenUsage: { total: 10, prompt: 7, completion: 3, cached: 2, numRequests: 1 },
+    });
+    const throwing = stub("inner-permanent", () => {
+      throw permanent;
+    });
+    const innerBackup = stub("inner-never", ok());
+    const outerBackup = stub("outer-never", ok());
+    const inner = fallback([native, throwing, innerBackup], { cooldownMs: 0 });
+    const response = await fallback([first, inner, outerBackup], { cooldownMs: 0 }).callApi("p");
+    assert.equal(typeof response.error, "string");
+    assert.ok(response.error!.trim().length > 0);
+    if (message !== undefined) assert.equal(response.error, message);
+    assert.equal(meta(response).permanentError, true);
+    assert.equal(innerBackup.calls.length, 0);
+    assert.equal(outerBackup.calls.length, 0);
+    assert.deepEqual(response.metadata?.judgeAccounting, {
+      version: 1,
+      attempts: [{ cached: false, accounting: measured }, { cached: false }, { cached: false }],
+    });
+    assert.equal(response.cost, undefined);
+    assert.deepEqual(response.tokenUsage, {
+      total: 16,
+      prompt: 11,
+      completion: 5,
+      cached: 2,
+      numRequests: 3,
+    });
+    await assert.rejects(inner.callApi("p"), (error) => error === permanent);
+  },
+);
 
 test("concurrent nested fallback failures keep invocation-local evidence for a shared frozen Error", async () => {
   const permanent = Object.freeze(new Error("API key is not set"));

@@ -431,121 +431,122 @@ test.each([
   { name: "primitive", permanent: "API key is not set", message: "API key is not set" },
   { name: "opaque", permanent: Object.create(null) },
   { name: "frozen opaque", permanent: Object.freeze(Object.create(null)) },
-])("accounted rubric retries retain native nested fallback usage and the permanent throwing leaf ($name)", async ({
-  permanent,
-  message,
-}) => {
-  const measured = accounting(1_000_000_000);
-  let nativeCalls = 0;
-  let throwingCalls = 0;
-  let backupCalls = 0;
-  const nested = new FallbackProvider({
-    config: {
-      cooldownMs: 0,
-      providers: [
-        {
-          id: () => "rubric-native-before-permanent",
-          async callApi() {
-            nativeCalls++;
-            return {
-              error: "API error: 503",
-              tokenUsage: { total: 10, prompt: 7, completion: 3, cached: 2, numRequests: 1 },
-              cost: 0.1,
-              metadata: { http: { status: 503 } },
-            };
+])(
+  "accounted rubric retries retain native nested fallback usage and the permanent throwing leaf ($name)",
+  async ({ permanent, message }) => {
+    const measured = accounting(1_000_000_000);
+    let nativeCalls = 0;
+    let throwingCalls = 0;
+    let backupCalls = 0;
+    const nested = new FallbackProvider({
+      config: {
+        cooldownMs: 0,
+        providers: [
+          {
+            id: () => "rubric-native-before-permanent",
+            async callApi() {
+              nativeCalls++;
+              return {
+                error: "API error: 503",
+                tokenUsage: { total: 10, prompt: 7, completion: 3, cached: 2, numRequests: 1 },
+                cost: 0.1,
+                metadata: { http: { status: 503 } },
+              };
+            },
           },
-        },
-        {
-          id: () => "rubric-native-permanent",
-          async callApi() {
-            throwingCalls++;
-            throw permanent;
+          {
+            id: () => "rubric-native-permanent",
+            async callApi() {
+              throwingCalls++;
+              throw permanent;
+            },
           },
-        },
-        {
-          id: () => "rubric-native-never",
-          async callApi() {
-            backupCalls++;
-            return { output: verdict };
+          {
+            id: () => "rubric-native-never",
+            async callApi() {
+              backupCalls++;
+              return { output: verdict };
+            },
           },
-        },
-      ],
-    },
-  });
-  let requests = 0;
-  const provider = {
-    id: () => "rubric-accounted-then-native-fallback",
-    async callApi(prompt: string, context?: object, options?: object) {
-      if (++requests === 1)
-        return {
-          output: "not JSON",
-          tokenUsage: { total: 6, prompt: 4, completion: 2, numRequests: 1 },
-          metadata: { copilot: { accounting: measured }, diagnostic: "retained" },
-        };
-      return nested.callApi(prompt, context, options);
-    },
-  };
-  const result = await llmAssert("candidate answer", { config: { components, provider } });
-  assert.equal(result.pass, false);
-  assert.equal(result.score, 0);
-  assert.equal(typeof result.reason, "string");
-  assert.ok(result.reason.trim().length > 0);
-  if (message !== undefined) assert.equal(result.reason, message);
-  assert.equal(result.metadata.graderError, true);
-  assert.equal(result.metadata.diagnostic, "retained");
-  assert.deepEqual(result.componentResults, []);
-  assert.equal(requests, 2);
-  assert.equal(nativeCalls, 1);
-  assert.equal(throwingCalls, 1);
-  assert.equal(backupCalls, 0);
-  assert.deepEqual(result.metadata.judgeAccounting, {
-    version: 1,
-    attempts: [{ cached: false, accounting: measured }, { cached: false }, { cached: false }],
-  });
-  assert.equal(result.tokensUsed?.cost, undefined);
-  assert.deepEqual(result.tokensUsed, {
-    total: 16,
-    prompt: 11,
-    completion: 5,
-    cached: 2,
-    numRequests: 3,
-  });
-});
+        ],
+      },
+    });
+    let requests = 0;
+    const provider = {
+      id: () => "rubric-accounted-then-native-fallback",
+      async callApi(prompt: string, context?: object, options?: object) {
+        if (++requests === 1)
+          return {
+            output: "not JSON",
+            tokenUsage: { total: 6, prompt: 4, completion: 2, numRequests: 1 },
+            metadata: { copilot: { accounting: measured }, diagnostic: "retained" },
+          };
+        return nested.callApi(prompt, context, options);
+      },
+    };
+    const result = await llmAssert("candidate answer", { config: { components, provider } });
+    assert.equal(result.pass, false);
+    assert.equal(result.score, 0);
+    assert.equal(typeof result.reason, "string");
+    assert.ok(result.reason.trim().length > 0);
+    if (message !== undefined) assert.equal(result.reason, message);
+    assert.equal(result.metadata.graderError, true);
+    assert.equal(result.metadata.diagnostic, "retained");
+    assert.deepEqual(result.componentResults, []);
+    assert.equal(requests, 2);
+    assert.equal(nativeCalls, 1);
+    assert.equal(throwingCalls, 1);
+    assert.equal(backupCalls, 0);
+    assert.deepEqual(result.metadata.judgeAccounting, {
+      version: 1,
+      attempts: [{ cached: false, accounting: measured }, { cached: false }, { cached: false }],
+    });
+    assert.equal(result.tokensUsed?.cost, undefined);
+    assert.deepEqual(result.tokensUsed, {
+      total: 16,
+      prompt: 11,
+      completion: 5,
+      cached: 2,
+      numRequests: 3,
+    });
+  },
+);
 
 test.each([
   { name: "opaque", permanent: Object.create(null) },
   { name: "frozen opaque", permanent: Object.freeze(Object.create(null)) },
-])("accounted rubric retry retains a non-stringifiable direct throw ($name)", async ({
-  permanent,
-}) => {
-  const measured = accounting(1_000_000_000);
-  let requests = 0;
-  const result = await gradeRubric(rubric(), "sent prompt", async (attempt) => {
-    requests++;
-    if (attempt === 0)
-      return {
-        text: "not JSON",
-        usage: { total: 6, prompt: 4, completion: 2, numRequests: 1 },
-        metadata: { copilot: { accounting: measured } },
-      };
-    throw permanent;
-  });
-  assert.equal(result.pass, false);
-  assert.equal(result.score, 0);
-  assert.equal(result.metadata.graderError, true);
-  assert.equal(typeof result.reason, "string");
-  assert.ok(result.reason.trim().length > 0);
-  assert.equal(requests, 2);
-  assert.deepEqual(result.metadata.judgeAccounting, {
-    version: 1,
-    attempts: [{ cached: false, accounting: measured }, { cached: false }],
-  });
-  assert.equal(result.tokensUsed?.cost, undefined);
-  assert.deepEqual(result.tokensUsed, {
-    total: 6,
-    prompt: 4,
-    completion: 2,
-    cached: 0,
-    numRequests: 2,
-  });
-});
+])(
+  "accounted rubric retry retains a non-stringifiable direct throw ($name)",
+  async ({ permanent }) => {
+    const measured = accounting(1_000_000_000);
+    let requests = 0;
+    const result = await gradeRubric(rubric(), "sent prompt", async (attempt) => {
+      requests++;
+      if (attempt === 0)
+        return {
+          text: "not JSON",
+          usage: { total: 6, prompt: 4, completion: 2, numRequests: 1 },
+          metadata: { copilot: { accounting: measured } },
+        };
+      throw permanent;
+    });
+    assert.equal(result.pass, false);
+    assert.equal(result.score, 0);
+    assert.equal(result.metadata.graderError, true);
+    assert.equal(typeof result.reason, "string");
+    assert.ok(result.reason.trim().length > 0);
+    assert.equal(requests, 2);
+    assert.deepEqual(result.metadata.judgeAccounting, {
+      version: 1,
+      attempts: [{ cached: false, accounting: measured }, { cached: false }],
+    });
+    assert.equal(result.tokensUsed?.cost, undefined);
+    assert.deepEqual(result.tokensUsed, {
+      total: 6,
+      prompt: 4,
+      completion: 2,
+      cached: 0,
+      numRequests: 2,
+    });
+  },
+);

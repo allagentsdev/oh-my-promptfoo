@@ -4,6 +4,7 @@ import { realpathSync } from "node:fs";
 import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   claudeReadAllowed,
   disabledWorkspaceSkills,
@@ -112,6 +113,19 @@ export class CopilotClient {
       );
       await writeFile(join(directory, "index.js"), source);
     }
+    const telemetryScope = join(
+      root,
+      "node_modules",
+      "promptfoo",
+      "node_modules",
+      "@opentelemetry",
+    );
+    await mkdir(telemetryScope, { recursive: true });
+    await symlink(
+      fileURLToPath(new URL("../node_modules/@opentelemetry/api", import.meta.url)),
+      join(telemetryScope, "api"),
+      process.platform === "win32" ? "junction" : "dir",
+    );
     await run({
       workspace,
       outside,

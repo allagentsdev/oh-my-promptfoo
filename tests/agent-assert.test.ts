@@ -541,27 +541,35 @@ test("agentAssert measures the full assembled UTF-8 prompt and honors explicit p
   });
 });
 
-test("agentAssert rejects oversized non-diff evidence before invoking a delegate", async () => {
+test("agentAssert rejects oversized candidate evidence before invoking a delegate", async () => {
+  await withGrader(async ({ queue, calls, context }) => {
+    await queue([]);
+    const huge = "x".repeat(17 * 1024 * 1024);
+    await assert.rejects(agentAssert(huge, context()), (error) => {
+      assert.ok(error instanceof Error);
+      assert.match(
+        error.message,
+        /prompt is \d+ bytes, exceeding maxPromptBytes budget of 131072 bytes/,
+      );
+      assert.ok(Number(error.message.match(/prompt is (\d+)/)![1]) > 16 * 1024 * 1024);
+      return true;
+    });
+    assert.deepEqual(await calls(), []);
+  });
+});
+
+// Compiling a real 17 MiB template needs a bounded stress-test budget on shared runners.
+test("agentAssert rejects oversized rubric prompts before invoking a delegate", async () => {
   await withGrader(async ({ queue, calls, context }) => {
     await queue([]);
     const gradingContext = context();
     const huge = "x".repeat(17 * 1024 * 1024);
-    for (const [candidate, overrides] of [
-      [huge, {}],
-      ["candidate", { config: { ...gradingContext.config, rubricPrompt: huge } }],
-      [
-        "candidate",
-        {
-          providerResponse: {
-            metadata: {
-              ...gradingContext.providerResponse.metadata,
-              fileChanges: { schemaVersion: 2, changedFiles: {}, deletedFiles: [huge] },
-            },
-          },
-        },
-      ],
-    ] as const) {
-      await assert.rejects(agentAssert(candidate, { ...gradingContext, ...overrides }), (error) => {
+    await assert.rejects(
+      agentAssert("candidate", {
+        ...gradingContext,
+        config: { ...gradingContext.config, rubricPrompt: huge },
+      }),
+      (error) => {
         assert.ok(error instanceof Error);
         assert.match(
           error.message,
@@ -569,8 +577,46 @@ test("agentAssert rejects oversized non-diff evidence before invoking a delegate
         );
         assert.ok(Number(error.message.match(/prompt is (\d+)/)![1]) > 16 * 1024 * 1024);
         return true;
-      });
-    }
+      },
+    );
+    assert.deepEqual(await calls(), []);
+  });
+}, 20_000);
+
+test("agentAssert rejects oversized deleted-file evidence before invoking a delegate", async () => {
+  await withGrader(async ({ queue, calls, context }) => {
+    await queue([]);
+    const gradingContext = context();
+    const huge = "x".repeat(17 * 1024 * 1024);
+    await assert.rejects(
+      agentAssert("candidate", {
+        ...gradingContext,
+        providerResponse: {
+          metadata: {
+            ...gradingContext.providerResponse.metadata,
+            fileChanges: { schemaVersion: 2, changedFiles: {}, deletedFiles: [huge] },
+          },
+        },
+      }),
+      (error) => {
+        assert.ok(error instanceof Error);
+        assert.match(
+          error.message,
+          /prompt is \d+ bytes, exceeding maxPromptBytes budget of 131072 bytes/,
+        );
+        assert.ok(Number(error.message.match(/prompt is (\d+)/)![1]) > 16 * 1024 * 1024);
+        return true;
+      },
+    );
+    assert.deepEqual(await calls(), []);
+  });
+});
+
+test("agentAssert omits diff content before rejecting oversized non-diff evidence without invoking a delegate", async () => {
+  await withGrader(async ({ queue, calls, context }) => {
+    await queue([]);
+    const gradingContext = context();
+    const huge = "x".repeat(17 * 1024 * 1024);
     await assert.rejects(
       agentAssert(huge, {
         ...gradingContext,
@@ -581,7 +627,15 @@ test("agentAssert rejects oversized non-diff evidence before invoking a delegate
           },
         },
       }),
-      /prompt is \d+ bytes, exceeding maxPromptBytes budget of 131072 bytes after omitting diff content/,
+      (error) => {
+        assert.ok(error instanceof Error);
+        assert.match(
+          error.message,
+          /prompt is \d+ bytes, exceeding maxPromptBytes budget of 131072 bytes after omitting diff content/,
+        );
+        assert.ok(Number(error.message.match(/prompt is (\d+)/)![1]) > 16 * 1024 * 1024);
+        return true;
+      },
     );
     assert.deepEqual(await calls(), []);
   });

@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { subscribe, unsubscribe } from "node:diagnostics_channel";
-import { lstatSync, realpathSync, statSync } from "node:fs";
+import { existsSync, lstatSync, realpathSync, statSync } from "node:fs";
 import {
   access,
   chmod,
@@ -17,14 +17,15 @@ import {
 } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
-import { join, relative } from "node:path";
+import { dirname, join, relative } from "node:path";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { context as otelContext, propagation, trace } from "@opentelemetry/api";
 import { AsyncLocalStorageContextManager } from "@opentelemetry/context-async-hooks";
 import { W3CTraceContextPropagator } from "@opentelemetry/core";
-import { NodeTracerProvider } from "@opentelemetry/sdk-trace-node";
+import { NodeTracerProvider, type ReadableSpan } from "@opentelemetry/sdk-trace-node";
 import {
+  object,
   promptConfig,
   resolveSourcePaths,
   validateCopilotConfig,
@@ -48,7 +49,11 @@ const roots: string[] = [];
 afterEach(async () => {
   await Promise.all(roots.splice(0).map((path) => removeTree(path)));
 });
-async function project(moduleName: string, source: string): Promise<string> {
+async function project(
+  moduleName: string,
+  source: string,
+  telemetryPackage = "@opentelemetry/api",
+): Promise<string> {
   const path = await mkdtemp(join(realpathSync(tmpdir()), "allagents-providers-"));
   roots.push(path);
   const dir = join(path, "node_modules", moduleName);
@@ -58,7 +63,27 @@ async function project(moduleName: string, source: string): Promise<string> {
     JSON.stringify({ name: moduleName, type: "module", exports: "./index.js" }),
   );
   await writeFile(join(dir, "index.js"), source);
+  if (moduleName === "promptfoo") await installTelemetryPeer(dir, telemetryPackage);
   return path;
+}
+async function telemetryPackageRoot(entry: string): Promise<string> {
+  for (let directory = dirname(entry); ; directory = dirname(directory)) {
+    const manifest = join(directory, "package.json");
+    if (
+      existsSync(manifest) &&
+      object(JSON.parse(await readFile(manifest, "utf8")), "telemetry API package").name ===
+        "@opentelemetry/api"
+    )
+      return directory;
+    if (dirname(directory) === directory)
+      throw new Error(`OpenTelemetry API package root not found for ${entry}`);
+  }
+}
+async function installTelemetryPeer(path: string, name: string): Promise<void> {
+  const packageRoot = await telemetryPackageRoot(createRequire(import.meta.url).resolve(name));
+  const scope = join(path, "node_modules", "@opentelemetry");
+  await mkdir(scope, { recursive: true });
+  await symlink(packageRoot, join(scope, "api"), process.platform === "win32" ? "junction" : "dir");
 }
 const native = `import {chmod,readdir,readFile,utimes,writeFile} from 'node:fs/promises';
 import {writeSync} from 'node:fs';
@@ -2081,7 +2106,9 @@ describe("direct Copilot provider", () => {
   test("missing SDK is actionable and pre-abort performs no execution", async () => {
     const path = await project("unrelated", "export {};");
     const provider = new CopilotSdkProvider({ config: { basePath: path, working_dir: "." } });
-    expect((await provider.callApi("test")).error).toContain("Install @github/copilot-sdk@1.0.17");
+    const missing = await provider.callApi("test");
+    expect(missing.error).toContain("@github/copilot-sdk");
+    expect(missing.error).toContain(path);
     const controller = new AbortController();
     controller.abort();
     expect(
@@ -2090,50 +2117,122 @@ describe("direct Copilot provider", () => {
   });
 });
 describe("native tracing relay", () => {
-  test("preserves row trace, nested native span ancestry, attributes and duration", async () => {
-    const completed: any[] = [];
-    const tracerProvider = new NodeTracerProvider({
-      spanProcessors: [
-        {
-          onStart() {},
-          onEnd(span) {
-            completed.push(span);
+  for (const [telemetryPackage, minor, decoyPackage] of [
+    ["@opentelemetry/api", "1.9.", "@opentelemetry/api-consumer"],
+    ["@opentelemetry/api-consumer", "1.10.", "@opentelemetry/api"],
+  ] as const) {
+    test(`registers the actual Promptfoo API ${minor} peer and preserves native and relayed ancestry`, async () => {
+      const completed: ReadableSpan[] = [];
+      const tracerProvider = new NodeTracerProvider({
+        spanProcessors: [
+          {
+            onStart() {},
+            onEnd(span) {
+              completed.push(span);
+            },
+            async forceFlush() {},
+            async shutdown() {},
           },
-          async forceFlush() {},
-          async shutdown() {},
-        },
-      ],
-    });
-    tracerProvider.register({
-      propagator: new W3CTraceContextPropagator(),
-      contextManager: new AsyncLocalStorageContextManager(),
-    });
-    try {
-      const apiPath = createRequire(import.meta.url).resolve("@opentelemetry/api");
-      const path = await project(
-        "promptfoo",
-        `import {trace} from ${JSON.stringify(pathToFileURL(apiPath).href)};
-      export async function loadApiProvider(){return {async callApi(){return trace.getTracer('fixture').startActiveSpan('native-parent',async span=>{const tool=trace.getTracer('fixture').startSpan('native-tool',{attributes:{'gen_ai.tool.name':'read_file','gen_ai.operation.name':'execute_tool','native.number':12}});await new Promise(resolve=>setTimeout(resolve,25));tool.setAttribute('native.final','present');tool.end();span.end();return{output:'traced'};});},async cleanup(){}};}`,
-      );
-      const f = frame(path);
-      f.context.traceparent = "00-0123456789abcdef0123456789abcdef-0123456789abcdef-01";
-      expect((await runDelegate(f, {}, 5000)).output).toBe("traced");
-      const parent = completed.find((s) => s.name === "native-parent");
-      const tool = completed.find((s) => s.name === "native-tool");
-      expect(tool.spanContext().traceId).toBe("0123456789abcdef0123456789abcdef");
-      expect(parent.parentSpanContext.spanId).toBe("0123456789abcdef");
-      expect(tool.parentSpanContext.spanId).toBe(parent.spanContext().spanId);
-      expect(tool.attributes["gen_ai.tool.name"]).toBe("read_file");
-      expect(tool.attributes["native.number"]).toBe(12);
-      expect(tool.attributes["native.final"]).toBe("present");
-      expect(tool.duration[0] * 1000 + tool.duration[1] / 1e6).toBeGreaterThanOrEqual(20);
-    } finally {
-      await tracerProvider.shutdown();
-      trace.disable();
-      propagation.disable();
-      otelContext.disable();
-    }
+        ],
+      });
+      tracerProvider.register({
+        propagator: new W3CTraceContextPropagator(),
+        contextManager: new AsyncLocalStorageContextManager(),
+      });
+      try {
+        const path = await project(
+          "promptfoo",
+          `import {context,propagation,trace} from '@opentelemetry/api';
+const tracer=trace.getTracer('fixture');
+function identity(value){return value && {traceId:value.traceId,spanId:value.spanId,traceFlags:value.traceFlags,isRemote:value.isRemote===true,tracestate:value.traceState?.serialize()};}
+function active(){return identity(trace.getSpan(context.active())?.spanContext());}
+export async function loadApiProvider(){return {
+ async callApi(){
+  const spans={before:active()},carrier={};
+  propagation.inject(context.active(),carrier);
+  await tracer.startActiveSpan('native-parent',async parent=>{
+   spans.parent=identity(parent.spanContext());spans.parentParent=identity(parent.parentSpanContext);
+   await tracer.startActiveSpan('native-tool',{attributes:{'gen_ai.tool.name':'read_file','gen_ai.operation.name':'execute_tool','native.number':12}},async tool=>{
+    spans.tool=identity(tool.spanContext());spans.toolParent=identity(tool.parentSpanContext);
+    await new Promise(resolve=>setTimeout(resolve,25));
+    spans.toolActive=active();
+    tool.setAttribute('native.final','present');tool.end();
+   });
+   spans.afterTool=active();parent.end();
   });
+  spans.restored=active();
+  return {output:'traced',metadata:{native:{spans,carrier}}};
+ },
+ async cleanup(){const span=tracer.startSpan('native-cleanup');span.end();}
+};}`,
+          telemetryPackage,
+        );
+        // A different API at basePath catches resolution that skips the real peer.
+        await installTelemetryPeer(path, decoyPackage);
+        const peerRequire = createRequire(join(path, "node_modules", "promptfoo", "index.js"));
+        const apiRoot = await telemetryPackageRoot(peerRequire.resolve("@opentelemetry/api"));
+        const apiPackage = object(
+          JSON.parse(await readFile(join(apiRoot, "package.json"), "utf8")),
+          "consumer API package",
+        );
+        expect(apiPackage.name).toBe("@opentelemetry/api");
+        expect(typeof apiPackage.version === "string" && apiPackage.version.startsWith(minor)).toBe(
+          true,
+        );
+        const f = frame(path);
+        const traceId = "0123456789abcdef0123456789abcdef";
+        const rowId = "0123456789abcdef";
+        f.context.traceparent = `00-${traceId}-${rowId}-01`;
+        f.context.tracestate = "fixture=consumer";
+        const response = await runDelegate(f, {}, 5000);
+        expect(response.output).toBe("traced");
+        const metadata = object(response.metadata, "response metadata");
+        const native = object(metadata.native, "native trace metadata");
+        const spans = object(native.spans, "native span identities");
+        expect(native.carrier).toEqual({
+          traceparent: f.context.traceparent,
+          tracestate: f.context.tracestate,
+        });
+        expect(spans.before).toEqual(expect.objectContaining({ traceId, spanId: rowId }));
+        expect(object(spans.parent, "native parent").traceId).toBe(traceId);
+        expect(spans.parentParent).toEqual(
+          expect.objectContaining({ traceId, spanId: rowId, isRemote: true }),
+        );
+        expect(object(spans.tool, "native tool").traceId).toBe(traceId);
+        expect(spans.toolParent).toEqual(spans.parent);
+        expect(spans.toolActive).toEqual(spans.tool);
+        expect(spans.afterTool).toEqual(spans.parent);
+        expect(spans.restored).toEqual(spans.before);
+        expect(completed.map((span) => span.name).sort()).toEqual([
+          "native-cleanup",
+          "native-parent",
+          "native-tool",
+        ]);
+        const parent = completed.find((span) => span.name === "native-parent");
+        const tool = completed.find((span) => span.name === "native-tool");
+        const cleanup = completed.find((span) => span.name === "native-cleanup");
+        if (!parent || !tool || !cleanup)
+          throw new Error("Native spans did not reach the row trace");
+        expect(parent.spanContext().traceId).toBe(traceId);
+        expect(parent.parentSpanContext?.spanId).toBe(rowId);
+        expect(tool.spanContext().traceId).toBe(traceId);
+        expect(tool.parentSpanContext?.spanId).toBe(parent.spanContext().spanId);
+        expect(tool.attributes["gen_ai.tool.name"]).toBe("read_file");
+        expect(tool.attributes["gen_ai.operation.name"]).toBe("execute_tool");
+        expect(tool.attributes["native.number"]).toBe(12);
+        expect(tool.attributes["native.final"]).toBe("present");
+        expect(tool.duration[0] * 1000 + tool.duration[1] / 1e6).toBeGreaterThanOrEqual(20);
+        expect(cleanup.spanContext().traceId).toBe(traceId);
+        expect(cleanup.parentSpanContext?.spanId).toBe(rowId);
+        expect(trace.getSpan(otelContext.active())).toBeUndefined();
+      } finally {
+        await tracerProvider.shutdown();
+        trace.disable();
+        propagation.disable();
+        otelContext.disable();
+      }
+    });
+  }
 });
 
 test("native peer resolution selects the evaluation project import condition", async () => {

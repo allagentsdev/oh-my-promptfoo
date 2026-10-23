@@ -10,13 +10,35 @@ updates:
     cooldown:
       default-days: 7
     groups:
-      routine-updates:
+      opentelemetry:
         patterns:
-          - "*"
+          - "@opentelemetry/*"
+      peer-sdks:
+        patterns:
+          - "@github/copilot-sdk"
+          - "@earendil-works/pi-coding-agent"
+          - "promptfoo"
+      bundled-runtime:
+        patterns:
+          - "diff"
+          - "ignore"
+          - "import-meta-resolve"
+          - "jsonc-parser"
+      safe-tooling:
+        patterns:
+          - "@biomejs/*"
+          - "@types/*"
+          - "typescript"
+          - "tsdown"
+          - "rolldown"
+          - "rolldown-plugin-dts"
         update-types:
           - minor
           - patch
     open-pull-requests-limit: 5
+    # The release-policy check distinguishes bundled/runtime and peer changes from
+    # tooling even when the private root uses devDependencies. Rename runtime PRs
+    # to fix(deps): ...; chore(deps-dev) does not trigger a Release Please release.
     commit-message:
       prefix: chore
       include: scope

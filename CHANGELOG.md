@@ -22,6 +22,21 @@
 * Verify `skill-used` with tracing disabled for Claude, Codex, and Copilot, including failed skill loads and text-only claims. Document native skill metadata preservation and that no OpenTelemetry collector is required.
 * Exercise the real Pi SDK with local model-service responses, including chunked streaming, bounded output, guarded directory and screenshot reads, credential errors, cancellation, skill evidence, and retained billing. Verify native Codex skill gates with two live SDK sessions, without tracing.
 
+## [1.20.3](https://github.com/allagentsdev/oh-my-promptfoo/compare/v1.20.2...v1.20.3) (2026-10-23)
+
+
+### Bug Fixes
+
+* **deps:** complete dependency upgrades and release safeguards ([#117](https://github.com/allagentsdev/oh-my-promptfoo/issues/117)) ([451a0e2](https://github.com/allagentsdev/oh-my-promptfoo/commit/451a0e2169baaf71371e470da2adc74dee768968))
+
+## [1.20.2](https://github.com/allagentsdev/oh-my-promptfoo/compare/v1.20.1...v1.20.2) (2026-10-22)
+
+
+### Bug Fixes
+
+* **deps:** remediate audits and maintain bun dependencies ([#110](https://github.com/allagentsdev/oh-my-promptfoo/issues/110)) ([0f94061](https://github.com/allagentsdev/oh-my-promptfoo/commit/0f940614c4cfb256c4e864485902f1d120649ade))
+* **deps:** resolve `ip-address` to `10.7.4` within existing ranges for [GHSA-rxp7-6hxx-x8q5](https://github.com/advisories/GHSA-rxp7-6hxx-x8q5), retaining the reviewed FTP and Forge overrides ([#114](https://github.com/allagentsdev/oh-my-promptfoo/pull/114)).
+
 ## [1.20.1](https://github.com/allagentsdev/oh-my-promptfoo/compare/v1.20.0...v1.20.1) (2026-10-22)
 
 
