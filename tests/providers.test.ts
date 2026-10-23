@@ -1,4 +1,3 @@
-import { afterEach, describe, expect, test } from "bun:test";
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { subscribe, unsubscribe } from "node:diagnostics_channel";
@@ -24,6 +23,7 @@ import { context as otelContext, propagation, trace } from "@opentelemetry/api";
 import { AsyncLocalStorageContextManager } from "@opentelemetry/context-async-hooks";
 import { W3CTraceContextPropagator } from "@opentelemetry/core";
 import { NodeTracerProvider, type ReadableSpan } from "@opentelemetry/sdk-trace-node";
+import { afterEach, describe, expect, test } from "vitest";
 import {
   object,
   promptConfig,
@@ -85,6 +85,7 @@ async function installTelemetryPeer(path: string, name: string): Promise<void> {
   await mkdir(scope, { recursive: true });
   await symlink(packageRoot, join(scope, "api"), process.platform === "win32" ? "junction" : "dir");
 }
+// Echoes options as a JSON snapshot: Node's process.env (options.options.env) is not a plain object.
 const native = `import {chmod,readdir,readFile,utimes,writeFile} from 'node:fs/promises';
 import {writeSync} from 'node:fs';
 export async function loadApiProvider(id, options) {
@@ -106,7 +107,7 @@ export async function loadApiProvider(id, options) {
   if(prompt==='collision') return {output:'ok',metadata:{workspace:{}}};
   if(prompt==='stderr'){process.stderr.write('x'.repeat(70000));await new Promise(()=>{});}
   if(prompt==='error') return {error:'native failure',output:'partial',metadata:{skillCalls:[{name:'fixture'}]}};
-  return {output:prompt,tokenUsage:{prompt:2,completion:3,total:5},cost:0.5,raw:{native:true},publicField:[1,2],metadata:{skillCalls:[{name:'fixture'}],options,context}};
+  return {output:prompt,tokenUsage:{prompt:2,completion:3,total:5},cost:0.5,raw:{native:true},publicField:[1,2],metadata:{skillCalls:[{name:'fixture'}],options:JSON.parse(JSON.stringify(options)),context}};
  },async cleanup(){await new Promise(r=>setTimeout(r,20));}};
 }`;
 function frame(
@@ -1611,13 +1612,14 @@ describe("direct Copilot provider", () => {
       }
     });
   }
-  for (const timeoutMs of [200, 5000]) {
+  // The short deadline stays below the one-second metrics cap after Node runner startup.
+  for (const timeoutMs of [500, 5000]) {
     test(`hung optional metrics preserve success within the ${timeoutMs}ms deadline and one-second cap`, async () => {
       const { provider } = await accountingProvider(timeoutMs);
       try {
         const started = Date.now();
         const response = await provider.callApi(accountingPrompt({ metrics: "hang" }));
-        expect(Date.now() - started).toBeLessThan(timeoutMs === 200 ? 1500 : 3000);
+        expect(Date.now() - started).toBeLessThan(timeoutMs === 500 ? 1500 : 3000);
         expect(response.error).toBeUndefined();
         expect(response.output).toBe("accounting fixture output");
         expect(response.cost).toBeUndefined();
@@ -2149,7 +2151,8 @@ describe("direct Copilot provider", () => {
     } finally {
       await protectedProvider.cleanup();
     }
-  }, 15_000);
+    // Each call spawns several Node subprocesses for cache locks and the delegate runner.
+  }, 30_000);
   test("missing SDK is actionable and pre-abort performs no execution", async () => {
     const path = await project("unrelated", "export {};");
     const provider = new CopilotSdkProvider({ config: { basePath: path, working_dir: "." } });

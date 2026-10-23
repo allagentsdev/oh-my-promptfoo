@@ -1,12 +1,13 @@
-import { describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import { describe, expect, test } from "vitest";
+import { parse as parseYaml } from "yaml";
 
-const checker = resolve(import.meta.dir, "../scripts/check-dependency-release.mjs");
+const checker = resolve(import.meta.dirname, "../scripts/check-dependency-release.mjs");
 const publicPath = "packages/oh-my-promptfoo/package.json";
 type Manifest = {
   version: string;
@@ -127,9 +128,9 @@ async function branchedFixture(dependency: "typescript" | "ignore") {
 }
 
 async function comparisonFetchScript() {
-  const workflow: unknown = Bun.YAML.parse(
+  const workflow: unknown = parseYaml(
     await readFile(
-      resolve(import.meta.dir, "../.github/workflows/dependency-release-policy.yml"),
+      resolve(import.meta.dirname, "../.github/workflows/dependency-release-policy.yml"),
       "utf8",
     ),
   );

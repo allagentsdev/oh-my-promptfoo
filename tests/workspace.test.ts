@@ -1,4 +1,3 @@
-import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { execFileSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { subscribe, unsubscribe } from "node:diagnostics_channel";
@@ -19,6 +18,8 @@ import {
 import { tmpdir } from "node:os";
 import { basename, dirname, join, relative, sep } from "node:path";
 import { pathToFileURL } from "node:url";
+import { resolve as resolveImport } from "import-meta-resolve";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import { withLock } from "../packages/workspace-core/src/cache-lock.ts";
 import { CheckoutFactory } from "../packages/workspace-core/src/checkout.ts";
 import { resolveWorkspaceTimeoutMs } from "../packages/workspace-core/src/config.ts";
@@ -53,6 +54,8 @@ import type {
   WorkspaceSpec,
 } from "../packages/workspace-core/src/types.ts";
 
+// Child processes run TypeScript fixtures and sources through the repository's tsx loader.
+const tsx = resolveImport("tsx", import.meta.url);
 const temporary: string[] = [];
 const onLinux = process.platform === "linux" ? test : test.skip;
 const managers: WorkspaceManager[] = [];
@@ -342,8 +345,10 @@ describe("workspace configuration", () => {
     const child = spawn(
       process.execPath,
       [
-        join(import.meta.dir, "fixtures/lock-contender.ts"),
-        pathToFileURL(join(import.meta.dir, "../packages/workspace-core/src/index.ts")).href,
+        "--import",
+        tsx,
+        join(import.meta.dirname, "fixtures/lock-contender.ts"),
+        pathToFileURL(join(import.meta.dirname, "../packages/workspace-core/src/index.ts")).href,
         JSON.stringify({
           ...f,
           channels: { ...f.channels, ALLAGENTS_WORKSPACE_TIMEOUT_MS: "1800000" },
@@ -386,14 +391,14 @@ describe("workspace configuration", () => {
     const parent = await mkdtemp(join(realpathSync(tmpdir()), "allagents-root-boundary-"));
     temporary.push(parent);
     const module = pathToFileURL(
-      join(import.meta.dir, "../packages/workspace-core/src/fs.ts"),
+      join(import.meta.dirname, "../packages/workspace-core/src/fs.ts"),
     ).href;
     for (const existing of [false, true]) {
       const root = join(parent, existing ? "existing" : "new");
       if (existing) await mkdir(root);
       const first = spawn(
         process.execPath,
-        [join(import.meta.dir, "fixtures/root-publisher.ts"), module, root],
+        ["--import", tsx, join(import.meta.dirname, "fixtures/root-publisher.ts"), module, root],
         {
           stdio: ["pipe", "pipe", "pipe"],
         },
@@ -412,6 +417,9 @@ describe("workspace configuration", () => {
         execFileSync(
           process.execPath,
           [
+            "--import",
+            tsx,
+            "--input-type=module",
             "-e",
             "const {ownedRoot}=await import(process.argv[1]);await ownedRoot(process.argv[2],'runtime-parent');",
             module,
@@ -663,7 +671,7 @@ describe("workspace lifecycle", () => {
       ALLAGENTS_WORKSPACE_ROOT: runtime,
     };
     const write = workspaceFs.atomicJson;
-    const spy = spyOn(workspaceFs, "atomicJson").mockImplementation((path, value, maxBytes) => {
+    const spy = vi.spyOn(workspaceFs, "atomicJson").mockImplementation((path, value, maxBytes) => {
       if (basename(path) === MARKER && dirname(dirname(path)) === runtime)
         return Promise.reject(new Error("injected runtime marker failure"));
       return write(path, value, maxBytes);
@@ -1290,7 +1298,9 @@ describe("workspace lifecycle", () => {
     const f = await fixture();
     const module = pathToFileURL(join(process.cwd(), "packages/workspace-core/src/index.ts")).href;
     const code = `const {WorkspaceManager}=await import(${JSON.stringify(module)});const manager=new WorkspaceManager(${JSON.stringify(f.spec)},${JSON.stringify(f.channels)});const handle=await manager.prepare();process.stdout.write(JSON.stringify(handle)+"\\n");setInterval(()=>{},1000);`;
-    const child = spawn(process.execPath, ["-e", code], { stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(process.execPath, ["--import", tsx, "--input-type=module", "-e", code], {
+      stdio: ["ignore", "pipe", "pipe"],
+    });
     let stderr = "";
     child.stderr.on("data", (b) => (stderr += b.toString()));
     const row = await new Promise<{ path: string; manifestDigest: `sha256:${string}` }>(
@@ -1511,14 +1521,18 @@ test("default runtime canonicalizes the platform temporary directory while expli
   await symlink(target, alias, process.platform === "win32" ? "junction" : "dir");
   const module = pathToFileURL(join(process.cwd(), "packages/workspace-core/src/index.ts")).href;
   const code = `const {WorkspaceManager}=await import(${JSON.stringify(module)});const manager=new WorkspaceManager({sources:[]},{ALLAGENTS_CACHE_ROOT:${JSON.stringify(join(root, "cache"))}});const handle=await manager.prepare();console.log(handle.path);await manager.cleanup();`;
-  const path = execFileSync(process.execPath, ["-e", code], {
-    encoding: "utf8",
-    env: {
-      ...process.env,
-      TMPDIR: alias,
-      ...(process.platform === "win32" ? { TEMP: alias, TMP: alias } : {}),
+  const path = execFileSync(
+    process.execPath,
+    ["--import", tsx, "--input-type=module", "-e", code],
+    {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        TMPDIR: alias,
+        ...(process.platform === "win32" ? { TEMP: alias, TMP: alias } : {}),
+      },
     },
-  }).trim();
+  ).trim();
   expect(path.startsWith(`${target}${sep}`)).toBe(true);
   await expect(
     manager(

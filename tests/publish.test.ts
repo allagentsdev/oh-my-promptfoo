@@ -1,8 +1,10 @@
-import { describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
+import { existsSync } from "node:fs";
 import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
+import { resolve as resolveImport } from "import-meta-resolve";
+import { describe, expect, test } from "vitest";
 
 const fakeNpm = `#!/usr/bin/env node
 const {readFileSync,writeFileSync}=require('node:fs');
@@ -49,13 +51,15 @@ async function fixture() {
   await mkdir(join(root, "bin"));
   await mkdir(join(root, "packages", "oh-my-promptfoo"), { recursive: true });
   await copyFile(
-    join(import.meta.dir, "..", "scripts", "publish.ts"),
+    join(import.meta.dirname, "..", "scripts", "publish.ts"),
     join(root, "scripts", "publish.ts"),
   );
+  // Like the repository root, run the copied script as ESM; the fake npm stays CommonJS.
+  await writeFile(join(root, "scripts", "package.json"), '{"type":"module"}\n');
   // Exercise retry/deadline logic without spending the test budget on wall-clock sleeps.
   await writeFile(
     join(root, "clock.cjs"),
-    `let elapsed=0;const now=Date.now;Date.now=()=>now()+elapsed;Bun.sleep=async delay=>{if(typeof delay!=='number')throw Error('Unexpected publisher sleep');elapsed+=delay;};`,
+    `let elapsed=0;const now=Date.now;Date.now=()=>now()+elapsed;require('node:timers/promises').setTimeout=async delay=>{if(typeof delay!=='number')throw Error('Unexpected publisher sleep');elapsed+=delay;};require('node:module').syncBuiltinESMExports();`,
   );
   if (process.platform === "win32") {
     await writeFile(join(root, "bin", "npm.js"), fakeNpm);
@@ -101,7 +105,13 @@ function run(
     throw new Error("Fake npm shim was not selected; refusing to run release script");
   return spawnSync(
     process.execPath,
-    ["--preload", join(f.root, "clock.cjs"), join(f.root, "scripts", "publish.ts")],
+    [
+      "--require",
+      join(f.root, "clock.cjs"),
+      "--import",
+      resolveImport("tsx", import.meta.url),
+      join(f.root, "scripts", "publish.ts"),
+    ],
     {
       cwd: f.root,
       encoding: "utf8",
@@ -167,7 +177,7 @@ describe("trusted stable release publish", () => {
       const result = run(f);
       expect(result.status).not.toBe(0);
       expect(result.stderr).toContain("must be published under latest");
-      expect(await Bun.file(f.output).exists()).toBe(false);
+      expect(existsSync(f.output)).toBe(false);
       expect(JSON.parse(await readFile(f.registry, "utf8")).published).toEqual([]);
     } finally {
       await rm(f.root, { recursive: true, force: true });

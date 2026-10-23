@@ -1,8 +1,8 @@
-import { expect, test } from "bun:test";
 import { realpathSync } from "node:fs";
 import { mkdir, mkdtemp, readdir, readFile, rm, statfs } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { expect, test } from "vitest";
 import { DEFAULT_LIMITS } from "../packages/workspace-core/src/config.ts";
 import { ownedRoot } from "../packages/workspace-core/src/fs.ts";
 import {

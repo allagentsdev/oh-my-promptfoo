@@ -1,4 +1,3 @@
-import { afterEach, describe, expect, test } from "bun:test";
 import { execFile } from "node:child_process";
 import { subscribe, unsubscribe } from "node:diagnostics_channel";
 import { realpathSync } from "node:fs";
@@ -19,6 +18,8 @@ import { tmpdir } from "node:os";
 import { join, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
+import { resolve as resolveImport } from "import-meta-resolve";
+import { afterEach, describe, expect, test } from "vitest";
 import { DEFAULT_LIMITS } from "../packages/workspace-core/src/config.ts";
 import { atomicJson, PACKAGE, processIdentity } from "../packages/workspace-core/src/fs.ts";
 import { helperAvailable, helperInvoke } from "../packages/workspace-core/src/helper.ts";
@@ -41,6 +42,8 @@ import {
 import type { WorkspaceSpec } from "../packages/workspace-core/src/types.ts";
 
 const exec = promisify(execFile);
+// Child processes import TypeScript sources through the repository's tsx loader.
+const tsx = resolveImport("tsx", import.meta.url);
 const roots: string[] = [];
 const privateAclCheck =
   "if(/\\(I\\)|Everyone|Authenticated Users|BUILTIN\\\\Users/i.test(acl)||!/\\(F\\)/.test(acl))process.exit(4);";
@@ -549,11 +552,59 @@ async function fakeOras(
     { mode: 0o700 },
   );
   if (process.platform === "win32") {
+    // Windows cannot execute the script directly; a compiled launcher runs it with this Node.
     const executable = join(root, "oras-fixture.exe");
-    await exec(process.execPath, ["build", "--compile", path, "--outfile", executable]);
+    const source = join(root, "oras-fixture.cs");
+    await writeFile(source, windowsLauncher(process.execPath));
+    const csc = join(
+      process.env.SystemRoot ?? "C:\\Windows",
+      "Microsoft.NET",
+      "Framework64",
+      "v4.0.30319",
+      "csc.exe",
+    );
+    await exec(csc, ["/nologo", `/out:${executable}`, source]);
     return executable;
   }
   return path;
+}
+/** C# entry point that forwards its arguments, output and exit code to `<exe name>.cjs`. */
+function windowsLauncher(node: string): string {
+  return `using System;
+using System.Diagnostics;
+using System.Text;
+using System.Threading.Tasks;
+static class Launcher {
+  static string Quote(string value) {
+    if (value.Length > 0 && value.IndexOfAny(new[] { ' ', '\\t', '"' }) < 0) return value;
+    var quoted = new StringBuilder("\\"");
+    var slashes = 0;
+    foreach (var c in value) {
+      if (c == '\\\\') { slashes++; continue; }
+      quoted.Append('\\\\', c == '"' ? slashes * 2 + 1 : slashes).Append(c);
+      slashes = 0;
+    }
+    return quoted.Append('\\\\', slashes * 2).Append('"').ToString();
+  }
+  static int Main(string[] args) {
+    var script = System.IO.Path.ChangeExtension(Process.GetCurrentProcess().MainModule.FileName, ".cjs");
+    var line = new StringBuilder(Quote(script));
+    foreach (var arg in args) line.Append(' ').Append(Quote(arg));
+    var start = new ProcessStartInfo(${JSON.stringify(node)}, line.ToString()) {
+      UseShellExecute = false,
+      RedirectStandardOutput = true,
+      RedirectStandardError = true,
+    };
+    using (var child = Process.Start(start)) {
+      var output = child.StandardOutput.BaseStream.CopyToAsync(Console.OpenStandardOutput());
+      var error = child.StandardError.BaseStream.CopyToAsync(Console.OpenStandardError());
+      child.WaitForExit();
+      Task.WaitAll(output, error);
+      return child.ExitCode;
+    }
+  }
+}
+`;
 }
 function manifestFor(
   bytes: Buffer,
@@ -901,13 +952,17 @@ test("private acquisition canonicalizes platform temp aliases and cleans its mar
     join(process.cwd(), "packages/workspace-core/src/sources/process.ts"),
   ).href;
   const code = `const {withPrivateAcquisition}=await import(${JSON.stringify(module)});let observed;await withPrivateAcquisition({},async(root,env)=>{observed=root;if(env.HOME!==root)throw Error('Environment escaped acquisition');});console.log(observed);`;
-  const { stdout } = await exec(process.execPath, ["-e", code], {
-    env: {
-      ...process.env,
-      TMPDIR: alias,
-      ...(process.platform === "win32" ? { TEMP: alias, TMP: alias } : {}),
+  const { stdout } = await exec(
+    process.execPath,
+    ["--import", tsx, "--input-type=module", "-e", code],
+    {
+      env: {
+        ...process.env,
+        TMPDIR: alias,
+        ...(process.platform === "win32" ? { TEMP: alias, TMP: alias } : {}),
+      },
     },
-  });
+  );
   expect(stdout.trim().startsWith(`${physical}${sep}`)).toBe(true);
   expect(await readdir(physical)).toEqual([]);
 });

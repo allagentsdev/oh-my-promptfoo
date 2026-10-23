@@ -198,7 +198,9 @@ export function workspaceReaderPath(): string {
   const here = typeof __dirname === "string" ? __dirname : dirname(fileURLToPath(import.meta.url));
   const built = join(here, "workspace-reader.js");
   if (existsSync(built)) return built;
-  const source = join(here, "workspace-reader.ts");
-  if (process.versions.bun && existsSync(source)) return source;
+  // A source checkout has no sibling build; Vitest's global setup bundles the entries.
+  const prebuilt = process.env.OH_MY_PROMPTFOO_TEST_ENTRIES;
+  if (prebuilt && existsSync(join(here, "workspace-reader.ts")))
+    return join(prebuilt, "workspace-reader.js");
   throw new Error("Workspace reader is missing; build or reinstall oh-my-promptfoo");
 }

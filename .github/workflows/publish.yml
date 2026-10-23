@@ -57,18 +57,16 @@ jobs:
             throw Error('Release tag commit must be merged into main');
           }
           JS
+      - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v7
         with:
           node-version: '24'
           registry-url: https://registry.npmjs.org
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: 1.4.0
       - name: Install npm with trusted publishing support
         run: npm install --global npm@11.6.2
-      - run: bun install --frozen-lockfile
+      - run: pnpm install --frozen-lockfile
       - name: Validate source and packed package
-        run: bun run typecheck && bun run lint && bun test && bun run build && bun run pack:check && bun run e2e
+        run: pnpm typecheck && pnpm lint && pnpm test && pnpm build && pnpm pack:check && pnpm e2e
       - name: Preserve packed-package E2E evidence
         run: |
           mkdir -p release-evidence
@@ -77,13 +75,13 @@ jobs:
         id: publish
         env:
           RELEASE_REF: ${{ inputs.ref }}
-        run: bun scripts/publish.ts
+        run: node --import tsx scripts/publish.ts
       - name: Verify published registry consumers and Promptfoo E2E
         env:
           PUBLISHED_VERSION: ${{ steps.publish.outputs.version }}
         run: |
-          bun scripts/smoke-packed-package.ts --registry "$PUBLISHED_VERSION"
-          bun scripts/e2e.ts --registry "$PUBLISHED_VERSION"
+          node --import tsx scripts/smoke-packed-package.ts --registry "$PUBLISHED_VERSION"
+          node --import tsx scripts/e2e.ts --registry "$PUBLISHED_VERSION"
           cp docs/evidence/promptfoo-e2e.json release-evidence/published-promptfoo-e2e.json
       - name: Publish verified GitHub release
         env:

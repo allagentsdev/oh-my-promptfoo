@@ -162,7 +162,6 @@ try {
         "--config.auto-install-peers=false",
       ],
     },
-    { name: "bun", command: "bun", args: ["add", "--ignore-scripts", "--omit=peer", "--exact"] },
   ]) {
     const cwd = join(temp, manager.name);
     await mkdir(cwd);
@@ -340,7 +339,6 @@ assert.equal(value(10).text,'protected source');assert.equal(readFileSync(join(r
     await compileDeclarations(cwd);
     run("node", ["node_modules/oh-my-promptfoo/dist/cli.js", "--help"], cwd);
     run("node", ["assertions-smoke.mjs"], cwd);
-    if (manager.name === "bun") run("bun", ["assertions-smoke.mjs"], cwd);
     run("node", ["workspace-reader-smoke.mjs"], cwd);
     run(manager.command, [...manager.args, `@github/copilot-sdk@${copilotVersion}`], cwd);
     run("node", ["smoke.mjs", "with-copilot"], cwd);

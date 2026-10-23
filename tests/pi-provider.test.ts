@@ -1,4 +1,3 @@
-import { afterEach, expect, test } from "bun:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
@@ -6,6 +5,8 @@ import { realpathSync } from "node:fs";
 import { access, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { resolve as resolveImport } from "import-meta-resolve";
+import { afterEach, expect, test } from "vitest";
 import { type JsonObject, object } from "../packages/oh-my-promptfoo/src/config";
 import {
   type CallFrame,
@@ -20,6 +21,8 @@ import {
   toolResults,
 } from "./fixtures/pi-model-server";
 
+// The child imports TypeScript sources through the repository's tsx loader.
+const tsx = resolveImport("tsx", import.meta.url);
 const roots: string[] = [];
 const servers: PiModelServer[] = [];
 afterEach(async () => {
@@ -411,15 +414,19 @@ test("Pi missing credentials cannot inherit ambient keys or leave private SDK st
     catch (failure) { error = failure.message; }
     console.log(JSON.stringify({error, entries:await readdir(process.env.TMPDIR)}));
   `;
-  const child = spawn(process.execPath, ["--eval", source], {
-    cwd: resolve("."),
-    env: {
-      ...process.env,
-      TMPDIR: scratch,
-      ANTHROPIC_API_KEY: "ambient-key-must-not-be-inherited",
+  const child = spawn(
+    process.execPath,
+    ["--import", tsx, "--input-type=module", "--eval", source],
+    {
+      cwd: resolve("."),
+      env: {
+        ...process.env,
+        TMPDIR: scratch,
+        ANTHROPIC_API_KEY: "ambient-key-must-not-be-inherited",
+      },
+      stdio: ["ignore", "pipe", "pipe"],
     },
-    stdio: ["ignore", "pipe", "pipe"],
-  });
+  );
   let stdout = "";
   let stderr = "";
   child.stdout.setEncoding("utf8").on("data", (chunk: string) => {

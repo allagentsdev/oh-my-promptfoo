@@ -331,7 +331,7 @@ For bring-your-own-key use, `provider` is a closed object containing a required 
 
 The repository is named `promptfoo-integration`, not `promptfoo-recipes`, because downstream projects install its package as a production dependency. Copyable configurations belong under `examples/`.
 
-The package targets Node.js 22.22.0 or newer on Linux and macOS. Bun manages workspaces, tests, builds, and release scripts. The package ships ESM, CommonJS, and declaration entrypoints. It bundles private workspace implementation while externalizing `promptfoo` and optional `@github/copilot-sdk`. Releases use GitHub trusted publishing with npm provenance.
+The package targets Node.js 22.22.0 or newer on Linux and macOS. pnpm manages workspaces, builds, and release scripts; Vitest runs the tests on Node. The package ships ESM, CommonJS, and declaration entrypoints. It bundles private workspace implementation while externalizing `promptfoo` and optional `@github/copilot-sdk`. Releases use GitHub trusted publishing with npm provenance.
 
 Provider configuration, workspace metadata, optional file-change results, manifests, and runtime environment variable names are versioned public contracts. Breaking changes require a major version.
 

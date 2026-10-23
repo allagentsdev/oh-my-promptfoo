@@ -1,4 +1,3 @@
-import { test } from "bun:test";
 import assert from "node:assert/strict";
 import { realpathSync } from "node:fs";
 import { cp, mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
@@ -6,6 +5,7 @@ import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { test } from "vitest";
 import {
   agentAssert as installedAgentAssert,
   llmAssert,

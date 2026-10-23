@@ -1,9 +1,9 @@
-import { expect, test } from "bun:test";
 import { realpathSync } from "node:fs";
 import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { expect, test } from "vitest";
 import { DEFAULT_LIMITS } from "../packages/workspace-core/src/config.ts";
 import {
   materializeSources,

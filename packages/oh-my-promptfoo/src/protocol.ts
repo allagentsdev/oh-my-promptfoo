@@ -181,8 +181,10 @@ function runnerPath(): string {
   const here = typeof __dirname === "string" ? __dirname : dirname(fileURLToPath(import.meta.url));
   const built = join(here, "delegate-runner.js");
   if (existsSync(built)) return built;
-  const source = join(here, "delegate-runner.ts");
-  if (process.versions.bun && existsSync(source)) return source;
+  // A source checkout has no sibling build; Vitest's global setup bundles the entries.
+  const prebuilt = process.env.OH_MY_PROMPTFOO_TEST_ENTRIES;
+  if (prebuilt && existsSync(join(here, "delegate-runner.ts")))
+    return join(prebuilt, "delegate-runner.js");
   throw new Error("Delegate runner is missing; build or reinstall oh-my-promptfoo");
 }
 export function resolvePeer(basePath: string, name: string): string {

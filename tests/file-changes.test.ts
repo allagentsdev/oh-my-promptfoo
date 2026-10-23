@@ -1,7 +1,7 @@
-import { expect, test } from "bun:test";
 import { chmod, mkdir, mkdtemp, readlink, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { expect, test } from "vitest";
 import { captureFileChanges, establishBaseline } from "../packages/workspace-core/src/file-changes";
 
 test("capture records exact after bytes, deletions, modes, symlinks and root additions", async () => {
