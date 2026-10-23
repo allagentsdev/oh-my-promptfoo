@@ -24,6 +24,13 @@
 * Exercise the real Pi SDK with local model-service responses, including chunked streaming, bounded output, guarded directory and screenshot reads, credential errors, cancellation, skill evidence, and retained billing. Verify native Codex skill gates with two live SDK sessions, without tracing.
 * Remove obsolete `@types/diff`; workspace file-change capture uses the declarations bundled with `diff@9`.
 
+## [1.20.5](https://github.com/allagentsdev/oh-my-promptfoo/compare/v1.20.4...v1.20.5) (2026-10-23)
+
+
+### Bug Fixes
+
+* allow shared native rubric defaults ([#122](https://github.com/allagentsdev/oh-my-promptfoo/issues/122)) ([3700f9a](https://github.com/allagentsdev/oh-my-promptfoo/commit/3700f9af1f235ecb6f41b8e4e8b6cfefe5d9b071))
+
 ## [1.20.4](https://github.com/allagentsdev/oh-my-promptfoo/compare/v1.20.3...v1.20.4) (2026-10-23)
 
 
