@@ -297,7 +297,9 @@ First-call configuration throws and explicit cancellation keep their existing
 error behavior; no unreported spend is inferred from them.
 
 See [Copilot runtime accounting v1](provider-guide.md#copilot-runtime-accounting-v1)
-for the exact nano-AIU schema, conversion and runtime/invoice limitations.
+for the exact nano-AIU schema, conversion and runtime/invoice limitations, and the
+[Copilot cost methodology](copilot-cost-methodology.md) for turning ledgers and
+`CopilotResponsesProvider` token prices into dollar totals.
 
 
 ### Caching

@@ -412,6 +412,10 @@ value and the sum are valid; missing/invalid values or no received events omit
 it. These event counters do not establish complete session billing and are
 never exported as generic money.
 
+[Copilot cost methodology](copilot-cost-methodology.md) defines the unit
+conversions and how to combine this usage with token-price estimates and native
+costs.
+
 
 ## Filesystem behavior
 
