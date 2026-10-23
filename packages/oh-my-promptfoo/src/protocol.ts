@@ -263,7 +263,10 @@ export async function runDelegate(
     if (stopping) return;
     stopping = true;
     child.stdin.write('{"version":1,"type":"abort"}\n', () => {});
-    killGroup("SIGTERM");
+    // Windows has no catchable SIGTERM: ChildProcess.kill() is TerminateProcess, which
+    // would discard the runner's terminal frame and its captured accounting. There the
+    // abort frame alone requests shutdown, and the grace timer remains the hard stop.
+    if (process.platform !== "win32") killGroup("SIGTERM");
     escalation = setTimeout(() => killGroup("SIGKILL"), SHUTDOWN_GRACE_MS);
   }
   const abort = () => stop(new Error("Delegate call aborted"), true);

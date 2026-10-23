@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { ChildProcess, execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { subscribe, unsubscribe } from "node:diagnostics_channel";
 import { existsSync, lstatSync, realpathSync, statSync } from "node:fs";
@@ -23,7 +23,7 @@ import { context as otelContext, propagation, trace } from "@opentelemetry/api";
 import { AsyncLocalStorageContextManager } from "@opentelemetry/context-async-hooks";
 import { W3CTraceContextPropagator } from "@opentelemetry/core";
 import { NodeTracerProvider, type ReadableSpan } from "@opentelemetry/sdk-trace-node";
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import {
   object,
   promptConfig,
@@ -1711,10 +1711,11 @@ describe("direct Copilot provider", () => {
       }
     }, 15_000);
   }
-  // Windows stop() hard-kills the runner before its terminal frame: allagentsdev/oh-my-promptfoo#128.
-  test.skipIf(process.platform === "win32")(
-    "cancellation retains settled Copilot accounting through the delegate protocol",
-    async () => {
+  // On Windows ChildProcess.kill() is TerminateProcess whatever the signal, so a stop that
+  // signals before the runner's terminal frame discards its accounting (#128). The
+  // emulated case reproduces those semantics on every host.
+  for (const killTerminates of [false, true])
+    test(`cancellation retains settled Copilot accounting through the delegate protocol${killTerminates ? " when kill() terminates the runner" : ""}`, async () => {
       const { path, provider } = await accountingProvider();
       const controller = new AbortController();
       try {
@@ -1733,8 +1734,25 @@ describe("direct Copilot provider", () => {
           }
           await new Promise((resolve) => setTimeout(resolve, 10));
         }
-        controller.abort();
-        const response = await pending;
+        const platform = Object.getOwnPropertyDescriptor(process, "platform")!;
+        const kill = ChildProcess.prototype.kill;
+        const terminate = killTerminates
+          ? vi.spyOn(ChildProcess.prototype, "kill").mockImplementation(function (
+              this: ChildProcess,
+            ) {
+              return kill.call(this, "SIGKILL");
+            })
+          : undefined;
+        if (killTerminates)
+          Object.defineProperty(process, "platform", { ...platform, value: "win32" });
+        let response: Awaited<typeof pending>;
+        try {
+          controller.abort();
+          response = await pending;
+        } finally {
+          Object.defineProperty(process, "platform", platform);
+          terminate?.mockRestore();
+        }
         expect(response.error).toContain("aborted");
         expect(response.cost).toBeUndefined();
         expect((response.metadata as any).copilot.accounting).toMatchObject({
@@ -1745,8 +1763,7 @@ describe("direct Copilot provider", () => {
       } finally {
         await provider.cleanup();
       }
-    },
-  );
+    });
   test("cleanup failure retains a partial snapshot without generic cost", async () => {
     const { provider } = await accountingProvider();
     try {
