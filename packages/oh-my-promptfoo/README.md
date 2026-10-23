@@ -156,7 +156,9 @@ copied as reported: prices per `batchSize` tokens, with `default` from the top
 level and `longContext` from its long-context tier when there is one. Only
 numeric fields are copied, and nothing is converted or summed into a cost. When
 Copilot reports no prices, or the model list can't be read, replies still
-succeed without the field.
+succeed without the field. To turn these prices, or Copilot's reported session
+usage, into dollars, see the
+[Copilot cost methodology](https://github.com/allagentsdev/oh-my-promptfoo/blob/main/docs/copilot-cost-methodology.md).
 
 To read Copilot's model list or endpoint yourself, `createCopilotEndpointClient()`
 from `oh-my-promptfoo/providers` starts the same private SDK process and returns
@@ -176,6 +178,9 @@ examples.
 - [Grading guide](https://github.com/allagentsdev/oh-my-promptfoo/blob/main/docs/grading-guide.md): `llmAssert` and `agentAssert` in
   full, including choosing the judge, fallback judges, scoring modes,
   templates, token usage and prompt size limits
+- [Copilot cost methodology](https://github.com/allagentsdev/oh-my-promptfoo/blob/main/docs/copilot-cost-methodology.md): how
+  Copilot's reported session usage and token prices become US dollars, and how to
+  total them
 - [Examples](https://github.com/allagentsdev/oh-my-promptfoo/tree/main/examples): complete Promptfoo configs
 - [Architecture decisions](https://github.com/allagentsdev/oh-my-promptfoo/tree/main/docs/adr): why things work the way they do
 - [Changelog](https://github.com/allagentsdev/oh-my-promptfoo/blob/main/CHANGELOG.md)
