@@ -319,10 +319,15 @@ and `metadata.copilot.skillSupport: true`. A successful local `read`,
 `source: "read-tool"`. Copilot's built-in Skill loader also records
 `source: "sdk-skill-loader"`, but only when its invoked-skill RPC supplies a
 contained, non-symlinked `SKILL.md` path and the loaded body matches the file
-after YAML frontmatter removal. Only skill names, paths, and provenance leave
-the runner; loaded content does not. Failed or unfinished reads, bare Skill
-invocations, text mentions, mismatched content, MCP reads, and paths outside
-the workspace do not count.
+after YAML frontmatter removal. Copilot redacts secret-shaped text in that body,
+including prose such as `Bearer authentication`, as `******`. A redacted body
+still matches only when every visible character is unchanged and in order, each
+mask hides one non-empty single-line span of at most 256 characters, there are at
+most 64 masks, and at least 90% of the file body stays visible. Alignments that
+exceed a fixed search budget are rejected. Only skill names,
+paths, and provenance leave the runner; loaded content does not. Failed or
+unfinished reads, bare Skill invocations, text mentions, mismatched content, MCP
+reads, and paths outside the workspace do not count.
 
 Copilot sessions enable skills only when a real `.agents/skills`,
 `.claude/skills`, or `.github/skills` directory exists immediately under the

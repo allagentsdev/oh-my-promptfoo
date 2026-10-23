@@ -409,6 +409,46 @@ interface ClientLike {
   forceStop(): Promise<unknown>;
 }
 
+// Copilot CLI redacts secret-shaped text in loaded skill content, including harmless
+// prose such as "Bearer authentication", by replacing each match with this mask. Its
+// rules include runtime-known secret values, so the redaction cannot be reproduced here.
+const REDACTION_MASK = "******";
+const MAX_MASKS = 64;
+const MAX_MASKED_SPAN = 256;
+const MAX_ALIGNMENT_STEPS = 1_000_000;
+
+/**
+ * Exact equality, or a bounded redaction of the local body: every visible character
+ * matches in order, each mask hides one non-empty single-line span of at most
+ * MAX_MASKED_SPAN characters, and at least 90% of the body stays visible.
+ */
+function matchesLoadedBody(body: string, content: string): boolean {
+  if (body === content) return true;
+  const parts = content.split(REDACTION_MASK);
+  const masks = parts.length - 1;
+  const visible = content.length - masks * REDACTION_MASK.length;
+  if (masks === 0 || masks > MAX_MASKS || visible * 10 < body.length * 9) return false;
+  if (!body.startsWith(parts[0]!)) return false;
+  const failed = new Set<string>();
+  let steps = 0;
+  // Memoized states still multiply with masks and span length on crafted single-line
+  // bodies, so a fixed step budget rejects them instead of blocking the runner.
+  const align = (index: number, position: number): boolean => {
+    if (index === masks) return position === body.length;
+    const key = `${index}:${position}`;
+    if (failed.has(key)) return false;
+    const next = parts[index + 1]!;
+    for (let span = 1; span <= MAX_MASKED_SPAN && position + span <= body.length; span++) {
+      if (body[position + span - 1] === "\n" || ++steps > MAX_ALIGNMENT_STEPS) break;
+      const start = position + span;
+      if (body.startsWith(next, start) && align(index + 1, start + next.length)) return true;
+    }
+    failed.add(key);
+    return false;
+  };
+  return align(0, parts[0]!.length);
+}
+
 function verifiedSkillLoaderRecord(entry: unknown, workingDir: string): SkillCall | undefined {
   if (!entry || typeof entry !== "object" || Array.isArray(entry)) return;
   const { name, path, content } = entry as Record<string, unknown>;
@@ -421,7 +461,7 @@ function verifiedSkillLoaderRecord(entry: unknown, workingDir: string): SkillCal
       .replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, "")
       .replace(/\r\n/g, "\n")
       .trim();
-    if (!body || body !== content.replace(/\r\n/g, "\n").trim()) return;
+    if (!body || !matchesLoadedBody(body, content.replace(/\r\n/g, "\n").trim())) return;
     return { ...local, source: "sdk-skill-loader" };
   } catch {
     return;

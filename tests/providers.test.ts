@@ -2007,7 +2007,13 @@ describe("direct Copilot provider", () => {
     await mkdir(join(repository, ".agents", "skills", "cw-sql-schema-migration"), {
       recursive: true,
     });
-    await writeFile(join(repository, skill), "# SQL migration\n");
+    // Long enough that one masked phrase leaves over 90% of the body visible, so each
+    // rejected variant below fails on its own rule rather than on visibility. The literal
+    // ****** line must still align when another phrase is redacted.
+    await writeFile(
+      join(repository, skill),
+      `# SQL migration\nSend Bearer authentication;\nKeep the column inventory.\nExample ****** stays literal.\n${"Inventory first. ".repeat(30)}\n${"Review each column before migrating.\n".repeat(80)}`,
+    );
     const git = promisify(execFile);
     await git("git", ["init", "-q", repository]);
     await git("git", ["-C", repository, "add", "."]);
@@ -2071,6 +2077,34 @@ describe("direct Copilot provider", () => {
       const mismatch = await provider.callApi("auto-skill-review:mismatch");
       expect(mismatch.error).toBeUndefined();
       expect((mismatch.metadata as { skillCalls: unknown[] }).skillCalls).toEqual([]);
+      // The CLI returns secret-shaped prose as ******. Only a bounded single-line mask
+      // with every visible character unchanged still proves the local skill loaded.
+      for (const [variant, accepted] of [
+        [":masked", true],
+        [":masked-multiline", false],
+        [":masked-altered", false],
+        [":masked-most", false],
+        [":masked-long-span", false],
+        [":masked-too-many", false],
+      ] as const) {
+        const result = await provider.callApi(`auto-skill-review${variant}`);
+        expect(result.error).toBeUndefined();
+        const resultMetadata = result.metadata as {
+          skillCalls: unknown[];
+          workspace: { path: string };
+        };
+        expect(resultMetadata.skillCalls).toEqual(
+          accepted
+            ? [
+                {
+                  name: "cw-sql-schema-migration",
+                  path: join(resultMetadata.workspace.path, "repo", skill),
+                  source: "sdk-skill-loader",
+                },
+              ]
+            : [],
+        );
+      }
     } finally {
       await provider.cleanup();
     }
