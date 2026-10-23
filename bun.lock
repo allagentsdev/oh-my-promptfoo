@@ -27,7 +27,7 @@
     },
     "packages/oh-my-promptfoo": {
       "name": "oh-my-promptfoo",
-      "version": "1.20.4",
+      "version": "1.20.5",
       "bin": {
         "allagents-promptfoo": "./dist/cli.js",
       },
