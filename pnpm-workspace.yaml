@@ -1,0 +1,13 @@
+packages:
+  - packages/*
+# Reviewed security and compatibility overrides; see docs/releasing.md.
+overrides:
+  get-uri@8.0.1>basic-ftp: 6.2.3
+  node-forge: github:matthewscottconroy/forge#db05494352dd3c9a5a07c5270333dcc78866cad2
+  tsdown@0.23.1>rolldown-plugin-dts: 0.28.7
+# Development needs no dependency install scripts; their packages ship usable builds.
+ignoredBuiltDependencies:
+  - "@google/genai"
+  - esbuild
+  - koffi
+  - protobufjs

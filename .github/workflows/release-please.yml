@@ -193,30 +193,28 @@ jobs:
             if (matches.length) accept(matches[0]);
           }
           JS
-      - name: Preserve the trusted lock synchronizer
+      # Install pnpm from main's packageManager before checking out the release branch.
+      - uses: pnpm/action-setup@v6
         if: steps.pr.outputs.branch != ''
-        run: |
-          mkdir -p "$RUNNER_TEMP/release-tools"
-          cp scripts/sync-release-lock.ts "$RUNNER_TEMP/release-tools/sync-release-lock.ts"
-          npm install --prefix "$RUNNER_TEMP/release-tools" --ignore-scripts --no-audit --no-fund --no-save jsonc-parser@3.3.1
       - uses: actions/checkout@v7
         if: steps.pr.outputs.branch != ''
         with:
           ref: ${{ steps.pr.outputs.branch }}
           persist-credentials: false
-      - name: Synchronize Bun lock in the release PR
+      - name: Synchronize pnpm lock in the release PR
         if: steps.pr.outputs.branch != ''
         id: lock
         run: |
-          node "$RUNNER_TEMP/release-tools/sync-release-lock.ts" "$GITHUB_WORKSPACE"
+          # Resolve only the lockfile; never run release-branch pnpmfile hooks or switch pnpm versions.
+          pnpm install --lockfile-only --no-frozen-lockfile --ignore-scripts --ignore-pnpmfile --config.manage-package-manager-versions=false
           if ! git diff --quiet -- package.json packages/oh-my-promptfoo/package.json; then
-            echo 'Bun unexpectedly modified a package manifest' >&2
+            echo 'pnpm unexpectedly modified a package manifest' >&2
             exit 1
           fi
-          if ! git diff --quiet -- bun.lock; then
+          if ! git diff --quiet -- pnpm-lock.yaml; then
             git config user.name 'github-actions[bot]'
             git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-            git add bun.lock
+            git add pnpm-lock.yaml
             git commit -m 'chore: synchronize release lockfile'
             echo 'changed=true' >> "$GITHUB_OUTPUT"
           fi
@@ -254,13 +252,11 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0
+      - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v7
         with:
           node-version: '24'
           registry-url: https://registry.npmjs.org
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: 1.4.0
       - name: Install npm with trusted publishing support
         run: npm install --global npm@11.6.2
       - name: Read the pending release version
@@ -307,7 +303,7 @@ jobs:
         env:
           PREVIEW_VERSION: ${{ steps.preview.outputs.version }}
         run: |
-          bun install --frozen-lockfile
+          pnpm install --frozen-lockfile
           node --input-type=module <<'JS'
           import { readFileSync, writeFileSync } from 'node:fs';
           for (const path of ['package.json', 'packages/oh-my-promptfoo/package.json']) {
@@ -317,7 +313,7 @@ jobs:
           }
           JS
       - name: Validate source and packed preview
-        run: bun run typecheck && bun run lint && bun test && bun run build && bun run pack:check && bun run e2e
+        run: pnpm typecheck && pnpm lint && pnpm test && pnpm build && pnpm pack:check && pnpm e2e
       - name: Recheck pending release PR and main source
         id: recheck
         env:
@@ -377,8 +373,8 @@ jobs:
         env:
           PREVIEW_VERSION: ${{ steps.preview.outputs.version }}
         run: |
-          bun scripts/smoke-packed-package.ts --registry "$PREVIEW_VERSION"
-          bun scripts/e2e.ts --registry "$PREVIEW_VERSION"
+          node --import tsx scripts/smoke-packed-package.ts --registry "$PREVIEW_VERSION"
+          node --import tsx scripts/e2e.ts --registry "$PREVIEW_VERSION"
       - name: Tag and announce verified preview
         if: steps.recheck.outputs.publish == 'true'
         env:

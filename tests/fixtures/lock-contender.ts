@@ -1,8 +1,8 @@
-import { mock } from "bun:test";
 import * as childProcess from "node:child_process";
 import { createHash } from "node:crypto";
 import { fstatSync, statSync } from "node:fs";
 import { readFile, realpath } from "node:fs/promises";
+import { createRequire, syncBuiltinESMExports } from "node:module";
 import { basename, dirname, join } from "node:path";
 
 const original = { ...childProcess };
@@ -20,8 +20,9 @@ const windowsLockName =
 // filesystem/provider operations remain real; POSIX 1800s becomes 2s.
 // Windows scales only the contended admission mutex; short bootstrap waits
 // otherwise expire under loaded runners before acquisition even starts.
-mock.module("node:child_process", () => ({
-  ...original,
+// Patch the builtin before importing the workspace so its named import sees the wrapper.
+const builtin: typeof childProcess = createRequire(import.meta.url)("node:child_process");
+Object.assign(builtin, {
   spawn(command: string, args: readonly string[], settings: childProcess.SpawnOptions) {
     const scaled = [...args];
     let spawnSettings = settings;
@@ -56,7 +57,8 @@ mock.module("node:child_process", () => ({
     }
     return original.spawn(command, scaled, spawnSettings);
   },
-}));
+});
+syncBuiltinESMExports();
 const { WorkspaceManager } = await import(process.argv[2]!);
 const manager = new WorkspaceManager(options.spec, options.channels);
 try {

@@ -1,5 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { appendFile, readFile } from "node:fs/promises";
+import { setTimeout as sleep } from "node:timers/promises";
 
 if (process.argv.length !== 2) throw new Error("Usage: publish.ts");
 const releaseRef = process.env.RELEASE_REF;
@@ -86,7 +87,7 @@ if (existing === undefined) {
     }
     if (Date.now() >= deadline)
       throw new Error(`npm accepted ${name}@${version}, but it is not indexed under latest`);
-    await Bun.sleep(1_000);
+    await sleep(1_000);
   }
 } else {
   console.log(`${name}@${version} is already published`);

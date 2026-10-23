@@ -1,4 +1,3 @@
-import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { execFileSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { subscribe, unsubscribe } from "node:diagnostics_channel";
@@ -19,6 +18,8 @@ import {
 import { tmpdir } from "node:os";
 import { basename, dirname, join, relative, sep } from "node:path";
 import { pathToFileURL } from "node:url";
+import { resolve as resolveImport } from "import-meta-resolve";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import { withLock } from "../packages/workspace-core/src/cache-lock.ts";
 import { CheckoutFactory } from "../packages/workspace-core/src/checkout.ts";
 import { resolveWorkspaceTimeoutMs } from "../packages/workspace-core/src/config.ts";
@@ -53,6 +54,8 @@ import type {
   WorkspaceSpec,
 } from "../packages/workspace-core/src/types.ts";
 
+// Child processes run TypeScript fixtures and sources through the repository's tsx loader.
+const tsx = resolveImport("tsx", import.meta.url);
 const temporary: string[] = [];
 const onLinux = process.platform === "linux" ? test : test.skip;
 const managers: WorkspaceManager[] = [];
@@ -61,7 +64,7 @@ afterEach(async () => {
   await Promise.all(temporary.splice(0).map((p) => removeTree(p)));
 });
 async function fixture() {
-  const root = await mkdtemp(join(realpathSync(tmpdir()), "allagents-workspace-test-"));
+  const root = await mkdtemp(join(realpathSync.native(tmpdir()), "allagents-workspace-test-"));
   temporary.push(root);
   const repo = join(root, "repository");
   await mkdir(repo);
@@ -113,7 +116,7 @@ async function allowFixtureFileMutation(path: string): Promise<void> {
   execFileSync(join(system32, "icacls.exe"), [path, "/grant:r", `*${sid}:F`, "/L", "/Q"]);
 }
 test("large protection walks retain file modes and never follow source symlinks", async () => {
-  const root = await mkdtemp(join(realpathSync(tmpdir()), "allagents-protect-test-"));
+  const root = await mkdtemp(join(realpathSync.native(tmpdir()), "allagents-protect-test-"));
   temporary.push(root);
   const tree = join(root, "tree");
   const nested = join(tree, "nested");
@@ -160,7 +163,7 @@ test("large protection walks retain file modes and never follow source symlinks"
   }
 });
 test("bounded inventory retains depth-first order and allocated blocks match inode totals", async () => {
-  const root = await mkdtemp(join(realpathSync(tmpdir()), "allagents-inventory-test-"));
+  const root = await mkdtemp(join(realpathSync.native(tmpdir()), "allagents-inventory-test-"));
   temporary.push(root);
   await mkdir(join(root, "a"));
   await writeFile(join(root, "a", "b"), "nested");
@@ -180,7 +183,7 @@ test("bounded inventory retains depth-first order and allocated blocks match ino
   expect(combined.allocatedBytes).toBe(expected);
 });
 test("writable Git views retain immutable objects while allowing new Git objects", async () => {
-  const root = await mkdtemp(join(realpathSync(tmpdir()), "allagents-git-object-modes-"));
+  const root = await mkdtemp(join(realpathSync.native(tmpdir()), "allagents-git-object-modes-"));
   temporary.push(root);
   const tree = join(root, "tree");
   const objects = join(tree, ".git", "objects", "ab");
@@ -269,7 +272,7 @@ test("local Git seed restores pinned executable modes under a restrictive umask"
 }, 15_000);
 describe("workspace configuration", () => {
   test("canceling a native lock waiter preserves its reason and the current holder", async () => {
-    const root = await mkdtemp(join(realpathSync(tmpdir()), "allagents-lock-cancel-"));
+    const root = await mkdtemp(join(realpathSync.native(tmpdir()), "allagents-lock-cancel-"));
     temporary.push(root);
     const lock = join(root, "contended");
     let ready!: () => void;
@@ -342,8 +345,10 @@ describe("workspace configuration", () => {
     const child = spawn(
       process.execPath,
       [
-        join(import.meta.dir, "fixtures/lock-contender.ts"),
-        pathToFileURL(join(import.meta.dir, "../packages/workspace-core/src/index.ts")).href,
+        "--import",
+        tsx,
+        join(import.meta.dirname, "fixtures/lock-contender.ts"),
+        pathToFileURL(join(import.meta.dirname, "../packages/workspace-core/src/index.ts")).href,
         JSON.stringify({
           ...f,
           channels: { ...f.channels, ALLAGENTS_WORKSPACE_TIMEOUT_MS: "1800000" },
@@ -383,17 +388,17 @@ describe("workspace configuration", () => {
     }
   }, 45_000);
   test("another process can initialize while an ownership marker awaits publication", async () => {
-    const parent = await mkdtemp(join(realpathSync(tmpdir()), "allagents-root-boundary-"));
+    const parent = await mkdtemp(join(realpathSync.native(tmpdir()), "allagents-root-boundary-"));
     temporary.push(parent);
     const module = pathToFileURL(
-      join(import.meta.dir, "../packages/workspace-core/src/fs.ts"),
+      join(import.meta.dirname, "../packages/workspace-core/src/fs.ts"),
     ).href;
     for (const existing of [false, true]) {
       const root = join(parent, existing ? "existing" : "new");
       if (existing) await mkdir(root);
       const first = spawn(
         process.execPath,
-        [join(import.meta.dir, "fixtures/root-publisher.ts"), module, root],
+        ["--import", tsx, join(import.meta.dirname, "fixtures/root-publisher.ts"), module, root],
         {
           stdio: ["pipe", "pipe", "pipe"],
         },
@@ -412,6 +417,9 @@ describe("workspace configuration", () => {
         execFileSync(
           process.execPath,
           [
+            "--import",
+            tsx,
+            "--input-type=module",
             "-e",
             "const {ownedRoot}=await import(process.argv[1]);await ownedRoot(process.argv[2],'runtime-parent');",
             module,
@@ -429,7 +437,9 @@ describe("workspace configuration", () => {
     expect((await readdir(parent)).sort()).toEqual(["existing", "new"]);
   }, 15_000);
   test("concurrent root publishers expose only complete ownership and preserve the winning kind", async () => {
-    const parent = await mkdtemp(join(realpathSync(tmpdir()), "allagents-root-publication-"));
+    const parent = await mkdtemp(
+      join(realpathSync.native(tmpdir()), "allagents-root-publication-"),
+    );
     temporary.push(parent);
     for (const existing of [false, true]) {
       const root = join(parent, existing ? "existing" : "new");
@@ -586,7 +596,7 @@ describe("workspace configuration", () => {
         ],
       }),
     ).toThrow(/Unknown source key/i);
-    const root = await mkdtemp(join(realpathSync(tmpdir()), "allagents-local-overlap-"));
+    const root = await mkdtemp(join(realpathSync.native(tmpdir()), "allagents-local-overlap-"));
     temporary.push(root);
     const spec: WorkspaceSpec = { sources: [{ type: "local", path: root, destination: "skills" }] };
     expect(
@@ -638,7 +648,7 @@ describe("workspace configuration", () => {
 });
 describe("workspace lifecycle", () => {
   test("different caches can initialize concurrently under one shared runtime parent", async () => {
-    const root = await mkdtemp(join(realpathSync(tmpdir()), "allagents-shared-runtime-"));
+    const root = await mkdtemp(join(realpathSync.native(tmpdir()), "allagents-shared-runtime-"));
     temporary.push(root);
     const owners = Array.from({ length: 6 }, (_, index) =>
       manager(
@@ -655,7 +665,7 @@ describe("workspace lifecycle", () => {
     expect(await readdir(join(root, "runtime"))).toEqual([MARKER]);
   }, 15_000);
   test("a failed runtime marker write removes the half-made root so the next manager initializes", async () => {
-    const root = await mkdtemp(join(realpathSync(tmpdir()), "allagents-runtime-marker-"));
+    const root = await mkdtemp(join(realpathSync.native(tmpdir()), "allagents-runtime-marker-"));
     temporary.push(root);
     const runtime = join(root, "runtime");
     const channels: RuntimeChannels = {
@@ -663,7 +673,7 @@ describe("workspace lifecycle", () => {
       ALLAGENTS_WORKSPACE_ROOT: runtime,
     };
     const write = workspaceFs.atomicJson;
-    const spy = spyOn(workspaceFs, "atomicJson").mockImplementation((path, value, maxBytes) => {
+    const spy = vi.spyOn(workspaceFs, "atomicJson").mockImplementation((path, value, maxBytes) => {
       if (basename(path) === MARKER && dirname(dirname(path)) === runtime)
         return Promise.reject(new Error("injected runtime marker failure"));
       return write(path, value, maxBytes);
@@ -682,7 +692,7 @@ describe("workspace lifecycle", () => {
     expect(await readdir(runtime)).toEqual([MARKER]);
   });
   test("recovery refuses an unmarked runtime root with an error naming its path", async () => {
-    const root = await mkdtemp(join(realpathSync(tmpdir()), "allagents-runtime-leftover-"));
+    const root = await mkdtemp(join(realpathSync.native(tmpdir()), "allagents-runtime-leftover-"));
     temporary.push(root);
     const runtime = join(root, "runtime");
     const channels: RuntimeChannels = {
@@ -737,7 +747,7 @@ describe("workspace lifecycle", () => {
   onLinux(
     "local source pins an immutable skill baseline across concurrent rows and later host edits",
     async () => {
-      const root = await mkdtemp(join(realpathSync(tmpdir()), "allagents-local-workspace-"));
+      const root = await mkdtemp(join(realpathSync.native(tmpdir()), "allagents-local-workspace-"));
       temporary.push(root);
       const source = join(root, "host", "skills");
       const skill = join(source, "example");
@@ -792,7 +802,7 @@ describe("workspace lifecycle", () => {
   onLinux(
     "read-only local source uses a protected checkout rather than the host directory",
     async () => {
-      const root = await mkdtemp(join(realpathSync(tmpdir()), "allagents-local-protected-"));
+      const root = await mkdtemp(join(realpathSync.native(tmpdir()), "allagents-local-protected-"));
       temporary.push(root);
       const source = join(root, "host", "skills");
       await mkdir(source, { recursive: true });
@@ -828,7 +838,7 @@ describe("workspace lifecycle", () => {
   onLinux(
     "several local sources merge one destination, keeping every plugin's skills",
     async () => {
-      const root = await mkdtemp(join(realpathSync(tmpdir()), "allagents-local-merge-"));
+      const root = await mkdtemp(join(realpathSync.native(tmpdir()), "allagents-local-merge-"));
       temporary.push(root);
       const host = join(root, "host");
       const plugins = ["alpha", "beta", "gamma"];
@@ -886,7 +896,7 @@ describe("workspace lifecycle", () => {
   onLinux(
     "a relative path contributed by two merged sources fails naming both sources",
     async () => {
-      const root = await mkdtemp(join(realpathSync(tmpdir()), "allagents-local-collide-"));
+      const root = await mkdtemp(join(realpathSync.native(tmpdir()), "allagents-local-collide-"));
       temporary.push(root);
       const host = join(root, "host");
       for (const name of ["alpha", "beta"]) {
@@ -920,7 +930,9 @@ describe("workspace lifecycle", () => {
   onLinux(
     "a merged read-only destination is one protected checkout with a verifiable stamp",
     async () => {
-      const root = await mkdtemp(join(realpathSync(tmpdir()), "allagents-local-merge-protected-"));
+      const root = await mkdtemp(
+        join(realpathSync.native(tmpdir()), "allagents-local-merge-protected-"),
+      );
       temporary.push(root);
       const host = join(root, "host");
       for (const name of ["alpha", "beta"]) {
@@ -977,7 +989,7 @@ describe("workspace lifecycle", () => {
   onLinux(
     "a cancelled first local seed lets the next case acquire fresh host bytes",
     async () => {
-      const root = await mkdtemp(join(realpathSync(tmpdir()), "allagents-local-abort-"));
+      const root = await mkdtemp(join(realpathSync.native(tmpdir()), "allagents-local-abort-"));
       temporary.push(root);
       const source = join(root, "host", "skills");
       await mkdir(source, { recursive: true });
@@ -1021,7 +1033,9 @@ describe("workspace lifecycle", () => {
   onLinux(
     "a cancelled first case after workspace readiness reacquires the local source",
     async () => {
-      const root = await mkdtemp(join(realpathSync(tmpdir()), "allagents-local-ready-abort-"));
+      const root = await mkdtemp(
+        join(realpathSync.native(tmpdir()), "allagents-local-ready-abort-"),
+      );
       temporary.push(root);
       const source = join(root, "host", "skills");
       await mkdir(source, { recursive: true });
@@ -1065,7 +1079,7 @@ describe("workspace lifecycle", () => {
   onLinux(
     "a changed source before first seed publication can be acquired on the next call",
     async () => {
-      const root = await mkdtemp(join(realpathSync(tmpdir()), "allagents-local-change-"));
+      const root = await mkdtemp(join(realpathSync.native(tmpdir()), "allagents-local-change-"));
       temporary.push(root);
       const source = join(root, "host", "skills");
       await mkdir(source, { recursive: true });
@@ -1290,7 +1304,9 @@ describe("workspace lifecycle", () => {
     const f = await fixture();
     const module = pathToFileURL(join(process.cwd(), "packages/workspace-core/src/index.ts")).href;
     const code = `const {WorkspaceManager}=await import(${JSON.stringify(module)});const manager=new WorkspaceManager(${JSON.stringify(f.spec)},${JSON.stringify(f.channels)});const handle=await manager.prepare();process.stdout.write(JSON.stringify(handle)+"\\n");setInterval(()=>{},1000);`;
-    const child = spawn(process.execPath, ["-e", code], { stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(process.execPath, ["--import", tsx, "--input-type=module", "-e", code], {
+      stdio: ["ignore", "pipe", "pipe"],
+    });
     let stderr = "";
     child.stderr.on("data", (b) => (stderr += b.toString()));
     const row = await new Promise<{ path: string; manifestDigest: `sha256:${string}` }>(
@@ -1468,7 +1484,7 @@ describe("cache policy and fallback admission", () => {
 });
 describe("cache locks and process identity", () => {
   test("parallel mutation lock operations never overlap", async () => {
-    const root = await mkdtemp(join(realpathSync(tmpdir()), "allagents-lock-test-"));
+    const root = await mkdtemp(join(realpathSync.native(tmpdir()), "allagents-lock-test-"));
     temporary.push(root);
     let active = 0;
     let maximum = 0;
@@ -1492,7 +1508,7 @@ describe("cache locks and process identity", () => {
 });
 
 test("large inventory JSON can use an explicit bounded read without relaxing default control record bounds", async () => {
-  const root = await mkdtemp(join(realpathSync(tmpdir()), "allagents-inventory-json-"));
+  const root = await mkdtemp(join(realpathSync.native(tmpdir()), "allagents-inventory-json-"));
   temporary.push(root);
   const path = join(root, "metadata.json");
   await writeFile(path, JSON.stringify({ inventory: "a".repeat(65 * 1024 * 1024) }));
@@ -1503,7 +1519,7 @@ test("large inventory JSON can use an explicit bounded read without relaxing def
 }, 30_000);
 
 test("default runtime canonicalizes the platform temporary directory while explicit symlink roots stay rejected", async () => {
-  const root = await mkdtemp(join(realpathSync(tmpdir()), "allagents-default-root-"));
+  const root = await mkdtemp(join(realpathSync.native(tmpdir()), "allagents-default-root-"));
   temporary.push(root);
   const target = join(root, "physical");
   const alias = join(root, "platform-alias");
@@ -1511,14 +1527,18 @@ test("default runtime canonicalizes the platform temporary directory while expli
   await symlink(target, alias, process.platform === "win32" ? "junction" : "dir");
   const module = pathToFileURL(join(process.cwd(), "packages/workspace-core/src/index.ts")).href;
   const code = `const {WorkspaceManager}=await import(${JSON.stringify(module)});const manager=new WorkspaceManager({sources:[]},{ALLAGENTS_CACHE_ROOT:${JSON.stringify(join(root, "cache"))}});const handle=await manager.prepare();console.log(handle.path);await manager.cleanup();`;
-  const path = execFileSync(process.execPath, ["-e", code], {
-    encoding: "utf8",
-    env: {
-      ...process.env,
-      TMPDIR: alias,
-      ...(process.platform === "win32" ? { TEMP: alias, TMP: alias } : {}),
+  const path = execFileSync(
+    process.execPath,
+    ["--import", tsx, "--input-type=module", "-e", code],
+    {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        TMPDIR: alias,
+        ...(process.platform === "win32" ? { TEMP: alias, TMP: alias } : {}),
+      },
     },
-  }).trim();
+  ).trim();
   expect(path.startsWith(`${target}${sep}`)).toBe(true);
   await expect(
     manager(
@@ -1636,7 +1656,7 @@ test("recent verified seed reuse avoids another full capacity walk but refreshes
 }, 30_000);
 
 test("bounded JSON writes reject before leaving a partial or temporary file", async () => {
-  const root = await mkdtemp(join(realpathSync(tmpdir()), "allagents-json-write-"));
+  const root = await mkdtemp(join(realpathSync.native(tmpdir()), "allagents-json-write-"));
   temporary.push(root);
   await expect(atomicJson(join(root, "metadata.json"), { value: "oversized" }, 5)).rejects.toThrow(
     "write bound",

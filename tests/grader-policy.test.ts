@@ -1,10 +1,10 @@
-import { test } from "bun:test";
 import assert from "node:assert/strict";
 import { realpathSync } from "node:fs";
 import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { test } from "vitest";
 import {
   claudeReadAllowed,
   disabledWorkspaceSkills,
@@ -21,7 +21,7 @@ async function withReadPolicy(
     call: (delegate: CallFrame["delegate"], model?: string) => Promise<Record<string, unknown>>;
   }) => Promise<void>,
 ) {
-  const root = await mkdtemp(join(realpathSync(tmpdir()), "allagents-read-policy-"));
+  const root = await mkdtemp(join(realpathSync.native(tmpdir()), "allagents-read-policy-"));
   const workspace = join(root, "candidate.with.dots");
   const outside = join(root, "private");
   const protectedRoot = join(root, "protected");

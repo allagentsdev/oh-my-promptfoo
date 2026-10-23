@@ -4,7 +4,7 @@ The contract is ADR 0001 and the phased plan merged from PR #1. All production m
 
 | Contract phase | Implementation and verification |
 | --- | --- |
-| 0: package | Dual ESM/CommonJS runtime and declarations, bundled private core, one CLI, optional Copilot peer, Release Please version PR configuration, and trusted-publishing workflow. Packed npm, pnpm and Bun consumers pass. |
+| 0: package | Dual ESM/CommonJS runtime and declarations, bundled private core, one CLI, optional Copilot peer, Release Please version PR configuration, and trusted-publishing workflow. Packed npm and pnpm consumers pass. |
 | 1: containment | Closed schemas, canonical source digest, normalized contained destinations, fixed acquisition channels and protected constructor policy. Configuration and override tests pass. |
 | 2: Git | Real local object materialization and authenticated HTTPS subprocess acquisition with physically bounded staging. Disposable HTTPS and actual over-capacity writer tests pass. |
 | 3: OCI | Real ORAS 1.3.0 against a disposable registry; digest, size, titles and streaming bounds validated. Registry and credential-isolation tests pass. |
@@ -19,18 +19,18 @@ The contract is ADR 0001 and the phased plan merged from PR #1. All production m
 ## Reproduce
 
 ```sh
-bun install --frozen-lockfile
-bun run typecheck
-bun run lint
-bun test tests
-bun run build
-bun run pack:check
-bun run e2e
-ALLAGENTS_TEST_ORAS_PATH=/path/to/oras ALLAGENTS_TEST_GIT_HTTPS=1 bun test tests
-bun scripts/benchmark-workspaces.ts
+pnpm install --frozen-lockfile
+pnpm typecheck
+pnpm lint
+pnpm test
+pnpm build
+pnpm pack:check
+pnpm e2e
+ALLAGENTS_TEST_ORAS_PATH=/path/to/oras ALLAGENTS_TEST_GIT_HTTPS=1 pnpm test
+node --import tsx scripts/benchmark-workspaces.ts
 ```
 
-The default Linux suite passes 97 tests with 404 assertions and skips five real-acquisition gates. The separate Linux acquisition job exercises real HTTPS Git, OCI, and privileged OverlayFS paths. TypeScript, Biome, both builds, packed npm/pnpm/Bun consumers and stock Promptfoo E2E pass.
+The default Linux suite passes 97 tests with 404 assertions and skips five real-acquisition gates. The separate Linux acquisition job exercises real HTTPS Git, OCI, and privileged OverlayFS paths. TypeScript, Biome, both builds, packed npm/pnpm consumers and stock Promptfoo E2E pass.
 
 Install the fixed helper documented in `docs/workspace-helper.md` before the real Linux mount/acquisition gates. Pull-request validation runs Linux, macOS and Windows; Linux additionally runs the real-acquisition job. The [Windows/macOS validation run](https://github.com/allagentsdev/oh-my-promptfoo/actions/runs/36728133187) passed tests, packed npm/pnpm/Bun consumers and stock Promptfoo E2E on both platforms. Windows uses a named kernel mutex and NTFS ACLs for protected trees. The Windows runner's 8.3 temp directory spelling must not be mistaken for a symlink; root ancestors and restored cache controls are still checked for actual links. `.gitattributes` keeps tracked text at LF on Windows so Biome checks the same bytes as Linux. The scale JSON reports fixture geometry as well as allocation; a one-file sparse fixture does not predict OverlayFS metadata cost for a large repository.
 

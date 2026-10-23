@@ -1,7 +1,7 @@
-import { expect, setSystemTime, test } from "bun:test";
 import assert from "node:assert/strict";
 import { join } from "node:path";
 import { assertions } from "promptfoo";
+import { expect, test, vi } from "vitest";
 import { FallbackProvider } from "../packages/oh-my-promptfoo/src/providers";
 
 type Reply = {
@@ -401,12 +401,13 @@ test("short cooldown expires and the judge is tried again", async () => {
   const second = stub("second", ok("second"));
   await fallback([first, second], { cooldownMs: 20 }).callApi("p");
   fail = false;
-  setSystemTime(new Date(Date.now() + 1_000));
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(Date.now() + 1_000);
   try {
     const response = await fallback([first, second], { cooldownMs: 20 }).callApi("p");
     assert.equal(response.output, "first");
   } finally {
-    setSystemTime();
+    vi.useRealTimers();
   }
 });
 
@@ -507,7 +508,7 @@ test("loads relative file:// judges against config.basePath", async () => {
   const label = unique("Fixture Judge");
   const provider = new FallbackProvider({
     config: {
-      basePath: join(import.meta.dir, "fixtures"),
+      basePath: join(import.meta.dirname, "fixtures"),
       providers: [{ id: "file://fallback-judge.mjs", label, config: { output: "from fixture" } }],
     },
   });
@@ -650,7 +651,7 @@ test("cooldowns are kept per judge identity, not per provider id", async () => {
   assert.equal(meta(third).attempts.length, 1);
 
   // The same spec loaded under another environment is another account's judge.
-  const judge = join(import.meta.dir, "fixtures", "fallback-judge.mjs");
+  const judge = join(import.meta.dirname, "fixtures", "fallback-judge.mjs");
   const spec = { id: `file://${judge}`, label: unique("env-judge"), config: { fail: 429 } };
   const withEnv = (account: string) =>
     new FallbackProvider({
@@ -671,7 +672,7 @@ test("the same relative judge in another suite's directory cools separately", as
       config: {
         providers: [spec, stub("suite-backup", ok("backup"))],
         cooldownMs: 60_000,
-        basePath: join(import.meta.dir, "fixtures", directory),
+        basePath: join(import.meta.dirname, "fixtures", directory),
       },
     });
   const limited = await suite("basepath-failing").callApi("p");

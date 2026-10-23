@@ -1,5 +1,5 @@
-import { expect, test } from "bun:test";
 import { createRequire } from "node:module";
+import { expect, test } from "vitest";
 
 // Exercise the Forge copy used by Promptfoo's JKS/PKCS#12 loader, not a separate test pin.
 const promptfooRequire = createRequire(import.meta.resolve("promptfoo"));

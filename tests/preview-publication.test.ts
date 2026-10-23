@@ -1,8 +1,8 @@
-import { describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
 import { copyFile, link, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
+import { describe, expect, test } from "vitest";
 
 const expectedSha = "a".repeat(40);
 const current = { state: "OPEN", headRefOid: expectedSha };
@@ -198,7 +198,7 @@ async function checkPublication(scenario: PreviewCase) {
     }
     const result = spawnSync(
       executable,
-      [join(import.meta.dir, "..", "scripts", "check-preview-publication.mjs")],
+      [join(import.meta.dirname, "..", "scripts", "check-preview-publication.mjs")],
       { cwd: root, encoding: "utf8", env },
     );
     expect(result.error).toBeUndefined();

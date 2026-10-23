@@ -1,5 +1,5 @@
-import { test } from "bun:test";
 import assert from "node:assert/strict";
+import { test } from "vitest";
 import { llmAssert } from "../packages/oh-my-promptfoo/src/assertions";
 import type { JudgeResponse } from "../packages/oh-my-promptfoo/src/judge";
 import { FallbackProvider } from "../packages/oh-my-promptfoo/src/providers";

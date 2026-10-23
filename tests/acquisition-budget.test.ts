@@ -1,8 +1,8 @@
-import { expect, test } from "bun:test";
 import { realpathSync } from "node:fs";
 import { mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { expect, test } from "vitest";
 import {
   acquisitionPhysicalReservation,
   controlledAcquisitionPhysicalReservation,
@@ -53,7 +53,7 @@ test("unsafe arithmetic cannot silently produce an unbounded admission budget", 
 });
 
 test("shared controlled budget rejects an oversized write before creating its inode", async () => {
-  const root = await mkdtemp(join(realpathSync(tmpdir()), "allagents-acquisition-budget-"));
+  const root = await mkdtemp(join(realpathSync.native(tmpdir()), "allagents-acquisition-budget-"));
   try {
     const maximum = controlledAcquisitionPhysicalReservation(limits);
     const writer = await PhysicalWriter.create(root, maximum);

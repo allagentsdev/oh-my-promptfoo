@@ -1,8 +1,8 @@
-import { expect, test } from "bun:test";
 import { realpathSync } from "node:fs";
 import { mkdir, mkdtemp, readdir, readFile, rm, statfs } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { expect, test } from "vitest";
 import { DEFAULT_LIMITS } from "../packages/workspace-core/src/config.ts";
 import { ownedRoot } from "../packages/workspace-core/src/fs.ts";
 import {
@@ -28,7 +28,7 @@ async function physicalLimits() {
 real(
   "real HTTPS Git fetch publishes a pinned source and releases private staging",
   async () => {
-    const parent = await mkdtemp(join(realpathSync(tmpdir()), "allagents-https-git-"));
+    const parent = await mkdtemp(join(realpathSync.native(tmpdir()), "allagents-https-git-"));
     const cache = join(parent, "cache");
     await ownedRoot(cache, "cache");
     const staging = join(cache, "staging", "fixture", "tree");
@@ -65,7 +65,7 @@ real(
 real(
   "real external Git writer cannot exceed a tiny kernel staging capacity and publishes nothing",
   async () => {
-    const parent = await mkdtemp(join(realpathSync(tmpdir()), "allagents-https-git-"));
+    const parent = await mkdtemp(join(realpathSync.native(tmpdir()), "allagents-https-git-"));
     const cache = join(parent, "cache");
     await ownedRoot(cache, "cache");
     const staging = join(cache, "staging", "fixture", "tree");
