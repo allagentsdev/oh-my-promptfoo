@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { test } from "vitest";
 import { llmAssert } from "../packages/oh-my-promptfoo/src/assertions";
 import { installRoot, type JudgeResponse, loadJudge } from "../packages/oh-my-promptfoo/src/judge";
-import { FallbackProvider } from "../packages/oh-my-promptfoo/src/providers";
+import { Fallback } from "../packages/oh-my-promptfoo/src/providers";
 
 const components = [
   { metric: "accuracy", value: "Ground every claim", weight: 3 },
@@ -893,7 +893,7 @@ test("a judge id resolves from the eval's base path or the Promptfoo install, no
       config: { basePath: fixtures },
       label: "llmAssert",
     });
-    // An explicit base path, as FallbackProvider passes its config's, still wins.
+    // An explicit base path, as Fallback passes its config's, still wins.
     const own = await loadJudge("file://judge-provider.mjs", { basePath: fixtures });
     assert.equal(own.id(), "file://judge-provider.mjs");
   } finally {
@@ -932,7 +932,7 @@ test("llmAssert names a missing, listed or misplaced judge before any request", 
   ])
     await assert.rejects(
       llmAssert("answer", context),
-      /A list of judges is not a provider.*FallbackProvider with config\.providers/,
+      /A list of judges is not a provider.*Fallback with config\.providers/,
     );
   // An empty config.provider is absent, as llm-rubric's `assertion.provider ||` reads it;
   // any other malformed one is refused.
@@ -1056,14 +1056,14 @@ test("config.provider beats the test's judge, whichever level Promptfoo resolved
   assert.equal(testJudge.calls.length, 1);
 });
 
-test("a FallbackProvider in config.provider fails over for that assertion only", async () => {
+test("a Fallback in config.provider fails over for that assertion only", async () => {
   const testJudge = stub([], "test-judge");
   const down = stub(
     [{ error: "Rate limit exceeded: HTTP 429", metadata: { http: { status: 429 } } }],
     "assertion-primary",
   );
   const up = stub([{ output: verdict() }], "assertion-backup");
-  const chain = new FallbackProvider({
+  const chain = new Fallback({
     label: "assertion-chain",
     config: { providers: [down.provider, up.provider], cooldownMs: 0 },
   });
@@ -1150,7 +1150,7 @@ test("a timed-out judge and a fallback chain that runs out record grader errors"
   };
   const first = stub([unavailable], "fallback-first");
   const second = stub([unavailable], "fallback-second");
-  const chain = new FallbackProvider({
+  const chain = new Fallback({
     config: { providers: [first.provider, second.provider], cooldownMs: 0 },
   });
   const exhausted = await llmAssert("answer", judgedBy(chain));
@@ -1236,7 +1236,7 @@ test("a verdict keeps the judge's metadata and reports only the provider's own c
     "fallback-down",
   );
   const up = stub([{ output: verdict(), metadata: { model: "backup-model" } }], "fallback-up");
-  const chain = new FallbackProvider({
+  const chain = new Fallback({
     config: { providers: [down.provider, up.provider], cooldownMs: 0 },
   });
   const rescued = await llmAssert("answer", judgedBy(chain));
@@ -1278,7 +1278,7 @@ test("a cached fallback verdict keeps earlier live judge accounting through llmA
     "live-down",
   );
   const up = stub([{ output: verdict(), cached: true }], "cached-up");
-  const chain = new FallbackProvider({
+  const chain = new Fallback({
     config: { providers: [down.provider, up.provider], cooldownMs: 0 },
   });
   const result = await llmAssert("answer", judgedBy(chain));
@@ -1314,10 +1314,10 @@ test("batched rubric retries flatten nested fallback accounting once without cha
     ],
     "backup",
   );
-  const inner = new FallbackProvider({
+  const inner = new Fallback({
     config: { providers: [primary.provider, backup.provider], cooldownMs: 0 },
   });
-  const outer = new FallbackProvider({ config: { providers: [inner], cooldownMs: 0 } });
+  const outer = new Fallback({ config: { providers: [inner], cooldownMs: 0 } });
   const result = await llmAssert("answer", judgedBy(outer));
   assert.equal(result.pass, true);
   assert.deepEqual(result.metadata.judgeAccounting, {

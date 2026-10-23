@@ -6,7 +6,7 @@ A Promptfoo provider that invokes a coding agent and returns its output, usage, 
 
 ## Workspace provider
 
-The public `Provider` that resolves workspace inputs, acquires immutable cached sources, creates one private writable workspace per call with the requested source access, invokes one delegate, optionally captures changed files, and publishes the workspace for Promptfoo assertions. It retains successful workspaces until best-effort provider cleanup instead of guessing when a row's assertions have finished.
+The public `Agent` provider (`package:oh-my-promptfoo/providers:Agent`) that resolves workspace inputs, acquires immutable cached sources, creates one private writable workspace per call with the requested source access, invokes one delegate, optionally captures changed files, and publishes the workspace for Promptfoo assertions. It retains successful workspaces until best-effort provider cleanup instead of guessing when a row's assertions have finished.
 
 ## Delegate
 
@@ -58,7 +58,7 @@ A private writable workspace owned exclusively by one provider call. Each source
 
 ## Provider runtime root
 
-A contained, ownership-marked directory for one workspace-provider instance. It contains private workspaces, source views, adapter state, a live process identity, and package-owned recovery records. Each workspace record exists before its source leases, inode trees, or mounts. `Provider.cleanup()` detaches views before releasing leases; failed detachment retains both for later recovery. The shared seed cache is never part of the root.
+A contained, ownership-marked directory for one workspace-provider instance. It contains private workspaces, source views, adapter state, a live process identity, and package-owned recovery records. Each workspace record exists before its source leases, inode trees, or mounts. `Agent.cleanup()` detaches views before releasing leases; failed detachment retains both for later recovery. The shared seed cache is never part of the root.
 
 ## Cache garbage collection
 

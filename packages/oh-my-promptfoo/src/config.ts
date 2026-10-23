@@ -59,7 +59,7 @@ export interface ClaudeDelegate {
 export interface CopilotDelegate {
   id: "copilot-sdk";
   env?: Record<string, string>;
-  config?: Omit<CopilotSdkProviderConfig, "working_dir" | "env">;
+  config?: Omit<CopilotSdkConfig, "working_dir" | "env">;
 }
 export interface PiDelegate {
   id: "pi-sdk";
@@ -74,7 +74,7 @@ export interface PiDelegate {
   };
 }
 export type Delegate = CodexDelegate | ClaudeDelegate | CopilotDelegate | PiDelegate;
-export interface ProviderConfig {
+export interface AgentConfig {
   delegate: Delegate;
   workspace: WorkspaceSpec;
   workspaceTimeoutMs?: number;
@@ -82,7 +82,7 @@ export interface ProviderConfig {
   fileChanges?: boolean;
   timeoutMs?: number;
 }
-export interface CopilotSdkProviderConfig {
+export interface CopilotSdkConfig {
   working_dir: string;
   model?: string;
   reasoning_effort?: "low" | "medium" | "high";
@@ -380,7 +380,7 @@ export function resolveSourcePaths(workspace: WorkspaceSpec, basePath: string): 
     }) as WorkspaceSpec["sources"],
   };
 }
-export function validateProviderConfig(value: unknown): ProviderConfig {
+export function validateAgentConfig(value: unknown): AgentConfig {
   const c = closed(
     value,
     ["delegate", "workspace", "workspaceTimeoutMs", "workingDir", "fileChanges", "timeoutMs"],
@@ -404,9 +404,9 @@ export function validateProviderConfig(value: unknown): ProviderConfig {
   )
     throw new Error("config.timeoutMs must be a positive integer");
   object(c.workspace, "workspace");
-  return { ...c, delegate: validateDelegate(c.delegate) } as unknown as ProviderConfig;
+  return { ...c, delegate: validateDelegate(c.delegate) } as unknown as AgentConfig;
 }
-export function validateCopilotConfig(value: unknown): CopilotSdkProviderConfig {
+export function validateCopilotConfig(value: unknown): CopilotSdkConfig {
   const c = closed(
     value,
     ["working_dir", "model", "reasoning_effort", "timeoutMs", "provider", "permissions", "env"],
@@ -421,7 +421,7 @@ export function validateCopilotConfig(value: unknown): CopilotSdkProviderConfig 
     working_dir,
     ...rest,
     ...(env !== undefined ? { env } : {}),
-  } as CopilotSdkProviderConfig;
+  } as CopilotSdkConfig;
 }
 export function promptConfig(context: unknown, id: DelegateId, original: JsonObject): JsonObject {
   const ctx = context as { prompt?: { config?: unknown } } | undefined;

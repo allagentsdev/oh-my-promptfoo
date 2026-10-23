@@ -2,7 +2,7 @@ import { validateHeaderName, validateHeaderValue } from "node:http";
 import {
   type CopilotEndpoint,
   type CopilotEndpointClient,
-  type CopilotModel,
+  type CopilotModelInfo,
   createCopilotEndpointClient,
 } from "./copilot-endpoint.js";
 import { type Judge, type JudgeResponse, promptfooLoader } from "./judge.js";
@@ -20,17 +20,17 @@ const PRICE_FIELDS = [
 export type CopilotReasoningEffort = (typeof EFFORTS)[number];
 
 /** Request settings; endpoint and authentication always come from Copilot discovery. */
-export interface CopilotResponsesConfig {
+export interface CopilotModelConfig {
   /** The Copilot model ID, exactly as `listModels()` reports it. */
   model: string;
   reasoning_effort?: CopilotReasoningEffort;
   response_format?: { type: "json_object" };
 }
 
-export interface CopilotResponsesProviderOptions {
+export interface CopilotModelOptions {
   id?: string;
   label?: string;
-  config?: CopilotResponsesConfig & {
+  config?: CopilotModelConfig & {
     /** Set by Promptfoo to the eval config's directory when it loads this provider. */
     basePath?: string;
   };
@@ -60,7 +60,7 @@ export interface NativeResponsesProvider extends Judge {
 }
 
 /** @internal Seams that keep lifecycle tests free of the SDK and of model calls. */
-export interface CopilotResponsesDependencies {
+export interface CopilotModelDependencies {
   createEndpointClient?: () => CopilotEndpointClient;
   loadProvider?: (id: string, context: { options: object }) => Promise<NativeResponsesProvider>;
   now?: () => number;
@@ -90,25 +90,23 @@ const CONFIG_KEYS: Record<string, true> = {
 };
 
 /** Validate authored config; anything that could redirect endpoint or authentication is rejected. */
-export function copilotResponsesConfig(input: unknown): Readonly<CopilotResponsesConfig> {
+export function copilotModelConfig(input: unknown): Readonly<CopilotModelConfig> {
   if (typeof input !== "object" || input === null || Array.isArray(input))
-    throw new Error("CopilotResponsesProvider config must be an object.");
+    throw new Error("CopilotModel config must be an object.");
   const config = input as Record<string, unknown>;
   const unsupported = Object.keys(config).filter((key) => !Object.hasOwn(CONFIG_KEYS, key));
   if (unsupported.length)
     throw new Error(
-      `CopilotResponsesProvider does not accept config.${unsupported.join(", config.")}; the endpoint and credentials come from Copilot discovery.`,
+      `CopilotModel does not accept config.${unsupported.join(", config.")}; the endpoint and credentials come from Copilot discovery.`,
     );
   const { model, reasoning_effort, response_format } = config;
   if (typeof model !== "string" || !model.trim() || model !== model.trim())
-    throw new Error("CopilotResponsesProvider requires an explicit config.model.");
+    throw new Error("CopilotModel requires an explicit config.model.");
   if (
     reasoning_effort !== undefined &&
     !EFFORTS.includes(reasoning_effort as CopilotReasoningEffort)
   )
-    throw new Error(
-      `CopilotResponsesProvider config.reasoning_effort must be one of: ${EFFORTS.join(", ")}.`,
-    );
+    throw new Error(`CopilotModel config.reasoning_effort must be one of: ${EFFORTS.join(", ")}.`);
   if (
     response_format !== undefined &&
     (typeof response_format !== "object" ||
@@ -117,9 +115,7 @@ export function copilotResponsesConfig(input: unknown): Readonly<CopilotResponse
       !("type" in response_format) ||
       response_format.type !== "json_object")
   )
-    throw new Error(
-      'CopilotResponsesProvider config.response_format must be { type: "json_object" }.',
-    );
+    throw new Error('CopilotModel config.response_format must be { type: "json_object" }.');
   return Object.freeze({
     model,
     ...(reasoning_effort === undefined
@@ -196,7 +192,7 @@ function connection(
  */
 function tokenPrices(models: unknown, model: string): CopilotTokenPrices | undefined {
   const prices = Array.isArray(models)
-    ? (models as CopilotModel[]).find((entry) => entry?.id === model)?.billing?.tokenPrices
+    ? (models as CopilotModelInfo[]).find((entry) => entry?.id === model)?.billing?.tokenPrices
     : undefined;
   if (!prices || typeof prices !== "object") return undefined;
   const tier = (value: unknown): CopilotTokenPriceTier | undefined => {
@@ -240,11 +236,11 @@ const loadNativeProvider = async (
  * instance of the returned class shares them; config cannot replace authentication or
  * the native transport.
  */
-export function createCopilotResponsesProvider({
+export function createCopilotModel({
   createEndpointClient = () => createCopilotEndpointClient(),
   loadProvider = loadNativeProvider,
   now = Date.now,
-}: CopilotResponsesDependencies = {}): CopilotResponsesProviderConstructor {
+}: CopilotModelDependencies = {}): CopilotModelConstructor {
   let client: CopilotEndpointClient | undefined;
   let owners = 0;
   let closing: Promise<void> | undefined;
@@ -258,7 +254,7 @@ export function createCopilotResponsesProvider({
     generation.active++;
     return generation;
   };
-  const load = async (config: Readonly<CopilotResponsesConfig>): Promise<Generation> => {
+  const load = async (config: Readonly<CopilotModelConfig>): Promise<Generation> => {
     client ??= createEndpointClient();
     const owner = client;
     let snapshot: CopilotEndpoint;
@@ -305,7 +301,7 @@ export function createCopilotResponsesProvider({
     }
     return generation;
   };
-  const native = async (config: Readonly<CopilotResponsesConfig>): Promise<Generation> => {
+  const native = async (config: Readonly<CopilotModelConfig>): Promise<Generation> => {
     // Each distinct request configuration owns its native provider; credentials are per model.
     const key = JSON.stringify(config);
     let entry = entries.get(key);
@@ -333,18 +329,18 @@ export function createCopilotResponsesProvider({
     }
   };
 
-  return class implements CopilotResponsesProvider {
-    readonly #config: Readonly<CopilotResponsesConfig>;
+  return class implements CopilotModel {
+    readonly #config: Readonly<CopilotModelConfig>;
     #closed = false;
     #cleanup: Promise<void> | undefined;
 
-    constructor(options: CopilotResponsesProviderOptions = {}) {
+    constructor(options: CopilotModelOptions = {}) {
       if (closing) throw new Error("Copilot provider cleanup is in progress.");
-      this.#config = copilotResponsesConfig(options.config ?? {});
+      this.#config = copilotModelConfig(options.config ?? {});
       owners++;
     }
 
-    get config(): Readonly<CopilotResponsesConfig> {
+    get config(): Readonly<CopilotModelConfig> {
       return this.#config;
     }
 
@@ -352,7 +348,7 @@ export function createCopilotResponsesProvider({
       return `copilot:responses:${this.#config.model}`;
     }
 
-    toJSON(): { id: string; config: Readonly<CopilotResponsesConfig> } {
+    toJSON(): { id: string; config: Readonly<CopilotModelConfig> } {
       return { id: this.id(), config: this.#config };
     }
 
@@ -412,26 +408,25 @@ export function createCopilotResponsesProvider({
  * request. Replies carry Copilot's reported token prices instead of an OpenAI list-price
  * `cost`. Every instance in a process shares one SDK worker.
  */
-export interface CopilotResponsesProvider {
-  readonly config: Readonly<CopilotResponsesConfig>;
+export interface CopilotModel {
+  readonly config: Readonly<CopilotModelConfig>;
   /** `copilot:responses:<model>`. */
   id(): string;
   /** The provider's id and request settings; never credentials. */
-  toJSON(): { id: string; config: Readonly<CopilotResponsesConfig> };
+  toJSON(): { id: string; config: Readonly<CopilotModelConfig> };
   callApi(prompt: string, context?: object, options?: object): Promise<ProviderReply>;
   /** Release this instance; the last one stops the shared SDK worker. */
   cleanup(): Promise<void>;
 }
 
-export interface CopilotResponsesProviderConstructor {
-  new (options?: CopilotResponsesProviderOptions): CopilotResponsesProvider;
+export interface CopilotModelConstructor {
+  new (options?: CopilotModelOptions): CopilotModel;
 }
 
 // One SDK worker per process, shared by every instance and by the ESM and CJS builds.
-const sharedKey = Symbol.for("oh-my-promptfoo.CopilotResponsesProvider");
+const sharedKey = Symbol.for("oh-my-promptfoo.CopilotModel");
 const shared = globalThis as typeof globalThis & {
-  [sharedKey]?: CopilotResponsesProviderConstructor;
+  [sharedKey]?: CopilotModelConstructor;
 };
-export const CopilotResponsesProvider: CopilotResponsesProviderConstructor =
-  shared[sharedKey] ?? createCopilotResponsesProvider();
-shared[sharedKey] = CopilotResponsesProvider;
+export const CopilotModel: CopilotModelConstructor = shared[sharedKey] ?? createCopilotModel();
+shared[sharedKey] = CopilotModel;

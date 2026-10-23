@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "vitest";
 import { llmAssert } from "../packages/oh-my-promptfoo/src/assertions";
 import type { JudgeResponse } from "../packages/oh-my-promptfoo/src/judge";
-import { FallbackProvider } from "../packages/oh-my-promptfoo/src/providers";
+import { Fallback } from "../packages/oh-my-promptfoo/src/providers";
 import { gradeRubric, prepareRubric } from "../packages/oh-my-promptfoo/src/rubric-contract";
 
 const components = [{ metric: "accuracy", value: "Ground every claim" }];
@@ -396,7 +396,7 @@ test("llmAssert reports usage for HTTP failures and empty billed replies", async
 
 test("rubric retains nested overflow accounting when the next attempt throws", async () => {
   const leaf = accounting(1_000_000_000);
-  const nested = new FallbackProvider({
+  const nested = new Fallback({
     config: {
       cooldownMs: 0,
       providers: Array.from({ length: 2 }, (_, index) => ({
@@ -487,7 +487,7 @@ test.each([
     let nativeCalls = 0;
     let throwingCalls = 0;
     let backupCalls = 0;
-    const nested = new FallbackProvider({
+    const nested = new Fallback({
       config: {
         cooldownMs: 0,
         providers: [

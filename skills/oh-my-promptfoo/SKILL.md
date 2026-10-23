@@ -1,6 +1,6 @@
 ---
 name: oh-my-promptfoo
-description: Use when authoring, running, or debugging stock Promptfoo coding-agent evals with oh-my-promptfoo's workspace Provider, direct CopilotSdkProvider, llmAssert or agentAssert assertions. Not for Promptfoo core changes or redteam scans.
+description: Use when authoring, running, or debugging stock Promptfoo coding-agent evals with oh-my-promptfoo's workspace Agent, direct CopilotSdk, llmAssert or agentAssert assertions. Not for Promptfoo core changes or redteam scans.
 ---
 
 # Evaluate coding agents with oh-my-promptfoo
@@ -8,11 +8,11 @@ description: Use when authoring, running, or debugging stock Promptfoo coding-ag
 Keep the authored `promptfooconfig.yaml` in the consuming project. Choose the
 provider before writing assertions:
 
-- `package:oh-my-promptfoo:Provider` prepares a new, private workspace for each
+- `package:oh-my-promptfoo/providers:Agent` prepares a new, private workspace for each
   test. Use it for Git, OCI artifact, or trusted local-directory sources.
-- `package:oh-my-promptfoo:CopilotSdkProvider` runs Copilot in an existing
+- `package:oh-my-promptfoo/providers:CopilotSdk` runs Copilot in an existing
   directory that the caller owns; it does not stage sources.
-- `package:oh-my-promptfoo/providers:CopilotResponsesProvider` calls a Copilot
+- `package:oh-my-promptfoo/providers:CopilotModel` calls a Copilot
   model directly over the Responses API, as an LLM candidate or a judge; it has
   no workspace or tools. Set `config.model` and export `GH_TOKEN`.
 - `package:oh-my-promptfoo/assertions:llmAssert` grades named semantic criteria
@@ -44,7 +44,7 @@ at the workspace root, with `CargoWise/` and `.agents/skills/` as siblings.
 ```yaml
 prompts: ["{{task}}"]
 providers:
-  - id: package:oh-my-promptfoo:Provider
+  - id: package:oh-my-promptfoo/providers:Agent
     config:
       delegate:
         id: copilot-sdk
@@ -108,7 +108,7 @@ written it:
 ```yaml
 prompts: ["{{task}}"]
 providers:
-  - id: package:oh-my-promptfoo:Provider
+  - id: package:oh-my-promptfoo/providers:Agent
     config:
       delegate:
         id: copilot-sdk
@@ -129,7 +129,7 @@ tests:
 ```
 
 For an existing Copilot directory, replace the workspace provider with
-`package:oh-my-promptfoo:CopilotSdkProvider` and set its required
+`package:oh-my-promptfoo/providers:CopilotSdk` and set its required
 `config.working_dir` to the existing absolute directory. See
 [the direct Copilot example](../../examples/copilot/promptfooconfig.yaml).
 
@@ -150,13 +150,13 @@ Or pass `--grader openai:chat:gpt-6-sol`, which replaces
 `defaultTest.options.provider`; a test's `options.provider` overrides both.
 Prefer one judge per suite. When one assertion needs its own judge, set
 `config.provider` on that `llmAssert` assertion (an id, provider object or
-`{ text: … }` map, including `FallbackProvider`); it overrides the test's judge, `--grader` and
+`{ text: … }` map, including `Fallback`); it overrides the test's judge, `--grader` and
 `defaultTest`. `provider:` beside `config:` is rejected, because Promptfoo does
 not pass it to package assertions. `metadata.judge` names the judge that graded.
 For Azure OpenAI v1, set the full
 `OPENAI_BASE_URL=https://<resource>.openai.azure.com/openai/v1` and use
 `openai:chat:<deployment>`. To fail over between judges on 429s and outages,
-use `id: package:oh-my-promptfoo/providers:FallbackProvider` with
+use `id: package:oh-my-promptfoo/providers:Fallback` with
 `config.providers` listing judges in order (set `maxRetries: 1` on each); a
 plain list is rejected. Judge errors and outages fail the assertion with
 `metadata.graderError: true`; a judge provider that throws (no API key) makes

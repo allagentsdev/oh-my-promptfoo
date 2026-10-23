@@ -97,7 +97,7 @@ try {
   );
   const commit = run("git", ["rev-parse", "HEAD"], source).trim();
   const wrapper = (id: string, label: string, permissions: string) => ({
-    id: "package:oh-my-promptfoo:Provider",
+    id: "package:oh-my-promptfoo/providers:Agent",
     label,
     config: {
       delegate: {
@@ -454,7 +454,7 @@ try {
     };
   });
   const piProvider = {
-    id: "package:oh-my-promptfoo:Provider",
+    id: "package:oh-my-promptfoo/providers:Agent",
     label: "pi",
     config: {
       delegate: {
@@ -567,7 +567,7 @@ try {
     prompts: ["direct-row"],
     providers: [
       {
-        id: "package:oh-my-promptfoo:CopilotSdkProvider",
+        id: "package:oh-my-promptfoo/providers:CopilotSdk",
         config: { working_dir: directDir },
       },
     ],
@@ -823,7 +823,7 @@ try {
         defaultTest: {
           options: {
             provider: {
-              id: "package:oh-my-promptfoo/providers:FallbackProvider",
+              id: "package:oh-my-promptfoo/providers:Fallback",
               config: { providers: [failingJudge, answeringJudge] },
             },
           },
@@ -961,7 +961,7 @@ try {
             assert: [
               judged(),
               judged({
-                id: "package:oh-my-promptfoo/providers:FallbackProvider",
+                id: "package:oh-my-promptfoo/providers:Fallback",
                 config: { providers: [failingJudge, levelJudge("assertion")] },
               }),
             ],
@@ -975,7 +975,7 @@ try {
       ["test: suite-judge", "assertion: assertion-judge"],
       [
         "test: test-judge",
-        "assertion: package:oh-my-promptfoo/providers:FallbackProvider via assertion-judge",
+        "assertion: package:oh-my-promptfoo/providers:Fallback via assertion-judge",
       ],
     ];
     if (
@@ -1050,13 +1050,13 @@ try {
     throw Error("Native error response or skipped assertion behavior changed");
   await writeFile(
     join(cwd, "abandoned.mjs"),
-    `import {Provider} from 'oh-my-promptfoo';const provider=new Provider(${JSON.stringify({ config: wrapper("openai:codex-sdk", "abandoned", "all").config })});const response=await provider.callApi('abandoned');if(response.error)throw Error(response.error);console.log(response.metadata.workspace.path);`,
+    `import {Agent} from 'oh-my-promptfoo/providers';const provider=new Agent(${JSON.stringify({ config: wrapper("openai:codex-sdk", "abandoned", "all").config })});const response=await provider.callApi('abandoned');if(response.error)throw Error(response.error);console.log(response.metadata.workspace.path);`,
   );
   const abandoned = run("node", ["abandoned.mjs"]).trim();
   await import("node:fs/promises").then((fs) => fs.access(abandoned));
   await writeFile(
     join(cwd, "recover.mjs"),
-    `import {Provider} from 'oh-my-promptfoo';const provider=new Provider(${JSON.stringify({ config: wrapper("openai:codex-sdk", "recovery", "all").config })});await provider.cleanup();`,
+    `import {Agent} from 'oh-my-promptfoo/providers';const provider=new Agent(${JSON.stringify({ config: wrapper("openai:codex-sdk", "recovery", "all").config })});await provider.cleanup();`,
   );
   run("node", ["recover.mjs"]);
   try {
@@ -1107,7 +1107,7 @@ try {
           "trajectory:tool-sequence",
           "trajectory:step-count",
           "packaged llmAssert with defaultTest judge",
-          "llm-rubric and llmAssert through FallbackProvider",
+          "llm-rubric and llmAssert through Fallback",
           "llmAssert judge outage keeps row results",
           "llmAssert config.provider over test, --grader and defaultTest judges",
         ],

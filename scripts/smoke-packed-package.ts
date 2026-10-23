@@ -23,47 +23,50 @@ function run(command: string, args: string[], cwd: string) {
 
 async function compileDeclarations(cwd: string) {
   const consumer = `
-const DefaultProvider: typeof Providers.Provider = Providers.default;
-const provider: Providers.Provider = new DefaultProvider();
-const copilot: Providers.CopilotSdkProvider = new Providers.CopilotSdkProvider();
+const agent: Providers.Agent = new Providers.Agent();
+const copilot: Providers.CopilotSdk = new Providers.CopilotSdk();
 const options: Providers.CallOptions = {abortSignal: new AbortController().signal};
-const providerId: string = provider.id();
-const reply: Promise<unknown> = provider.callApi('prompt', undefined, options);
+const agentConfig: Providers.AgentConfig = {delegate: {id: 'copilot-sdk'}, workspace: {sources: []}};
+const copilotConfig: Providers.CopilotSdkConfig = {working_dir: '.'};
+const agentId: string = agent.id();
+const reply: Promise<unknown> = agent.callApi('prompt', undefined, options);
 const copilotReply: Promise<unknown> = copilot.callApi('prompt', undefined, options);
 const rubric: Assertions.LlmAssertConfig = {components: [{metric: 'quality', value: 'Check answer'}]};
 const assertion: Promise<unknown> = Assertions.llmAssert('answer', {config: rubric});
 const agentAssertion: Promise<unknown> = Assertions.agentAssert('answer');
-const fallbackConfig: Fallbacks.FallbackProviderConfig = {providers: ['openai:example'], cooldownMs: 0};
-const fallback = new Fallbacks.FallbackProvider({config: fallbackConfig});
+const fallbackConfig: Providers.FallbackConfig = {providers: ['openai:example'], cooldownMs: 0};
+const fallback = new Providers.Fallback({config: fallbackConfig});
 const fallbackId: string = fallback.id();
 const fallbackReply: Promise<unknown> = fallback.callApi('prompt');
-const responsesConfig: Fallbacks.CopilotResponsesConfig = {model: 'gpt-6-sol', reasoning_effort: 'low', response_format: {type: 'json_object'}};
-const responses: Fallbacks.CopilotResponsesProvider = new Fallbacks.CopilotResponsesProvider({config: responsesConfig});
+const responsesConfig: Providers.CopilotModelConfig = {model: 'gpt-6-sol', reasoning_effort: 'low', response_format: {type: 'json_object'}};
+const responses: Providers.CopilotModel = new Providers.CopilotModel({config: responsesConfig});
 const responsesId: string = responses.id();
 const responsesReply: Promise<unknown> = responses.callApi('prompt');
-const endpointClient = (): Fallbacks.CopilotEndpointClient => Fallbacks.createCopilotEndpointClient({token: 'token'});
-const endpoint = (client: Fallbacks.CopilotEndpointClient): Promise<Fallbacks.CopilotEndpoint> => client.endpoint('gpt-6-sol');
+const endpointClient = (): Providers.CopilotEndpointClient => Providers.createCopilotEndpointClient({token: 'token'});
+const endpoint = (client: Providers.CopilotEndpointClient): Promise<Providers.CopilotEndpoint> => client.endpoint('gpt-6-sol');
+// @ts-expect-error The package root exports no providers.
+const rootAgent = Root.Agent;
 // @ts-expect-error Reasoning effort is low, medium or high.
-const invalidResponses: Fallbacks.CopilotResponsesConfig = {model: 'gpt-6-sol', reasoning_effort: 'extreme'};
+const invalidResponses: Providers.CopilotModelConfig = {model: 'gpt-6-sol', reasoning_effort: 'extreme'};
 // @ts-expect-error An AbortSignal, not a string, is required.
 const invalidOptions: Providers.CallOptions = {abortSignal: 'invalid'};
 // @ts-expect-error A rubric metric must be named with a string.
 const invalidComponent: Assertions.RubricComponent = {metric: 42, value: 'Check answer'};
 // @ts-expect-error The fallback chain must be a list.
-const invalidFallback: Fallbacks.FallbackProviderConfig = {providers: 'invalid'};
+const invalidFallback: Providers.FallbackConfig = {providers: 'invalid'};
 `;
   for (const [extension, imports] of [
     [
       "mts",
-      `import * as Providers from 'oh-my-promptfoo';
+      `import * as Root from 'oh-my-promptfoo';
 import * as Assertions from 'oh-my-promptfoo/assertions';
-import * as Fallbacks from 'oh-my-promptfoo/providers';`,
+import * as Providers from 'oh-my-promptfoo/providers';`,
     ],
     [
       "cts",
-      `import Providers = require('oh-my-promptfoo');
+      `import Root = require('oh-my-promptfoo');
 import Assertions = require('oh-my-promptfoo/assertions');
-import Fallbacks = require('oh-my-promptfoo/providers');`,
+import Providers = require('oh-my-promptfoo/providers');`,
     ],
   ])
     await writeFile(join(cwd, `consumer.${extension}`), `${imports}\n${consumer}`);
@@ -182,12 +185,14 @@ try {
     run(manager.command, [...manager.args, installation, ...consumerDependencies], cwd);
     await writeFile(
       join(cwd, "smoke.mjs"),
-      `import Default,{Provider,CopilotSdkProvider} from 'oh-my-promptfoo';
+      `import * as Root from 'oh-my-promptfoo';
+import * as Providers from 'oh-my-promptfoo/providers';
 import{createRequire}from'node:module';
 import{readFileSync,statSync}from'node:fs';
 const require=createRequire(import.meta.url);
-const c=require('oh-my-promptfoo');
-if(Default!==Provider||c.default!==c.Provider||typeof Provider!=='function'||typeof CopilotSdkProvider!=='function'||typeof c.Provider!=='function'||typeof c.CopilotSdkProvider!=='function')throw Error('Exports');
+const c=require('oh-my-promptfoo/providers');
+for(const entry of [Providers,c])if(Object.keys(entry).sort().join()!=='Agent,CopilotModel,CopilotSdk,Fallback,createCopilotEndpointClient')throw Error('Provider entry exports '+Object.keys(entry));
+if(Object.keys(Root).length||Object.keys(require('oh-my-promptfoo')).length)throw Error('The package root exports values');
 const packageUrl=new URL('../package.json',import.meta.resolve('oh-my-promptfoo'));
 const manifest=JSON.parse(readFileSync(packageUrl,'utf8'));
 if(manifest.version!==${JSON.stringify(expectedVersion)})throw Error('Loaded package version mismatch');
@@ -209,7 +214,7 @@ console.log('exports and loaded version passed');`,
       `import assert from 'node:assert/strict';
 import {createRequire} from 'node:module';
 import {llmAssert,agentAssert} from 'oh-my-promptfoo/assertions';
-import {FallbackProvider} from 'oh-my-promptfoo/providers';
+import {Fallback as EsmFallback} from 'oh-my-promptfoo/providers';
 const require=createRequire(import.meta.url);
 const c=require('oh-my-promptfoo/assertions');
 const cp=require('oh-my-promptfoo/providers');
@@ -230,7 +235,7 @@ const judge={
 };
 const withJudge=context=>({...context,test:{options:{provider:judge}}});
 const stub=(name,reply)=>({id:()=>name,callApi:async ()=>reply});
-for(const Fallback of [FallbackProvider,cp.FallbackProvider]){
+for(const Fallback of [EsmFallback,cp.Fallback]){
   assert.equal(typeof Fallback,'function');
   const provider=new Fallback({config:{cooldownMs:0,providers:[
     stub('down',{error:'API error: 500',metadata:{http:{status:500}}}),
@@ -272,7 +277,7 @@ for(const assertion of [llmAssert,c.llmAssert]){
 }
 assert.equal(requests.length,2);
 const measuredAccounting={version:1,source:'session.rpc.usage.getMetrics',scope:'session',unit:'nano-AIU',status:'complete',totalNanoAiu:1000000000};
-for(const [assertion,Fallback] of [[llmAssert,FallbackProvider],[llmAssert,cp.FallbackProvider],[c.llmAssert,FallbackProvider],[c.llmAssert,cp.FallbackProvider]]){
+for(const [assertion,Fallback] of [[llmAssert,EsmFallback],[llmAssert,cp.Fallback],[c.llmAssert,EsmFallback],[c.llmAssert,cp.Fallback]]){
   const permanent=Object.freeze(new Error('Packed permanent judge failure'));
   let backupCalls=0;
   const inner=new Fallback({config:{cooldownMs:0,providers:[
@@ -345,7 +350,7 @@ assert.equal(value(10).text,'protected source');assert.equal(readFileSync(join(r
 `,
     );
     await writeFile(
-      join(cwd, "copilot-responses-smoke.mjs"),
+      join(cwd, "copilot-model-smoke.mjs"),
       `import assert from 'node:assert/strict';
 import {fork} from 'node:child_process';
 import {createRequire} from 'node:module';
@@ -354,12 +359,12 @@ process.env.PROMPTFOO_DISABLE_TELEMETRY='1';
 process.env.PROMPTFOO_DISABLE_UPDATE='1';
 delete process.env.GH_TOKEN;
 const {loadApiProvider}=await import('promptfoo');
-const {CopilotResponsesProvider,createCopilotEndpointClient}=await import('oh-my-promptfoo/providers');
+const {CopilotModel,createCopilotEndpointClient}=await import('oh-my-promptfoo/providers');
 const require=createRequire(import.meta.url);
 const cp=require('oh-my-promptfoo/providers');
-for(const value of [CopilotResponsesProvider,cp.CopilotResponsesProvider,createCopilotEndpointClient,cp.createCopilotEndpointClient])assert.equal(typeof value,'function');
-assert.equal(CopilotResponsesProvider,cp.CopilotResponsesProvider,'ESM and CJS builds share one provider and SDK worker');
-const id='package:oh-my-promptfoo/providers:CopilotResponsesProvider';
+for(const value of [CopilotModel,cp.CopilotModel,createCopilotEndpointClient,cp.createCopilotEndpointClient])assert.equal(typeof value,'function');
+assert.equal(CopilotModel,cp.CopilotModel,'ESM and CJS builds share one provider and SDK worker');
+const id='package:oh-my-promptfoo/providers:CopilotModel';
 const config={model:'gpt-6-sol',reasoning_effort:'low',response_format:{type:'json_object'}};
 const provider=await loadApiProvider(id,{basePath:process.cwd(),options:{config}});
 assert.equal(provider.id(),'copilot:responses:gpt-6-sol');
@@ -379,6 +384,34 @@ assert.deepEqual(reply,{id:1,ok:false});
 await exited;
 `,
     );
+    await writeFile(
+      join(cwd, "package-ids-smoke.mjs"),
+      `import assert from 'node:assert/strict';
+import {Agent,CopilotModel,CopilotSdk,Fallback} from 'oh-my-promptfoo/providers';
+process.env.PROMPTFOO_DISABLE_TELEMETRY='1';
+process.env.PROMPTFOO_DISABLE_UPDATE='1';
+const {loadApiProvider}=await import('promptfoo');
+const load=(id,config)=>loadApiProvider(id,{basePath:process.cwd(),options:{config}});
+const source={type:'git',repository:'file:///nonexistent/repository',ref:'0'.repeat(40),destination:'project'};
+const providers={
+  Agent:[Agent,{delegate:{id:'copilot-sdk'},workspace:{sources:[source]}}],
+  CopilotSdk:[CopilotSdk,{working_dir:'.'}],
+  CopilotModel:[CopilotModel,{model:'gpt-6-sol'}],
+  Fallback:[Fallback,{providers:['echo']}],
+};
+// Promptfoo's package: loader constructs each provider from the ./providers entry.
+for(const [name,[Entity,config]] of Object.entries(providers)){
+  const provider=await load('package:oh-my-promptfoo/providers:'+name,config);
+  assert.ok(provider instanceof Entity,name+' resolves to the exported class');
+  await provider.cleanup?.();
+}
+// The new names are not root exports, and the earlier root and Provider-suffixed names are
+// gone; smoke.mjs checks the entry's exact export list, which rules out any other name.
+const retired=['','/providers'].flatMap(entry=>['','CopilotSdk','Fallback'].map(name=>'package:oh-my-promptfoo'+entry+':'+name+'Provider'));
+for(const id of [...Object.keys(providers).map(name=>'package:oh-my-promptfoo:'+name),...retired])
+  await assert.rejects(load(id,{}),/Could not find entity/,id);
+`,
+    );
     // Promptfoo may run from a directory above the eval project, such as a repository
     // root, with no oh-my-promptfoo there: package judges resolve from the installed peer.
     const elsewhere = join(temp, `${manager.name}-elsewhere`);
@@ -391,11 +424,11 @@ process.env.PROMPTFOO_DISABLE_TELEMETRY='1';
 process.env.PROMPTFOO_DISABLE_UPDATE='1';
 delete process.env.GH_TOKEN;
 assert.equal(process.cwd(),${JSON.stringify(elsewhere)});
-const id='package:oh-my-promptfoo/providers:CopilotResponsesProvider';
+const id='package:oh-my-promptfoo/providers:CopilotModel';
 const judge={id,config:{model:'gpt-6-sol',reasoning_effort:'low',response_format:{type:'json_object'}}};
 const grade=provider=>llmAssert('answer',{config:{components:[{metric:'m',value:'Check answer'}]},test:{options:{provider}}});
 // Each judge is constructed and asked; without a token it throws before contacting Copilot.
-const fallback={id:'package:oh-my-promptfoo/providers:FallbackProvider',config:{cooldownMs:0,providers:[judge]}};
+const fallback={id:'package:oh-my-promptfoo/providers:Fallback',config:{cooldownMs:0,providers:[judge]}};
 for(const provider of [judge,{text:judge},fallback])await assert.rejects(grade(provider),/explicit GH_TOKEN/);
 `,
     );
@@ -406,7 +439,8 @@ for(const provider of [judge,{text:judge},fallback])await assert.rejects(grade(p
     run("node", ["workspace-reader-smoke.mjs"], cwd);
     run(manager.command, [...manager.args, `@github/copilot-sdk@${copilotVersion}`], cwd);
     run("node", ["smoke.mjs", "with-copilot"], cwd);
-    run("node", ["copilot-responses-smoke.mjs"], cwd);
+    run("node", ["copilot-model-smoke.mjs"], cwd);
+    run("node", ["package-ids-smoke.mjs"], cwd);
     run("node", [join(cwd, "judge-install-smoke.mjs")], elsewhere);
     run("node", ["node_modules/oh-my-promptfoo/dist/cli.js", "--help"], cwd);
     await compileDeclarations(cwd);

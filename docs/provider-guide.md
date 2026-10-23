@@ -7,9 +7,9 @@ eval configs. This guide records configuration, response, and resource
 behavior. The [examples](../examples) include Codex, Claude, Copilot, Git/OCI,
 source permissions, and cache use.
 
-Both providers use stock Promptfoo. Their YAML IDs are `package:oh-my-promptfoo:Provider` and `package:oh-my-promptfoo:CopilotSdkProvider`.
+Both providers use stock Promptfoo. Their YAML IDs are `package:oh-my-promptfoo/providers:Agent` (the workspace agent) and `package:oh-my-promptfoo/providers:CopilotSdk`. Every provider comes from the `oh-my-promptfoo/providers` entry; the package root exports nothing.
 
-The package also ships a judge provider, `package:oh-my-promptfoo/providers:FallbackProvider`, which tries `llmAssert` and `llm-rubric` judges in order and fails over on rate limits and outages. Name `llmAssert`'s judge with `defaultTest.options.provider` for the suite, a test's `options.provider`, or `--grader` for the run; one assertion that needs its own judge can set `config.provider`. `llmAssert` does not read `OPENAI_*` variables itself. The [grading guide](grading-guide.md#choosing-llmasserts-judge) covers both.
+The package also ships a judge provider, `package:oh-my-promptfoo/providers:Fallback`, which tries `llmAssert` and `llm-rubric` judges in order and fails over on rate limits and outages. Name `llmAssert`'s judge with `defaultTest.options.provider` for the suite, a test's `options.provider`, or `--grader` for the run; one assertion that needs its own judge can set `config.provider`. `llmAssert` does not read `OPENAI_*` variables itself. The [grading guide](grading-guide.md#choosing-llmasserts-judge) covers both.
 
 ## Provider response and assertions
 
@@ -231,7 +231,7 @@ source identities; subscribing does not add copies or verification passes.
 
 ## Workspace lifetime
 
-Workspaces remain live through synchronous/asynchronous assertions. `Provider.cleanup()` closes calls, stops active process groups, removes private views, then releases leases. Promptfoo 0.122 does not guarantee cleanup on every CLI/Node path. Paths are transient and may survive until later dead-owner recovery or runner disposal. There is no cleanup timer. Call `cleanup()` explicitly when using providers directly. Dead-owner recovery uses process start identity and never removes live or unmarked roots; an unknown mount or legacy OverlayFS recovery record fails closed and retains leases for manual cleanup.
+Workspaces remain live through synchronous/asynchronous assertions. `Agent.cleanup()` closes calls, stops active process groups, removes private views, then releases leases. Promptfoo 0.122 does not guarantee cleanup on every CLI/Node path. Paths are transient and may survive until later dead-owner recovery or runner disposal. There is no cleanup timer. Call `cleanup()` explicitly when using providers directly. Dead-owner recovery uses process start identity and never removes live or unmarked roots; an unknown mount or legacy OverlayFS recovery record fails closed and retains leases for manual cleanup.
 
 ## Seed cache and resource limits
 
@@ -263,7 +263,7 @@ Select Pi using the same labeled workspace-provider pattern:
 
 ```yaml
 providers:
-  - id: package:oh-my-promptfoo:Provider
+  - id: package:oh-my-promptfoo/providers:Agent
     label: pi
     config:
       delegate:
@@ -311,7 +311,7 @@ shell `allow` is rejected rather than silently weakened.
 
 ## Direct Copilot configuration
 
-Direct Copilot uses `package:oh-my-promptfoo:CopilotSdkProvider` with an existing `working_dir`. An absolute path is used as is; a relative path resolves against the eval config's directory, like other Promptfoo file references. Optional fields are `model`, `reasoning_effort`, `timeoutMs`, `permissions`, and explicit `env`. Its optional BYOK `provider` is an endpoint object with required `baseUrl` and supported SDK fields (`type`, `wireApi`, `apiKey`, `wireModel`, `azure.apiVersion`); strings and embedded URL credentials are rejected. Defaults deny writes, shell, and network. Copilot tool events produce tool spans; skill inference from assistant text is disabled.
+Direct Copilot uses `package:oh-my-promptfoo/providers:CopilotSdk` with an existing `working_dir`. An absolute path is used as is; a relative path resolves against the eval config's directory, like other Promptfoo file references. Optional fields are `model`, `reasoning_effort`, `timeoutMs`, `permissions`, and explicit `env`. Its optional BYOK `provider` is an endpoint object with required `baseUrl` and supported SDK fields (`type`, `wireApi`, `apiKey`, `wireModel`, `azure.apiVersion`); strings and embedded URL credentials are rejected. Defaults deny writes, shell, and network. Copilot tool events produce tool spans; skill inference from assistant text is disabled.
 
 Both direct and workspace-backed Copilot responses report `metadata.skillCalls`
 and `metadata.copilot.skillSupport: true`. A successful local `read`,

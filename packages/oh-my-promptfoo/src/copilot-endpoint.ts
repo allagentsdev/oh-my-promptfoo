@@ -32,7 +32,7 @@ export interface CopilotEndpoint {
 }
 
 /** A model entry from the SDK's `listModels()`, as far as this package reads it. */
-export interface CopilotModel {
+export interface CopilotModelInfo {
   id: string;
   billing?: { tokenPrices?: Record<string, unknown> } & Record<string, unknown>;
   [key: string]: unknown;
@@ -43,7 +43,7 @@ export interface CopilotEndpointClient {
   /** The Responses endpoint for `model`, or the runtime's default model when omitted. */
   endpoint(model?: string): Promise<CopilotEndpoint>;
   /** The SDK's model list, including Copilot's reported token prices. */
-  models(): Promise<CopilotModel[]>;
+  models(): Promise<CopilotModelInfo[]>;
   /** Stop the worker and its runtime; idempotent. */
   close(): Promise<void>;
 }
@@ -232,7 +232,7 @@ export function startCopilotEndpointClient(
   return {
     async models() {
       await ready;
-      return rpc<CopilotModel[]>("models");
+      return rpc<CopilotModelInfo[]>("models");
     },
     async endpoint(model?: string) {
       if (model !== undefined && (typeof model !== "string" || !model.trim()))

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { join } from "node:path";
 import { assertions } from "promptfoo";
 import { expect, test, vi } from "vitest";
-import { FallbackProvider } from "../packages/oh-my-promptfoo/src/providers";
+import { Fallback } from "../packages/oh-my-promptfoo/src/providers";
 
 type Reply = {
   output?: unknown;
@@ -53,7 +53,7 @@ const ok = (output = "ok"): Reply => ({
 });
 
 function fallback(providers: unknown[], extra: Record<string, unknown> = {}) {
-  return new FallbackProvider({ config: { providers, ...extra } });
+  return new Fallback({ config: { providers, ...extra } });
 }
 
 function meta(response: { metadata?: Record<string, unknown> }): FallbackMetadata {
@@ -490,23 +490,17 @@ test("sums complete native usage and cost across attempts and records diagnostic
 });
 
 test("validates its config", () => {
-  assert.throws(() => new FallbackProvider({}), /config\.providers/);
-  assert.throws(() => new FallbackProvider({ config: { providers: [] } }), /config\.providers/);
+  assert.throws(() => new Fallback({}), /config\.providers/);
+  assert.throws(() => new Fallback({ config: { providers: [] } }), /config\.providers/);
   const providers = [stub("v", ok())];
-  assert.throws(
-    () => new FallbackProvider({ config: { providers, cooldownMs: -1 } }),
-    /cooldownMs/,
-  );
-  assert.throws(
-    () => new FallbackProvider({ config: { providers, cooldownMs: 1.5 } }),
-    /cooldownMs/,
-  );
-  assert.equal(new FallbackProvider({ config: { providers } }).handlesOwnRetries, true);
+  assert.throws(() => new Fallback({ config: { providers, cooldownMs: -1 } }), /cooldownMs/);
+  assert.throws(() => new Fallback({ config: { providers, cooldownMs: 1.5 } }), /cooldownMs/);
+  assert.equal(new Fallback({ config: { providers } }).handlesOwnRetries, true);
 });
 
 test("loads relative file:// judges against config.basePath", async () => {
   const label = unique("Fixture Judge");
-  const provider = new FallbackProvider({
+  const provider = new Fallback({
     config: {
       basePath: join(import.meta.dirname, "fixtures"),
       providers: [{ id: "file://fallback-judge.mjs", label, config: { output: "from fixture" } }],
@@ -532,7 +526,7 @@ test("passes context and options through unchanged", async () => {
   }
 });
 
-test("native llm-rubric grades through FallbackProvider", async () => {
+test("native llm-rubric grades through Fallback", async () => {
   const first = stub("rubric-a", {
     ...failing(500),
     tokenUsage: { total: 4, prompt: 4, completion: 0 },
@@ -545,7 +539,7 @@ test("native llm-rubric grades through FallbackProvider", async () => {
     },
     "Backup Judge",
   );
-  const provider = new FallbackProvider({ config: { providers: [first, second], cooldownMs: 0 } });
+  const provider = new Fallback({ config: { providers: [first, second], cooldownMs: 0 } });
   const result = await assertions.runAssertion({
     assertion: { type: "llm-rubric", value: "The reply greets the user politely" },
     test: { vars: {}, options: { provider } },
@@ -654,7 +648,7 @@ test("cooldowns are kept per judge identity, not per provider id", async () => {
   const judge = join(import.meta.dirname, "fixtures", "fallback-judge.mjs");
   const spec = { id: `file://${judge}`, label: unique("env-judge"), config: { fail: 429 } };
   const withEnv = (account: string) =>
-    new FallbackProvider({
+    new Fallback({
       config: { providers: [spec, stub("env-backup", ok("backup"))], cooldownMs: 60_000 },
       env: { ACCOUNT: account },
     });
@@ -668,7 +662,7 @@ test("cooldowns are kept per judge identity, not per provider id", async () => {
 test("the same relative judge in another suite's directory cools separately", async () => {
   const spec = { id: "file://judge.mjs", label: unique("relative-judge") };
   const suite = (directory: string) =>
-    new FallbackProvider({
+    new Fallback({
       config: {
         providers: [spec, stub("suite-backup", ok("backup"))],
         cooldownMs: 60_000,
