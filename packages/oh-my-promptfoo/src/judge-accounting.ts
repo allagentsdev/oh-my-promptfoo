@@ -15,6 +15,8 @@ export interface JudgeAttemptAccounting {
 export interface JudgeAccountingLedger {
   version: 1;
   attempts: JudgeAttemptAccounting[];
+  /** Earlier Copilot leaves were discarded by a bounded overflow sentinel. */
+  copilotAccountingSeen?: true;
 }
 
 interface JudgeFailureEvidence {
@@ -69,6 +71,7 @@ interface ReplyAccounting {
   attempts: JudgeAttemptAccounting[];
   copilot: boolean;
   valid: boolean;
+  copilotAccountingSeen?: boolean;
 }
 
 function replyAccounting(metadata: unknown, cached: boolean): ReplyAccounting {
@@ -82,12 +85,14 @@ function replyAccounting(metadata: unknown, cached: boolean): ReplyAccounting {
       ledger.version !== 1 ||
       !Array.isArray(ledger.attempts) ||
       ledger.attempts.length === 0 ||
-      ledger.attempts.length > MAX_ATTEMPTS
+      ledger.attempts.length > MAX_ATTEMPTS ||
+      (ledger.copilotAccountingSeen !== undefined && ledger.copilotAccountingSeen !== true)
     )
       return invalidLedger();
     const attempts: JudgeAttemptAccounting[] = [];
-    let copilot = false;
-    let valid = true;
+    const copilotAccountingSeen = ledger.copilotAccountingSeen === true;
+    let copilot = copilotAccountingSeen;
+    let valid = !copilotAccountingSeen;
     for (const entry of ledger.attempts) {
       if (!isRecord(entry) || typeof entry.cached !== "boolean") return invalidLedger();
       const accounting = readCopilotAccounting(entry.accounting);
@@ -97,7 +102,7 @@ function replyAccounting(metadata: unknown, cached: boolean): ReplyAccounting {
       }
       attempts.push({ cached: cached || entry.cached, ...(accounting ? { accounting } : {}) });
     }
-    return { attempts, copilot, valid };
+    return { attempts, copilot, valid, copilotAccountingSeen };
   }
   const copilot = isRecord(metadata.copilot) ? metadata.copilot : undefined;
   const accounting = readCopilotAccounting(copilot?.accounting);
@@ -125,11 +130,16 @@ export class JudgeAccountingCollector {
   record(metadata: unknown, cached = false, cost?: unknown): void {
     if (this.overflow && this.copilotAccountingSeen) return;
     const reply = replyAccounting(metadata, cached);
-    this.copilotAccountingSeen ||= reply.attempts.some((leaf) => leaf.accounting !== undefined);
+    this.copilotAccountingSeen ||=
+      reply.copilotAccountingSeen === true ||
+      reply.attempts.some((leaf) => leaf.accounting !== undefined);
+    if (reply.copilotAccountingSeen || (this.overflow && this.copilotAccountingSeen))
+      this.ledger.copilotAccountingSeen = true;
     if (this.overflow) return;
     if (this.ledger.attempts.length + reply.attempts.length > MAX_ATTEMPTS) {
       // A prefix would look complete to consumers. One unknown leaf fails all totals closed.
       this.ledger.attempts = [{ cached: false }];
+      if (this.copilotAccountingSeen) this.ledger.copilotAccountingSeen = true;
       this.complete = false;
       this.overflow = true;
       return;

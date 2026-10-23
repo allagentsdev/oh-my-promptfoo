@@ -263,6 +263,30 @@ for(const assertion of [llmAssert,c.llmAssert]){
   assert.equal(requests.length,before,'file templates must fail before requesting a judge');
 }
 assert.equal(requests.length,2);
+const measuredAccounting={version:1,source:'session.rpc.usage.getMetrics',scope:'session',unit:'nano-AIU',status:'complete',totalNanoAiu:1000000000};
+for(const [assertion,Fallback] of [[llmAssert,FallbackProvider],[llmAssert,cp.FallbackProvider],[c.llmAssert,FallbackProvider],[c.llmAssert,cp.FallbackProvider]]){
+  const permanent=Object.freeze(new Error('Packed permanent judge failure'));
+  let backupCalls=0;
+  const inner=new Fallback({config:{cooldownMs:0,providers:[
+    {id:()=>'packed-native-transient',async callApi(){return {error:'API error: 503',tokenUsage:{total:3,prompt:2,completion:1,numRequests:1},metadata:{http:{status:503}}};}},
+    {id:()=>'packed-native-permanent',async callApi(){throw permanent;}},
+    {id:()=>'packed-native-never',async callApi(){backupCalls++;return {output:'unexpected backup'};}},
+  ]}});
+  let calls=0;
+  const provider={id:()=>'packed-accounted-retry',async callApi(prompt,context,options){
+    if(++calls===1)return {output:'not JSON',tokenUsage:{total:4,prompt:3,completion:1,numRequests:1},metadata:{copilot:{accounting:measuredAccounting}}};
+    return inner.callApi(prompt,context,options);
+  }};
+  const result=await assertion('answer',{config:{components:[{metric:'m',value:'Check answer'}],provider}});
+  assert.equal(result.pass,false);
+  assert.equal(result.metadata.graderError,true);
+  assert.equal(result.reason,permanent.message);
+  assert.equal(result.tokensUsed.total,7);
+  assert.equal(result.tokensUsed.numRequests,3);
+  assert.equal(result.tokensUsed.cost,undefined);
+  assert.deepEqual(result.metadata.judgeAccounting.attempts,[{cached:false,accounting:measuredAccounting},{cached:false},{cached:false}]);
+  assert.equal(backupCalls,0);
+}
 `,
     );
     await writeFile(
