@@ -100,6 +100,67 @@ pinned Git and OCI sources, and larger runs.
   `fileChanges` to read them in your own JavaScript assertions.
 - **Run Copilot in a folder you already have.** `CopilotSdkProvider` runs
   Copilot where you point it, without creating a workspace.
+- **Use a Copilot model as a candidate or a judge.** `CopilotResponsesProvider`
+  calls a Copilot model directly, with your `GH_TOKEN` and no API key.
+
+## Copilot models without an agent
+
+`package:oh-my-promptfoo/providers:CopilotResponsesProvider` sends a prompt
+straight to a Copilot model over the Responses API: no workspace, tools or
+agent loop. Use it as an LLM candidate, or as the judge for `llmAssert` and
+`llm-rubric`. It needs `@github/copilot-sdk@1.0.22` installed and `GH_TOKEN`
+exported, and it does not run on Windows.
+
+```yaml
+providers:
+  - id: package:oh-my-promptfoo/providers:CopilotResponsesProvider
+    label: gpt-5.6-sol
+    config:
+      model: gpt-5.6-sol           # required, exactly as Copilot lists it
+      reasoning_effort: medium     # optional: low, medium or high
+defaultTest:
+  options:
+    provider:
+      id: package:oh-my-promptfoo/providers:CopilotResponsesProvider
+      config:
+        model: gpt-6-sol
+        reasoning_effort: low
+        response_format: { type: json_object }   # optional; the only accepted format
+```
+
+Those three keys are the whole config. The endpoint and credentials always come
+from Copilot: a private Copilot SDK process signs in with `GH_TOKEN` (never your
+stored logins or `OPENAI_*`/`AZURE_*` settings), asks Copilot for the model's
+endpoint and short-lived credentials, and refreshes them before they expire.
+Promptfoo's own `openai:responses` provider then makes the request, so usage
+counting and cancellation work as usual. Every instance in a run shares that
+one SDK process. The provider id is `copilot:responses:<model>`, and neither
+it nor the serialized provider contains credentials.
+
+Replies have no `cost`, because Promptfoo would price them at OpenAI's list
+rates, which is not what Copilot bills. Instead, when Copilot's model list
+reports prices for the model, each reply carries them in
+`metadata.copilotTokenPrices`:
+
+```json
+{
+  "model": "gpt-6-sol",
+  "batchSize": 1000000,
+  "default": { "inputPrice": 200, "cacheReadPrice": 20, "cacheWritePrice": 250, "outputPrice": 1000, "maxPromptTokens": 272000 },
+  "longContext": { "inputPrice": 400, "cacheReadPrice": 40, "cacheWritePrice": 500, "outputPrice": 1500, "maxPromptTokens": 872000 }
+}
+```
+
+These are the model's `billing.tokenPrices` from the SDK's `listModels()`,
+copied as reported: prices per `batchSize` tokens, with `default` from the top
+level and `longContext` from its long-context tier when there is one. Only
+numeric fields are copied, and nothing is converted or summed into a cost. When
+Copilot reports no prices, or the model list can't be read, replies still
+succeed without the field.
+
+To read Copilot's model list or endpoint yourself, `createCopilotEndpointClient()`
+from `oh-my-promptfoo/providers` starts the same private SDK process and returns
+`models()`, `endpoint(model)` and `close()`.
 
 ## Writing evals with an AI agent
 

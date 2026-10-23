@@ -8,6 +8,24 @@ import {
   preserveJudgeFailure,
 } from "./judge-accounting.js";
 
+export {
+  type CopilotEndpoint,
+  type CopilotEndpointClient,
+  type CopilotEndpointClientOptions,
+  type CopilotModel,
+  type CopilotSessionToken,
+  createCopilotEndpointClient,
+} from "./copilot-endpoint.js";
+export {
+  type CopilotReasoningEffort,
+  type CopilotResponsesConfig,
+  CopilotResponsesProvider,
+  type CopilotResponsesProviderConstructor,
+  type CopilotResponsesProviderOptions,
+  type CopilotTokenPrices,
+  type CopilotTokenPriceTier,
+} from "./copilot-responses.js";
+
 export interface FallbackProviderConfig {
   /** Judges to try in order: provider ids, provider objects, or `{ text: … }` maps. */
   providers: unknown[];
