@@ -12,6 +12,9 @@ provider before writing assertions:
   test. Use it for Git, OCI artifact, or trusted local-directory sources.
 - `package:oh-my-promptfoo:CopilotSdkProvider` runs Copilot in an existing
   directory that the caller owns; it does not stage sources.
+- `package:oh-my-promptfoo/providers:CopilotResponsesProvider` calls a Copilot
+  model directly over the Responses API, as an LLM candidate or a judge; it has
+  no workspace or tools. Set `config.model` and export `GH_TOKEN`.
 - `package:oh-my-promptfoo/assertions:llmAssert` grades named semantic criteria
   independently of either provider.
 - `package:oh-my-promptfoo/assertions:agentAssert` grades the live case workspace

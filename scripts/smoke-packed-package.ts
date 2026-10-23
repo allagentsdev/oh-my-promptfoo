@@ -37,6 +37,14 @@ const fallbackConfig: Fallbacks.FallbackProviderConfig = {providers: ['openai:ex
 const fallback = new Fallbacks.FallbackProvider({config: fallbackConfig});
 const fallbackId: string = fallback.id();
 const fallbackReply: Promise<unknown> = fallback.callApi('prompt');
+const responsesConfig: Fallbacks.CopilotResponsesConfig = {model: 'gpt-6-sol', reasoning_effort: 'low', response_format: {type: 'json_object'}};
+const responses: Fallbacks.CopilotResponsesProvider = new Fallbacks.CopilotResponsesProvider({config: responsesConfig});
+const responsesId: string = responses.id();
+const responsesReply: Promise<unknown> = responses.callApi('prompt');
+const endpointClient = (): Fallbacks.CopilotEndpointClient => Fallbacks.createCopilotEndpointClient({token: 'token'});
+const endpoint = (client: Fallbacks.CopilotEndpointClient): Promise<Fallbacks.CopilotEndpoint> => client.endpoint('gpt-6-sol');
+// @ts-expect-error Reasoning effort is low, medium or high.
+const invalidResponses: Fallbacks.CopilotResponsesConfig = {model: 'gpt-6-sol', reasoning_effort: 'extreme'};
 // @ts-expect-error An AbortSignal, not a string, is required.
 const invalidOptions: Providers.CallOptions = {abortSignal: 'invalid'};
 // @ts-expect-error A rubric metric must be named with a string.
@@ -102,6 +110,7 @@ try {
     "dist/providers.d.cts",
     "dist/delegate-runner.js",
     "dist/workspace-reader.js",
+    "dist/copilot-endpoint-worker.js",
     "dist/cli.js",
     "LICENSE",
     "README.md",
@@ -335,6 +344,41 @@ for(const id of [6,8,9,11,12])assert.equal(response(id).isError,true,'Unsafe wor
 assert.equal(value(10).text,'protected source');assert.equal(readFileSync(join(root,'large.txt'),'utf8').length,256*1024+2);
 `,
     );
+    await writeFile(
+      join(cwd, "copilot-responses-smoke.mjs"),
+      `import assert from 'node:assert/strict';
+import {fork} from 'node:child_process';
+import {createRequire} from 'node:module';
+import {dirname,join} from 'node:path';
+process.env.PROMPTFOO_DISABLE_TELEMETRY='1';
+process.env.PROMPTFOO_DISABLE_UPDATE='1';
+delete process.env.GH_TOKEN;
+const {loadApiProvider}=await import('promptfoo');
+const {CopilotResponsesProvider,createCopilotEndpointClient}=await import('oh-my-promptfoo/providers');
+const require=createRequire(import.meta.url);
+const cp=require('oh-my-promptfoo/providers');
+for(const value of [CopilotResponsesProvider,cp.CopilotResponsesProvider,createCopilotEndpointClient,cp.createCopilotEndpointClient])assert.equal(typeof value,'function');
+assert.equal(CopilotResponsesProvider,cp.CopilotResponsesProvider,'ESM and CJS builds share one provider and SDK worker');
+const id='package:oh-my-promptfoo/providers:CopilotResponsesProvider';
+const config={model:'gpt-6-sol',reasoning_effort:'low',response_format:{type:'json_object'}};
+const provider=await loadApiProvider(id,{basePath:process.cwd(),options:{config}});
+assert.equal(provider.id(),'copilot:responses:gpt-6-sol');
+assert.deepEqual(JSON.parse(JSON.stringify(provider)),{id:'copilot:responses:gpt-6-sol',config});
+await assert.rejects(provider.callApi('prompt'),/GH_TOKEN/);
+await provider.cleanup();
+await assert.rejects(loadApiProvider(id,{basePath:process.cwd(),options:{config:{model:'gpt-6-sol',apiBaseUrl:'http://127.0.0.1:9'}}}),/config.apiBaseUrl/);
+assert.throws(()=>createCopilotEndpointClient({token:''}),/GH_TOKEN/);
+// The SDK peer and the shipped worker resolve beside the installed bundle.
+const providers=require.resolve('oh-my-promptfoo/providers');
+createRequire(providers).resolve('@github/copilot-sdk');
+// The worker starts under Node and fails closed on a request before sign-in, without contacting Copilot.
+const child=fork(join(dirname(providers),'copilot-endpoint-worker.js'),[],{stdio:['ignore','ignore','ignore','ipc'],serialization:'advanced'});
+const exited=new Promise(resolve=>child.once('exit',resolve));
+const reply=await new Promise((resolve,reject)=>{child.once('message',resolve);child.once('error',reject);child.send({id:1,method:'models'});});
+assert.deepEqual(reply,{id:1,ok:false});
+await exited;
+`,
+    );
     run("node", ["smoke.mjs", "without-copilot"], cwd);
     await compileDeclarations(cwd);
     run("node", ["node_modules/oh-my-promptfoo/dist/cli.js", "--help"], cwd);
@@ -342,6 +386,7 @@ assert.equal(value(10).text,'protected source');assert.equal(readFileSync(join(r
     run("node", ["workspace-reader-smoke.mjs"], cwd);
     run(manager.command, [...manager.args, `@github/copilot-sdk@${copilotVersion}`], cwd);
     run("node", ["smoke.mjs", "with-copilot"], cwd);
+    run("node", ["copilot-responses-smoke.mjs"], cwd);
     run("node", ["node_modules/oh-my-promptfoo/dist/cli.js", "--help"], cwd);
     await compileDeclarations(cwd);
     console.log(

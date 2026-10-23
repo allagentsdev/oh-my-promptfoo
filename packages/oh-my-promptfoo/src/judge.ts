@@ -32,7 +32,7 @@ let loader: Promise<LoadApiProvider> | undefined;
  * delegate runner loads providers. Promptfoo's grader resolution is internal, so this is
  * the supported way to construct a provider from a grading config.
  */
-function promptfooLoader(): Promise<LoadApiProvider> {
+export function promptfooLoader(): Promise<LoadApiProvider> {
   loader ??= (async () => {
     const here =
       typeof __dirname === "string" ? __dirname : dirname(fileURLToPath(import.meta.url));
