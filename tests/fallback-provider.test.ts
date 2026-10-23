@@ -204,12 +204,13 @@ test("fallback ledger growth fails closed rather than reporting a truncated tota
   assert.deepEqual(response.metadata?.judgeAccounting, {
     version: 1,
     attempts: [{ cached: false }],
+    copilotAccountingSeen: true,
   });
   assert.equal(response.cost, undefined);
 });
 
 for (const failure of ["call", "load"] as const) {
-  test(`fallback retains an overflowed Copilot failure after a permanent ${failure} throw`, async () => {
+  test(`nested fallback retains an overflowed Copilot failure after a permanent ${failure} throw`, async () => {
     const leaf = accounting(1_000_000_000);
     const measured = Array.from({ length: 2 }, (_, index) =>
       stub(`overflow-failure-${index}`, {
@@ -230,17 +231,19 @@ for (const failure of ["call", "load"] as const) {
       throw permanent;
     });
     const untouched = stub("overflow-untouched", ok());
-    const response = await fallback([...measured, failure === "call" ? throwing : 42, untouched], {
+    const inner = fallback(measured, { cooldownMs: 0 });
+    const response = await fallback([inner, failure === "call" ? throwing : 42, untouched], {
       cooldownMs: 0,
     }).callApi("p");
     assert.match(response.error!, failure === "call" ? /API key is not set/ : /A judge must be/);
     assert.equal(response.output, undefined);
     assert.equal(meta(response).permanentError, true);
-    assert.equal(meta(response).attempts.length, 3);
+    assert.equal(meta(response).attempts.length, 2);
     assert.equal(untouched.calls.length, 0);
     assert.deepEqual(response.metadata?.judgeAccounting, {
       version: 1,
-      attempts: [{ cached: false }],
+      attempts: [{ cached: false }, { cached: false }],
+      copilotAccountingSeen: true,
     });
     assert.equal(response.cost, undefined);
     assert.deepEqual(response.tokenUsage, {

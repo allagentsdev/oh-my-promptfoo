@@ -149,6 +149,11 @@ test("rubric nested accounting is authoritative, sanitized and fails closed on i
     { version: 1, attempts: [{ cached: "false", accounting: leaf }] },
     {
       version: 1,
+      attempts: [{ cached: false, accounting: leaf }],
+      copilotAccountingSeen: false,
+    },
+    {
+      version: 1,
       attempts: Array.from({ length: 1025 }, () => ({ cached: false, accounting: leaf })),
     },
   ]) {
@@ -387,6 +392,50 @@ test("llmAssert reports usage for HTTP failures and empty billed replies", async
     numRequests: 1,
   });
   assert.equal(attempts, 5);
+});
+
+test("rubric retains nested overflow accounting when the next attempt throws", async () => {
+  const leaf = accounting(1_000_000_000);
+  const nested = new FallbackProvider({
+    config: {
+      cooldownMs: 0,
+      providers: Array.from({ length: 2 }, (_, index) => ({
+        id: () => `overflow-rubric-${index}`,
+        async callApi() {
+          return {
+            ...(index === 0 ? { error: "API error: 503" } : { output: "not JSON" }),
+            tokenUsage: { total: 6000, prompt: 4800, completion: 1200, numRequests: 600 },
+            metadata: {
+              ...(index === 0 ? { http: { status: 503 } } : {}),
+              judgeAccounting: {
+                version: 1,
+                attempts: Array.from({ length: 600 }, () => ({ cached: false, accounting: leaf })),
+              },
+            },
+          };
+        },
+      })),
+    },
+  });
+  let calls = 0;
+  const provider = {
+    id: () => "overflow-rubric-retry",
+    async callApi(prompt: string) {
+      if (++calls === 1) return nested.callApi(prompt);
+      throw new Error("Grader disconnected");
+    },
+  };
+  const result = await llmAssert("candidate answer", { config: { components, provider } });
+  assert.equal(result.pass, false);
+  assert.equal(result.metadata.graderError, true);
+  assert.equal(result.reason, "Grader disconnected");
+  assert.equal(result.tokensUsed?.cost, undefined);
+  assert.equal(result.tokensUsed?.numRequests, 1201);
+  assert.equal(result.tokensUsed?.total, 12_000);
+  assert.deepEqual(result.metadata.judgeAccounting?.attempts, [
+    { cached: false },
+    { cached: false },
+  ]);
 });
 
 test("a retry that throws retains prior session accounting and an unknown final leaf", async () => {

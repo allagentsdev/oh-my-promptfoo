@@ -270,6 +270,7 @@ type JudgeAccounting = {
     cached: boolean;
     accounting?: CopilotAccounting; // The exact record documented in the provider guide.
   }>;
+  copilotAccountingSeen?: true; // Copilot history discarded by overflow, not a monetary total.
 };
 ```
 
@@ -286,6 +287,9 @@ valid scalar.
 The ledger is limited to 1,024 leaves. Invalid/oversized nested ledgers become
 one uncached unknown leaf; cumulative overflow replaces the whole ledger with
 that sentinel and omits scalar cost, never silently truncating a complete total.
+When discarded leaves included Copilot accounting, `copilotAccountingSeen: true`
+preserves that history through enclosing ledgers and later permanent failures.
+The marker never establishes a complete monetary total, including after nesting.
 Only whitelisted accounting fields are retained, not raw provider metadata or
 errors. The ledger survives provider errors, empty replies, malformed-verdict
 exhaustion, and later call/load throws after a retained Copilot attempt.
