@@ -26,6 +26,13 @@
 * Exercise the real Pi SDK with local model-service responses, including chunked streaming, bounded output, guarded directory and screenshot reads, credential errors, cancellation, skill evidence, and retained billing. Verify native Codex skill gates with two live SDK sessions, without tracing.
 * Remove obsolete `@types/diff`; workspace file-change capture uses the declarations bundled with `diff@9`.
 
+## [1.22.1](https://github.com/allagentsdev/oh-my-promptfoo/compare/v1.22.0...v1.22.1) (2026-10-23)
+
+
+### Bug Fixes
+
+* **assertions:** keep judge cache-token details in llmAssert usage ([#138](https://github.com/allagentsdev/oh-my-promptfoo/issues/138)) ([1d8e2b0](https://github.com/allagentsdev/oh-my-promptfoo/commit/1d8e2b0ebb862ef31122e01f637f85c72b3ce179))
+
 ## [1.22.0](https://github.com/allagentsdev/oh-my-promptfoo/compare/v1.21.2...v1.22.0) (2026-10-23)
 
 
