@@ -379,6 +379,26 @@ assert.deepEqual(reply,{id:1,ok:false});
 await exited;
 `,
     );
+    // Promptfoo may run from a directory above the eval project, such as a repository
+    // root, with no oh-my-promptfoo there: package judges resolve from the installed peer.
+    const elsewhere = join(temp, `${manager.name}-elsewhere`);
+    await mkdir(elsewhere);
+    await writeFile(
+      join(cwd, "judge-install-smoke.mjs"),
+      `import assert from 'node:assert/strict';
+import {llmAssert} from 'oh-my-promptfoo/assertions';
+process.env.PROMPTFOO_DISABLE_TELEMETRY='1';
+process.env.PROMPTFOO_DISABLE_UPDATE='1';
+delete process.env.GH_TOKEN;
+assert.equal(process.cwd(),${JSON.stringify(elsewhere)});
+const id='package:oh-my-promptfoo/providers:CopilotResponsesProvider';
+const judge={id,config:{model:'gpt-6-sol',reasoning_effort:'low',response_format:{type:'json_object'}}};
+const grade=provider=>llmAssert('answer',{config:{components:[{metric:'m',value:'Check answer'}]},test:{options:{provider}}});
+// Each judge is constructed and asked; without a token it throws before contacting Copilot.
+const fallback={id:'package:oh-my-promptfoo/providers:FallbackProvider',config:{cooldownMs:0,providers:[judge]}};
+for(const provider of [judge,{text:judge},fallback])await assert.rejects(grade(provider),/explicit GH_TOKEN/);
+`,
+    );
     run("node", ["smoke.mjs", "without-copilot"], cwd);
     await compileDeclarations(cwd);
     run("node", ["node_modules/oh-my-promptfoo/dist/cli.js", "--help"], cwd);
@@ -387,6 +407,7 @@ await exited;
     run(manager.command, [...manager.args, `@github/copilot-sdk@${copilotVersion}`], cwd);
     run("node", ["smoke.mjs", "with-copilot"], cwd);
     run("node", ["copilot-responses-smoke.mjs"], cwd);
+    run("node", [join(cwd, "judge-install-smoke.mjs")], elsewhere);
     run("node", ["node_modules/oh-my-promptfoo/dist/cli.js", "--help"], cwd);
     await compileDeclarations(cwd);
     console.log(

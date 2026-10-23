@@ -316,15 +316,18 @@ and the flag only turns off the CLI's copy. That includes the judges inside a
 `FallbackProvider`. Set `PROMPTFOO_CACHE_ENABLED=false` in the environment
 instead, which both copies read.
 
-### Relative `file://` judges
+### Relative `file://` and `package:` judges
 
-`llmAssert` loads its judge itself, so a relative `file://` judge resolves from
-the working directory, not the eval config's directory, for the same reason:
-the config's base path doesn't reach package code. That includes the inner
-judges of a `FallbackProvider` that `llmAssert` loads. When native
-`llm-rubric` uses the same setting, Promptfoo loads it and passes the base
-path, so there it resolves against the config. Use an absolute path, or run
-`promptfoo` from the config's directory.
+`llmAssert` loads its judge itself, and the eval config's base path doesn't
+reach package code, for the same reason. A relative `file://` or a `package:`
+judge therefore resolves from the project the Promptfoo peer is installed in:
+the directory holding the `node_modules` that contains `promptfoo`. It never
+resolves from the working directory, so `promptfoo` can run from a repository
+root while the eval project, with Promptfoo, oh-my-promptfoo and the judge's
+package, is installed in `evals/`. That includes the inner judges of a
+`FallbackProvider` that `llmAssert` loads. When native `llm-rubric` uses the
+same setting, Promptfoo passes the config's directory instead. Keep the eval
+config beside its install, or use an absolute path, so both resolve the same.
 
 ### Azure OpenAI
 

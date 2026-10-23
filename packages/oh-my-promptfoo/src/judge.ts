@@ -1,4 +1,4 @@
-import { dirname } from "node:path";
+import { dirname, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { resolvePeer } from "./protocol.js";
 
@@ -25,30 +25,50 @@ type LoadApiProvider = (providerPath: string, context?: LoadContext) => Promise<
 export const JUDGE_LIST_ERROR =
   "A list of judges is not a provider: to try judges in order, use package:oh-my-promptfoo/providers:FallbackProvider with config.providers";
 
-let loader: Promise<LoadApiProvider> | undefined;
+type Peer = { load: LoadApiProvider; installRoot: string };
+
+let peer: Promise<Peer> | undefined;
+
+/**
+ * The project a Promptfoo peer at `entry` is installed in: the parent of the outermost
+ * `node_modules` on its path, so pnpm's `node_modules/.pnpm/…/node_modules` store still
+ * names the project that installed it.
+ */
+export function installRoot(entry: string): string {
+  const parts = entry.split(sep);
+  const index = parts.indexOf("node_modules");
+  if (index < 1) throw new Error(`The Promptfoo peer ${entry} is not installed in node_modules`);
+  const root = parts.slice(0, index).join(sep);
+  return index === 1 ? root + sep : root;
+}
+
+function promptfooPeer(): Promise<Peer> {
+  peer ??= (async () => {
+    const here =
+      typeof __dirname === "string" ? __dirname : dirname(fileURLToPath(import.meta.url));
+    // The peer is the evaluation project's Promptfoo, located at run time with its
+    // import conditions; a static import would bind whichever copy the bundler saw.
+    const entry = resolvePeer(here, "promptfoo");
+    const module = await import(pathToFileURL(entry).href);
+    const load = module.loadApiProvider ?? module.default?.loadApiProvider;
+    if (typeof load !== "function")
+      throw new Error("The consumer Promptfoo peer does not export loadApiProvider");
+    const typed: LoadApiProvider = load;
+    return { load: typed, installRoot: installRoot(entry) };
+  })().catch((error) => {
+    peer = undefined;
+    throw error;
+  });
+  return peer;
+}
 
 /**
  * Promptfoo's public `loadApiProvider`, from the consumer's installed peer, the way the
  * delegate runner loads providers. Promptfoo's grader resolution is internal, so this is
  * the supported way to construct a provider from a grading config.
  */
-export function promptfooLoader(): Promise<LoadApiProvider> {
-  loader ??= (async () => {
-    const here =
-      typeof __dirname === "string" ? __dirname : dirname(fileURLToPath(import.meta.url));
-    // The peer is the evaluation project's Promptfoo, located at run time with its
-    // import conditions; a static import would bind whichever copy the bundler saw.
-    const peer = await import(pathToFileURL(resolvePeer(here, "promptfoo")).href);
-    const load = peer.loadApiProvider ?? peer.default?.loadApiProvider;
-    if (typeof load !== "function")
-      throw new Error("The consumer Promptfoo peer does not export loadApiProvider");
-    const typed: LoadApiProvider = load;
-    return typed;
-  })().catch((error) => {
-    loader = undefined;
-    throw error;
-  });
-  return loader;
+export async function promptfooLoader(): Promise<LoadApiProvider> {
+  return (await promptfooPeer()).load;
 }
 
 export function isJudge(value: unknown): value is Judge {
@@ -66,6 +86,11 @@ export function isJudge(value: unknown): value is Judge {
  * Turn a grading-provider value into a provider, unpacking the shapes Promptfoo's own
  * `getGradingProvider` accepts for a text grader: an id, `ProviderOptions` with an `id`,
  * an `ApiProvider` instance, or a `{ text: … }` map.
+ *
+ * Ids resolve from `context.basePath`, else from the project the Promptfoo peer is
+ * installed in. Promptfoo's grader passes its eval base path (`cliState.basePath`), but
+ * the CLI keeps that state in its own bundle: the library entry loaded here holds a
+ * separate, unset copy, and its `loadApiProvider` would fall back to `process.cwd()`.
  */
 export async function loadJudge(
   spec: unknown,
@@ -73,14 +98,17 @@ export async function loadJudge(
 ): Promise<Judge> {
   if (Array.isArray(spec)) throw new Error(JUDGE_LIST_ERROR);
   if (isJudge(spec)) return spec;
-  const load: LoadContext = {
-    ...(context.basePath ? { basePath: context.basePath } : {}),
-    ...(context.env ? { env: context.env } : {}),
+  const load = async (id: string, options?: object) => {
+    const promptfoo = await promptfooPeer();
+    return promptfoo.load(id, {
+      basePath: context.basePath || promptfoo.installRoot,
+      ...(context.env ? { env: context.env } : {}),
+      ...(options ? { options } : {}),
+    });
   };
-  if (typeof spec === "string" && spec.trim()) return (await promptfooLoader())(spec, load);
+  if (typeof spec === "string" && spec.trim()) return load(spec);
   if (typeof spec === "object" && spec !== null) {
-    if ("id" in spec && typeof spec.id === "string" && spec.id.trim())
-      return (await promptfooLoader())(spec.id, { ...load, options: spec });
+    if ("id" in spec && typeof spec.id === "string" && spec.id.trim()) return load(spec.id, spec);
     if ("text" in spec && spec.text !== undefined) return loadJudge(spec.text, context);
   }
   throw new Error(

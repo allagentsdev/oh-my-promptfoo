@@ -1,8 +1,11 @@
 import assert from "node:assert/strict";
+import { realpathSync } from "node:fs";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "vitest";
 import { llmAssert } from "../packages/oh-my-promptfoo/src/assertions";
-import type { JudgeResponse } from "../packages/oh-my-promptfoo/src/judge";
+import { installRoot, type JudgeResponse, loadJudge } from "../packages/oh-my-promptfoo/src/judge";
 import { FallbackProvider } from "../packages/oh-my-promptfoo/src/providers";
 
 const components = [
@@ -19,6 +22,8 @@ const agentAnswerRule =
   "Credit only what the answer itself shows. Do not credit a claim that a tool was called, a command was run, a file was inspected, created, edited or deleted, a build or test was run, or an external query was made.";
 // Promptfoo strips "file://" from provider ids, so a Windows drive path must follow it directly.
 const fixtureJudge = `file://${join(import.meta.dirname, "fixtures", "judge-provider.mjs")}`;
+// The project this checkout's Promptfoo peer is installed in, where judge ids resolve.
+const installed = realpathSync(join(import.meta.dirname, ".."));
 const noJudge =
   "llmAssert has no judge. Set defaultTest.options.provider for the suite, a test's options.provider, or pass --grader.";
 const misplacedProvider =
@@ -824,17 +829,23 @@ test("the judge is the test's options.provider, as Promptfoo resolves it for the
 });
 
 test("a judge may be an id, provider options, a provider instance or a { text } map", async () => {
-  // An id Promptfoo loads itself, here a file:// provider module.
+  // An id Promptfoo loads itself, here a file:// provider module, given the base path
+  // the judge resolved from, as Promptfoo's own grader gives its eval's.
   const byId = await llmAssert("answer", judgedBy(fixtureJudge));
   assert.equal(byId.pass, true);
-  assert.deepEqual(byId.metadata.fixture, { id: fixtureJudge, config: {}, label: "llmAssert" });
+  const base = { basePath: installed };
+  assert.deepEqual(byId.metadata.fixture, { id: fixtureJudge, config: base, label: "llmAssert" });
 
   // Provider options: the config reaches the provider Promptfoo constructs.
   const config = { scores: { accuracy: 0.5, clarity: 1 }, reason: "Configured" };
   const byOptions = await llmAssert("answer", judgedBy({ id: fixtureJudge, config }));
   assert.equal(byOptions.score, 0.625);
   assert.equal(byOptions.componentResults[0].reason, "Configured graded accuracy");
-  assert.deepEqual(byOptions.metadata.fixture, { id: fixtureJudge, config, label: "llmAssert" });
+  assert.deepEqual(byOptions.metadata.fixture, {
+    id: fixtureJudge,
+    config: { ...base, ...config },
+    label: "llmAssert",
+  });
 
   // A provider instance, as --grader and a loaded defaultTest provider arrive.
   const instance = stub([{ output: verdict() }, { output: verdict() }]);
@@ -852,6 +863,43 @@ test("a judge may be an id, provider options, a provider instance or a { text } 
   );
   assert.equal(byMappedOptions.score, 0.625);
   assert.equal(byMappedOptions.componentResults[0].reason, "Configured graded accuracy");
+});
+
+test("a judge id resolves from the project Promptfoo is installed in, not the working directory", async () => {
+  // Promptfoo runs from a directory without the judge, as from a repository root whose
+  // eval project, with Promptfoo and the judge, is installed in a subdirectory.
+  const elsewhere = await mkdtemp(join(realpathSync(tmpdir()), "judge-cwd-"));
+  const previous = process.cwd();
+  process.chdir(elsewhere);
+  try {
+    const relative = "file://tests/fixtures/judge-provider.mjs";
+    for (const provider of [relative, { id: relative }, { text: relative }]) {
+      const graded = await llmAssert("answer", judgedBy(provider));
+      assert.equal(graded.pass, true);
+      assert.deepEqual(graded.metadata.fixture, {
+        id: relative,
+        config: { basePath: installed },
+        label: "llmAssert",
+      });
+    }
+    // An explicit base path, as FallbackProvider passes its config's, still wins.
+    const own = await loadJudge("file://judge-provider.mjs", {
+      basePath: join(import.meta.dirname, "fixtures"),
+    });
+    assert.equal(own.id(), "file://judge-provider.mjs");
+  } finally {
+    process.chdir(previous);
+    await rm(elsewhere, { recursive: true, force: true });
+  }
+});
+
+test("the install root is the parent of the outermost node_modules", () => {
+  const project = join(realpathSync(tmpdir()), "repo", "evals");
+  const peer = join("promptfoo", "dist", "src", "index.js");
+  assert.equal(installRoot(join(project, "node_modules", peer)), project);
+  const pnpm = join(project, "node_modules", ".pnpm", "promptfoo@0.124.1", "node_modules", peer);
+  assert.equal(installRoot(pnpm), project);
+  assert.throws(() => installRoot(join(project, peer)), /not installed in node_modules/);
 });
 
 test("llmAssert names a missing, listed or misplaced judge before any request", async () => {
@@ -938,7 +986,11 @@ test("an assertion's config.provider judges it in every judge shape", async () =
 
   const byId = await own(fixtureJudge);
   assert.equal(byId.pass, true);
-  assert.deepEqual(byId.metadata.fixture, { id: fixtureJudge, config: {}, label: "llmAssert" });
+  assert.deepEqual(byId.metadata.fixture, {
+    id: fixtureJudge,
+    config: { basePath: installed },
+    label: "llmAssert",
+  });
   assert.equal(byId.metadata.judge, fixtureJudge);
 
   // A provider object: its config, label and env reach the provider Promptfoo constructs,
