@@ -142,17 +142,29 @@ $$\text{credits} = \frac{(\text{prompt} - \text{cached}) \times \texttt{cacheWri
 $$\text{USD} = \text{credits} \times 0.01$$
 
 Uncached prompt tokens are priced at `cacheWritePrice`, not `inputPrice`. This
-rule comes from calibration. Applied to the token breakdowns of Copilot SDK agent
-sessions, which do report cache reads, it reproduced each session's reported
-usage to within $0.00001. Pricing uncached input at `inputPrice` undercounted by
-about 16%.
+rule comes from calibration against Copilot SDK sessions (Copilot CLI 1.0.98,
+`@github/copilot-sdk` 1.0.22) measured in a downstream consumer's CI. Session
+usage reports cache reads, so each session's token breakdown can be priced and
+compared with its reported `totalNanoAiu` / $10^{11}$. The rule reproduced every
+reported figure to within $0.00001; pricing uncached input at `inputPrice`
+undercounted by 16–17%.
 
-| Model | Run | Reported | Formula |
-| --- | --- | ---: | ---: |
-| claude-opus-5.5 | [39934137325](https://github.com/WiseTechGlobal/WTG.AI.Prompts/actions/runs/39934137325) | $0.1289054 | $0.1289130 |
-| claude-opus-5.5 | [39922534386](https://github.com/WiseTechGlobal/WTG.AI.Prompts/actions/runs/39922534386) | $0.2118726 | $0.2118810 |
-| claude-opus-5.5 | [39903956512](https://github.com/WiseTechGlobal/WTG.AI.Prompts/actions/runs/39903956512) | $0.1260512 | $0.1260590 |
-| gpt-6-sol | [39936401678](https://github.com/WiseTechGlobal/WTG.AI.Prompts/actions/runs/39936401678) | $0.0453814 | $0.0453859 |
+| Model | Prompt | Cached | Uncached | Completion | Reported USD | Formula USD |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| claude-opus-5.5 | 38,875 | 18,117 | 20,758 | 1,075 | 0.1289054 | 0.1289134 |
+| claude-opus-5.5 | 79,135 | 43,003 | 36,132 | 1,131 | 0.2118726 | 0.2118806 |
+| claude-opus-5.5 | 38,920 | 18,121 | 20,799 | 922 | 0.1260512 | 0.1260592 |
+| gpt-6-sol | 38,238 | 23,617 | 14,621 | 411 | 0.0453814 | 0.0453859 |
+
+Prompt is total input tokens, cached is prompt-cache reads, and uncached is
+prompt − cached. The prices are AI credits per 1,000,000 tokens: Copilot's reported
+read, write and output prices, and `inputPrice` from GitHub's published table
+(used only for the undercount comparison):
+
+| Model | `inputPrice` | `cacheReadPrice` | `cacheWritePrice` | `outputPrice` |
+| --- | ---: | ---: | ---: | ---: |
+| claude-opus-5.5 | 400 | 20 | 500 | 2000 |
+| gpt-6-sol | 200 | 20 | 250 | 1000 |
 
 The estimate is unavailable when the recorded `model` differs from the model that
 answered, `batchSize` is not a positive integer, or the chosen tier lacks
