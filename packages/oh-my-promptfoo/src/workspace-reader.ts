@@ -157,15 +157,12 @@ async function callTool(name: unknown, args: Record<string, unknown>) {
     const entries: { name: string; type: string }[] = [];
     let index = 0;
     let truncated = false;
-    // Node cannot list an fd, so POSIX lists the verified handle through its
-    // descriptor path. Windows has no such path; there the listing is bracketed
-    // by identity checks, which catch a swap that is still in place afterwards.
-    const fdDirectory =
-      process.platform === "linux"
-        ? "/proc/self/fd"
-        : process.platform === "darwin"
-          ? "/dev/fd"
-          : "";
+    // Node cannot list an fd, so Linux lists the verified handle through
+    // /proc/self/fd, which names the open directory itself. macOS /dev/fd cannot
+    // be listed and Windows has no descriptor path; there the listing is
+    // bracketed by identity checks, which catch a swap still in place afterwards.
+    // A swap reverted between the checks could expose entry names, never bytes.
+    const fdDirectory = process.platform === "linux" ? "/proc/self/fd" : "";
     let handle: FileHandle | undefined;
     let before: BigIntStats;
     try {
