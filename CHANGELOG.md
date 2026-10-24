@@ -5,6 +5,7 @@
 ### Features
 
 * Add `pi-sdk` workspace and read-only agent-grader delegates using the maintained optional `@earendil-works/pi-coding-agent@1.3.0` peer, explicit model/credentials and local endpoint support. Isolated in-memory sessions report successful skill-file reads to stock `skill-used` without changing skill authoring.
+* Add closed, workspace-contained Node stdio `mcpServers` for Copilot and Claude candidates, including per-test overrides, literal-only child environment, case-insensitive reserved env checks, configured-tool permissions, unambiguous Claude trace identity and independently supervised abort cleanup. Read-only graders reject configured servers; general configuration discovery remains disabled.
 
 ### Bug Fixes
 
