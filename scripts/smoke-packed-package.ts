@@ -90,8 +90,8 @@ import Providers = require('oh-my-promptfoo/providers');`,
   // Use the compiler installed in this consumer, with no workspace aliases or symlinks.
   run("node", ["node_modules/typescript/bin/tsc", "--project", "tsconfig.json"], cwd);
 }
-// The workspace reader compares declared link targets with realpath; Windows tmpdir() can be
-// an 8.3 short path (RUNNER~1) that only the native realpath expands.
+// Consumer smokes compare paths with process.cwd(), which is already canonical: macOS
+// tmpdir() is under the /var -> /private/var symlink and Windows may use 8.3 names.
 const temp = await mkdtemp(join(realpathSync.native(tmpdir()), "allagents-pack-"));
 try {
   const packed = JSON.parse(

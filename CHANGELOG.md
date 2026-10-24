@@ -8,6 +8,7 @@
 
 ### Bug Fixes
 
+* **workspace:** canonicalize declared protected source link targets in the workspace reader so Windows 8.3 short temp paths (`RUNNER~1`) are accepted; undeclared, mismatched and non-symlink sources are still refused.
 * **copilot:** capture bounded final session nano-AIU metrics with versioned units and completeness; export USD usage value only for complete reported totals instead of treating premium-request multipliers as money. Preserve partial/error accounting and distinguish measured zero from unavailable telemetry.
 * **grading:** retain a bounded, authoritative Copilot attempt ledger across rubric retries and judge fallbacks, including failures; exclude cached usage and reject incomplete or mixed-unit monetary totals without duplicating batched criterion spend.
 * **accounting:** preserve empty-message execution failures, retain failure history after ledger overflow, and carry nested failed-attempt usage across bundled entrypoints without changing native-only throws or cancellation.

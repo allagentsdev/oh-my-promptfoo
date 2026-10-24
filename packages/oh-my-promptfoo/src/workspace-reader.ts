@@ -13,6 +13,10 @@ const physicalRoot = await realpath(root);
 const sourceRoots = JSON.parse(process.argv[3] ?? "{}") as Record<string, string>;
 if (!sourceRoots || typeof sourceRoots !== "object" || Array.isArray(sourceRoots))
   throw new Error("Workspace reader source roots must be an object");
+// Windows tmpdir() can spell a declared target with 8.3 short names (RUNNER~1)
+// while realpath returns long names, so compare canonical forms of both sides.
+// The link itself must still be a symlink and the target a real directory.
+const declared: { source: string; target: string; physical: string }[] = [];
 for (const [source, target] of Object.entries(sourceRoots)) {
   if (
     !source ||
@@ -22,10 +26,13 @@ for (const [source, target] of Object.entries(sourceRoots)) {
     typeof target !== "string" ||
     !isAbsolute(target) ||
     !(await lstat(resolve(root, source))).isSymbolicLink() ||
-    (await realpath(resolve(root, source))) !== target ||
     !(await stat(target)).isDirectory()
   )
     throw new Error("Workspace reader source root is not a declared protected directory link");
+  const physical = await realpath(target);
+  if ((await realpath(resolve(root, source))) !== physical)
+    throw new Error("Workspace reader source root is not a declared protected directory link");
+  declared.push({ source, target, physical });
 }
 const MAX_BYTES = 256 * 1024;
 const MAX_ENTRIES = 2000;
@@ -70,7 +77,9 @@ async function contained(path: unknown): Promise<string> {
   if (typeof path !== "string" || !path || path.includes("\0"))
     throw new Error("path must name a workspace or declared protected source entry");
   const target = resolve(root, path);
-  const declaredTarget = Object.values(sourceRoots).some((allowed) => within(allowed, target));
+  const declaredTarget = declared.some(
+    ({ target: allowed, physical }) => within(allowed, target) || within(physical, target),
+  );
   if (
     !within(root, target) &&
     !(isAbsolute(path) && (within(physicalRoot, target) || declaredTarget))
@@ -78,10 +87,11 @@ async function contained(path: unknown): Promise<string> {
     throw new Error("path must stay inside the workspace or declared protected sources");
   const physical = await realpath(target);
   if (within(physicalRoot, physical)) return physical;
-  for (const [source, allowed] of Object.entries(sourceRoots))
+  for (const { source, target: allowed, physical: allowedPhysical } of declared)
     if (
-      (within(resolve(root, source), target) || (isAbsolute(path) && within(allowed, target))) &&
-      within(allowed, physical)
+      (within(resolve(root, source), target) ||
+        (isAbsolute(path) && (within(allowed, target) || within(allowedPhysical, target)))) &&
+      within(allowedPhysical, physical)
     )
       return physical;
   throw new Error("path follows a symlink outside the workspace or declared protected sources");
