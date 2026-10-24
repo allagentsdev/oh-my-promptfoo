@@ -26,6 +26,15 @@
 * Exercise the real Pi SDK with local model-service responses, including chunked streaming, bounded output, guarded directory and screenshot reads, credential errors, cancellation, skill evidence, and retained billing. Verify native Codex skill gates with two live SDK sessions, without tracing.
 * Remove obsolete `@types/diff`; workspace file-change capture uses the declarations bundled with `diff@9`.
 
+## [1.22.2](https://github.com/allagentsdev/oh-my-promptfoo/compare/v1.22.1...v1.22.2) (2026-10-24)
+
+
+### Bug Fixes
+
+* **providers:** use Copilot model limits and no default temperature in CopilotModel ([#141](https://github.com/allagentsdev/oh-my-promptfoo/issues/141)) ([94e8f5a](https://github.com/allagentsdev/oh-my-promptfoo/commit/94e8f5ab1ba600a748763d3b1c51930db86e48ec))
+* **workspace:** capture file changes for large Git sources ([#144](https://github.com/allagentsdev/oh-my-promptfoo/issues/144)) ([daaf17e](https://github.com/allagentsdev/oh-my-promptfoo/commit/daaf17e63854b6a32e5c1131405b0b8f904189e6))
+* **workspace:** never read hardlinked files during change capture ([#145](https://github.com/allagentsdev/oh-my-promptfoo/issues/145)) ([b1b0146](https://github.com/allagentsdev/oh-my-promptfoo/commit/b1b01464517134dd6de678a322d8083a07ebfeae))
+
 ## [1.22.1](https://github.com/allagentsdev/oh-my-promptfoo/compare/v1.22.0...v1.22.1) (2026-10-23)
 
 
