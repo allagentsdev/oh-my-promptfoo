@@ -5,10 +5,12 @@
 ### Features
 
 * Add `pi-sdk` workspace and read-only agent-grader delegates using the maintained optional `@earendil-works/pi-coding-agent@1.3.0` peer, explicit model/credentials and local endpoint support. Isolated in-memory sessions report successful skill-file reads to stock `skill-used` without changing skill authoring.
+* Add closed, workspace-contained Node stdio `mcpServers` for Copilot and Claude candidates, including per-test overrides, literal-only child environment, case-insensitive reserved env checks, configured-tool permissions, unambiguous Claude trace identity and independently supervised abort cleanup. Read-only graders reject configured servers; general configuration discovery remains disabled.
 
 ### Bug Fixes
 
 * **workspace:** canonicalize declared protected source link targets in the workspace reader so Windows 8.3 short temp paths (`RUNNER~1`) are accepted; undeclared, mismatched and non-symlink sources are still refused.
+* **workspace:** handle Windows `EPERM` while racing to publish an owned root; only a completed ownership marker can establish the concurrent winner, and mismatched root kinds remain rejected.
 * **copilot:** capture bounded final session nano-AIU metrics with versioned units and completeness; export USD usage value only for complete reported totals instead of treating premium-request multipliers as money. Preserve partial/error accounting and distinguish measured zero from unavailable telemetry.
 * **grading:** retain a bounded, authoritative Copilot attempt ledger across rubric retries and judge fallbacks, including failures; exclude cached usage and reject incomplete or mixed-unit monetary totals without duplicating batched criterion spend.
 * **accounting:** preserve empty-message execution failures, retain failure history after ledger overflow, and carry nested failed-attempt usage across bundled entrypoints without changing native-only throws or cancellation.
@@ -26,6 +28,7 @@
 * Verify `skill-used` with tracing disabled for Claude, Codex, and Copilot, including failed skill loads and text-only claims. Document native skill metadata preservation and that no OpenTelemetry collector is required.
 * Exercise the real Pi SDK with local model-service responses, including chunked streaming, bounded output, guarded directory and screenshot reads, credential errors, cancellation, skill evidence, and retained billing. Verify native Codex skill gates with two live SDK sessions, without tracing.
 * Remove obsolete `@types/diff`; workspace file-change capture uses the declarations bundled with `diff@9`.
+* Exercise MCP candidate execution and packed consumers with pinned Git fixtures on all platforms; retain the Linux-specific protected local-source case.
 
 ## [1.22.4](https://github.com/allagentsdev/oh-my-promptfoo/compare/v1.22.3...v1.22.4) (2026-10-24)
 

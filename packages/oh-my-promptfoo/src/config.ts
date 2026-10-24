@@ -9,6 +9,13 @@ export type DelegateId =
   | "anthropic:claude-agent-sdk"
   | "copilot-sdk"
   | "pi-sdk";
+export interface McpServer {
+  path: string;
+  args?: string[];
+  env?: Record<string, string>;
+  tools?: string[];
+  timeoutMs?: number;
+}
 export interface CodexDelegate {
   id: "openai:codex-sdk";
   env?: Record<string, string>;
@@ -54,6 +61,7 @@ export interface ClaudeDelegate {
     include_partial_messages?: boolean;
     include_hook_events?: boolean;
     forward_subagent_text?: boolean;
+    mcpServers?: Record<string, McpServer>;
   };
 }
 export interface CopilotDelegate {
@@ -87,6 +95,7 @@ export interface CopilotSdkConfig {
   model?: string;
   reasoning_effort?: "low" | "medium" | "high";
   timeoutMs?: number;
+  mcpServers?: Record<string, McpServer>;
   provider?: {
     type?: "openai" | "azure" | "anthropic";
     wireApi?: "completions" | "responses";
@@ -153,11 +162,13 @@ const claude: Record<string, Rule> = {
   include_partial_messages: "boolean",
   include_hook_events: "boolean",
   forward_subagent_text: "boolean",
+  mcpServers: "object",
 };
 const copilot: Record<string, Rule> = {
   model: "string",
   reasoning_effort: ["low", "medium", "high"],
   timeoutMs: "number",
+  mcpServers: "object",
 };
 const pi: Record<string, Rule> = {
   provider: "string",
@@ -207,8 +218,9 @@ export function validateEnv(value: unknown, path = "env"): Record<string, string
   for (const [key, v] of Object.entries(env)) {
     if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key) || typeof v !== "string")
       throw new Error(`${path} must map environment names to strings`);
+    const canonical = key.toUpperCase();
     if (
-      key.startsWith("ALLAGENTS_") ||
+      canonical.startsWith("ALLAGENTS_") ||
       [
         "NODE_OPTIONS",
         "NODE_PATH",
@@ -219,11 +231,61 @@ export function validateEnv(value: unknown, path = "env"): Record<string, string
         "PATH",
         "HOME",
         "TMPDIR",
-      ].includes(key)
+      ].includes(canonical)
     )
       throw new Error(`${path}.${key} is reserved`);
   }
   return env as Record<string, string>;
+}
+function validateMcpServers(value: unknown, id: DelegateId): void {
+  const servers = object(value, "delegate.config.mcpServers");
+  if (id === "anthropic:claude-agent-sdk") {
+    const namespaces = new Set(Object.keys(servers));
+    for (const name of namespaces) {
+      for (
+        let separator = name.indexOf("__");
+        separator >= 0;
+        separator = name.indexOf("__", separator + 1)
+      ) {
+        if (namespaces.has(name.slice(0, separator)))
+          throw new Error(
+            "Claude MCP servers have ambiguous tool namespaces: a server name cannot prefix another followed by '__'",
+          );
+      }
+    }
+  }
+  for (const [name, entry] of Object.entries(servers)) {
+    if (!/^[A-Za-z0-9_-]{1,64}$/.test(name))
+      throw new Error("MCP server names must use 1–64 letters, numbers, underscores or hyphens");
+    const path = `delegate.config.mcpServers.${name}`;
+    const server = fields(
+      entry,
+      { path: "string", args: "strings", env: "object", tools: "strings", timeoutMs: "number" },
+      path,
+    );
+    destination(server.path);
+    if (server.args && (server.args as string[]).some((arg) => arg.includes("\0")))
+      throw new Error(`${path}.args must not contain NUL`);
+    if (server.tools && (server.tools as string[]).some((tool) => !tool || /[\s\0]/.test(tool)))
+      throw new Error(`${path}.tools must contain nonempty tool names`);
+    if (server.env !== undefined) {
+      const env = validateEnv(server.env, `${path}.env`);
+      for (const [key, literal] of Object.entries(env)) {
+        if (
+          literal.includes("\0") ||
+          /(?:\bBearer\s+\S+|\b(?:sk-|gh[pousr]_)[A-Za-z0-9_-]{16,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|https?:\/\/[^\s/]+:[^\s/@]+@)/i.test(
+            literal,
+          )
+        )
+          throw new Error(`${path}.env.${key} must not contain secret-shaped credentials or NUL`);
+      }
+    }
+    if (
+      server.timeoutMs !== undefined &&
+      (!Number.isSafeInteger(server.timeoutMs) || (server.timeoutMs as number) <= 0)
+    )
+      throw new Error(`${path}.timeoutMs must be a positive safe integer`);
+  }
 }
 function validateEndpoint(value: unknown): void {
   const p = fields(
@@ -265,6 +327,7 @@ export function validateDelegateConfig(id: DelegateId, value: unknown): JsonObje
   ) {
     config = fields(value, { ...rules, tools: "strings" }, "delegate.config");
   } else config = fields(value, rules, "delegate.config");
+  if (config.mcpServers !== undefined) validateMcpServers(config.mcpServers, id);
   if (
     id === "anthropic:claude-agent-sdk" &&
     config.tools !== undefined &&
@@ -409,7 +472,16 @@ export function validateAgentConfig(value: unknown): AgentConfig {
 export function validateCopilotConfig(value: unknown): CopilotSdkConfig {
   const c = closed(
     value,
-    ["working_dir", "model", "reasoning_effort", "timeoutMs", "provider", "permissions", "env"],
+    [
+      "working_dir",
+      "model",
+      "reasoning_effort",
+      "timeoutMs",
+      "provider",
+      "permissions",
+      "env",
+      "mcpServers",
+    ],
     "config",
   );
   if (typeof c.working_dir !== "string" || !c.working_dir)

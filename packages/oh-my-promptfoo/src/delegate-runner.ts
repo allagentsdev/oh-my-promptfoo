@@ -23,6 +23,15 @@ import {
   graderReadScope,
   workspaceReaderPath,
 } from "./grader-policy.js";
+import {
+  claudeMcpOptions,
+  copilotMcpAttributes,
+  copilotMcpOptions,
+  mcpToolAllowed,
+  nativeMcpAttributes,
+  type ResolvedMcpServer,
+  resolveMcpServers,
+} from "./mcp.js";
 import { runPi } from "./pi-runner.js";
 import {
   type CallFrame,
@@ -46,6 +55,7 @@ let accepted = false,
   buffer = Buffer.alloc(0),
   fatal: Error | undefined;
 let sensitive: string[] = [];
+let mcpServers: ResolvedMcpServer[] = [];
 let telemetryApi = bundledTelemetry;
 // Native Promptfoo agent spans are collected in this child, then replayed on the
 // host's row trace. No unconfigured exporter or separate root trace is created.
@@ -54,6 +64,7 @@ const tracerProvider = new NodeTracerProvider({
     {
       onStart(span, parentContext) {
         if (terminal) return;
+        const attributes: JsonObject = JSON.parse(redact(jsonSafe(span.attributes), sensitive));
         emit({
           version: 1,
           type: "tool",
@@ -62,7 +73,10 @@ const tracerProvider = new NodeTracerProvider({
           name: redact(span.name, sensitive),
           startTime: span.startTime,
           parentId: `native:${telemetryApi.trace.getSpan(parentContext)?.spanContext().spanId ?? ""}`,
-          attributes: JSON.parse(redact(jsonSafe(span.attributes), sensitive)),
+          attributes: {
+            ...attributes,
+            ...nativeMcpAttributes(attributes, mcpServers),
+          },
         });
       },
       onEnd(span) {
@@ -72,6 +86,7 @@ const tracerProvider = new NodeTracerProvider({
         for (const [key, value] of Object.entries(span.attributes))
           if (value !== undefined)
             attributes[key] = typeof value === "string" ? redact(value, sensitive) : value;
+        Object.assign(attributes, nativeMcpAttributes(attributes, mcpServers));
         emit({
           version: 1,
           type: "tool",
@@ -151,6 +166,8 @@ async function execute(input: JsonObject): Promise<void> {
         "context",
         "delegateEnvKeys",
         "readOnly",
+        "mcpRoots",
+        "mcpConfigDir",
         "deadlineMs",
       ],
       "call",
@@ -189,6 +206,9 @@ async function execute(input: JsonObject): Promise<void> {
       )
         throw new Error("Read-only Codex grading requires its owned authentication home");
     }
+    if (frame.mcpRoots !== undefined && !Array.isArray(frame.mcpRoots))
+      throw new Error("Invalid trusted MCP roots");
+    mcpServers = (await resolveMcpServers(frame)).sort((a, b) => b.name.length - a.name.length);
     if (
       !Array.isArray(frame.delegateEnvKeys) ||
       frame.delegateEnvKeys.some((key) => typeof key !== "string")
@@ -363,8 +383,12 @@ async function runNative(
         },
       };
     }
+    const candidateConfig =
+      frame.delegate === "anthropic:claude-agent-sdk" && !frame.readOnly
+        ? claudeMcpOptions(frame.config, mcpServers)
+        : frame.config;
     const config = {
-      ...(frame.readOnly ? graderConfig(frame.delegate, frame.config) : frame.config),
+      ...(frame.readOnly ? graderConfig(frame.delegate, frame.config) : candidateConfig),
       ...nativePolicy,
       working_dir: frame.workingDir,
       ...(frame.delegate === "openai:codex-sdk"
@@ -521,7 +545,13 @@ async function runCopilot(frame: CallFrame, signal: AbortSignal): Promise<JsonOb
       request.kind === "read" ||
       (request.kind === "write" && permissions.filesystem === "write") ||
       (request.kind === "shell" && permissions.shell === "allow") ||
-      (request.kind === "url" && permissions.network === "allow");
+      (request.kind === "url" && permissions.network === "allow") ||
+      (request.kind === "mcp" &&
+        !frame.readOnly &&
+        mcpServers.some(
+          (server) =>
+            server.name === request.serverName && mcpToolAllowed(server, request.toolName),
+        ));
     return allowed ? { kind: "approve-once" } : { kind: "reject" };
   };
   const abort = () => {
@@ -536,6 +566,7 @@ async function runCopilot(frame: CallFrame, signal: AbortSignal): Promise<JsonOb
       ...(frame.config.reasoning_effort ? { reasoningEffort: frame.config.reasoning_effort } : {}),
       ...(frame.config.provider ? { provider: frame.config.provider } : {}),
       onPermissionRequest: approve,
+      mcpServers: copilotMcpOptions(mcpServers),
       enableConfigDiscovery: false,
       // Keep general config discovery off; expose only physical workspace skill directories.
       ...(frame.readOnly
@@ -577,7 +608,7 @@ async function runCopilot(frame: CallFrame, signal: AbortSignal): Promise<JsonOb
         ) {
           if (tools.has(data.toolCallId)) throw new Error("Duplicate Copilot tool identity");
           tools.add(data.toolCallId);
-          if (!data.mcpServerName) {
+          if (!data.mcpServerName && !data.mcpConfigServerName) {
             const skillRead = observedSkillRead(data.toolName, data.arguments, frame.workingDir);
             if (skillRead) skillReads.set(data.toolCallId, skillRead);
           }
@@ -588,6 +619,7 @@ async function runCopilot(frame: CallFrame, signal: AbortSignal): Promise<JsonOb
             id: data.toolCallId,
             name: redact(data.toolName, sensitive),
             attributes: {
+              ...JSON.parse(redact(jsonSafe(copilotMcpAttributes(data)), sensitive)),
               ...(data.arguments
                 ? { "gen_ai.tool.call.arguments": redact(jsonSafe(data.arguments), sensitive) }
                 : {}),

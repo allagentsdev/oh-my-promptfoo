@@ -311,6 +311,85 @@ discovery. Read preserves image attachments; both tools reject paths outside
 the workspace and declared protected sources. Explicit filesystem `write` or
 shell `allow` is rejected rather than silently weakened.
 
+## Local MCP servers
+
+Copilot and Claude candidates accept the same closed
+`delegate.config.mcpServers.<name>` object. Server names use
+`^[A-Za-z0-9_-]{1,64}$`; each entry has only:
+
+| Field | Required | Meaning |
+| --- | --- | --- |
+| `path` | Yes | Normalized relative Node script path, resolved against the delegate working directory |
+| `args` | No | Literal string arguments; no shell or interpolation |
+| `env` | No | Literal string environment entries, default `{}`; no host/delegate inheritance or interpolation |
+| `tools` | No | Exact, case-sensitive tool names; omitted or `["*"]` allows all, `[]` allows none |
+| `timeoutMs` | No | Positive safe-integer limit for each tool request; timeout closes the server |
+
+For Claude, configured names cannot overlap at a double-underscore boundary:
+`a` and `a__b` cannot coexist, because a tool `b__read` on `a` has the same
+flattened namespace prefix as `read` on `a__b`. An isolated name containing `__`
+is valid. Copilot supplies structured server/tool identity and retains overlapping
+names without this Claude-specific restriction.
+
+Scripts must realpath to a regular file inside the workspace or one of its declared
+protected read-only sources. An undeclared symlink target, directory, absolute path,
+`..`, command, URL, HTTP/SSE transport, headers, or authored `cwd` is rejected.
+Use a read-only source for mocks so ordinary candidate edits cannot change the
+canned answers; this is a recommendation, not a requirement. `type: local`
+acquisition requires Linux; a pinned `type: git` source supports all platforms.
+Node code remains trusted suite code, not an OS/network sandbox, just like
+JavaScript assertions.
+
+See [`examples/mcp/promptfooconfig.yaml`](../examples/mcp/promptfooconfig.yaml).
+Per-test `options.delegate.config.mcpServers` (forwarded by Promptfoo as
+`context.prompt.config.delegate.config.mcpServers`) replaces the complete
+server map; an empty map removes configured servers for that test. The same key is
+available directly in `CopilotSdk` config, with containment against its existing
+`working_dir`. Codex/Pi and read-only `agentAssert` graders reject it.
+
+The package invokes only its bundled Node stdio launcher and the contained Node
+script. The actual script receives only its authored env, including when the SDK
+merges inherited environment or Node adds platform defaults. Injection variables
+such as `NODE_OPTIONS`, `PATH` and `HOME`, NULs, and secret-shaped credential values
+are rejected. Reserved environment names and the `ALLAGENTS_` prefix are checked
+case-insensitively, including per-test overrides and delegate env. Allowed authored
+keys and values keep their original case. Pass delegate credentials in
+`delegate.env`, not the fixture's env.
+Control data is held in an owner-private, bounded file, never serialized into
+process arguments, and removed by the host even if the runner is force-killed.
+Normal shutdown, cancellation, failure and timeout stop both launcher and server.
+A separate Worker thread inside the Node server monitors a private launcher-owned
+pipe and forcibly kills the server on EOF, even if its main thread is blocked.
+A one-byte pipe handshake must succeed before suite code starts; abrupt launcher
+termination does not depend on a main-thread disconnect callback or polling.
+
+Copilot receives explicit stdio options, tools and timeout with
+`enableConfigDiscovery: false`; permission requests approve only configured server
+and tool pairs. Claude receives Promptfoo's `mcp.servers`,
+`strict_mcp_config: true` and `setting_sources: []`, with configured MCP names added
+to its allowed-tools policy without replacing existing native restrictions.
+Model-free consumer tests exercise native Read and permitted/denied Write/Edit
+filesystem actions through stock Promptfoo and a synthetic SDK executor, including
+custom/append allowed tools, disallowed tools, accept-edits, bypass and don't-ask
+modes. They verify adapter policy composition, not the installed Claude CLI's
+independent enforcement; no live model service is involved.
+Promptfoo 0.124.1's Claude transform cannot carry a per-server allow-list or timeout:
+the launcher therefore filters both `tools/list` and `tools/call` and enforces the
+deadline for both delegates, even with bypass permissions. It accepts newline
+JSON-RPC only, bounds each frame at 16 MiB and pending requests at 1,024, and
+forwards no late success after timeout. Workspace `.mcp.json`, `.github/mcp.json`,
+`.vscode/mcp.json` and `.copilot/mcp-config.json` cannot add servers through these
+adapters. Plugins and setting-source configuration are not added by this feature.
+
+Observed tool spans preserve display names, arguments and call IDs, and add stable
+`gen_ai.tool.mcp.server` and `gen_ai.tool.mcp.tool` attributes. MCP reads are not
+counted as skill-file reads.
+
+For model-free packed verification, install the built tarball and Promptfoo in a
+consumer directory, then run `node scripts/smoke-mcp.mjs /absolute/consumer` from
+this repository. It exercises packed ESM/CJS providers, stock Promptfoo's Claude
+translation, real Node stdio, literal env, denied tools and private-file cleanup.
+
 ## Direct Copilot configuration
 
 Direct Copilot uses `package:oh-my-promptfoo/providers:CopilotSdk` with an existing `working_dir`. An absolute path is used as is; a relative path resolves against the eval config's directory, like other Promptfoo file references. Optional fields are `model`, `reasoning_effort`, `timeoutMs`, `permissions`, and explicit `env`. Its optional BYOK `provider` is an endpoint object with required `baseUrl` and supported SDK fields (`type`, `wireApi`, `apiKey`, `wireModel`, `azure.apiVersion`); strings and embedded URL credentials are rejected. Defaults deny writes, shell, and network. Copilot tool events produce tool spans; skill inference from assistant text is disabled.
@@ -346,6 +425,7 @@ without a local skills directory keep skill loading disabled.
 | `model`, `reasoning_effort` | No | Select the model and its supported reasoning effort |
 | `permissions` | No | Allow filesystem writes, shell, or network requests when needed |
 | `provider` | No | Configure a BYOK endpoint with `baseUrl` and supported SDK fields |
+| `mcpServers` | No | Contained local Node MCP fixtures with the shape above |
 | `timeoutMs` | No | Limit the call |
 
 ### Copilot runtime accounting v1

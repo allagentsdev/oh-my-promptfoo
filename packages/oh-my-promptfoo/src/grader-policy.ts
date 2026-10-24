@@ -30,6 +30,7 @@ export function graderConfig(id: DelegateId, input: JsonObject): JsonObject {
       `Agent assertion grader.config.${field} cannot weaken the read-only grader policy`,
     );
   };
+  if (config.mcpServers !== undefined) reject("mcpServers");
   if (id === "pi-sdk") {
     const permissions = (config.permissions ?? {}) as JsonObject;
     for (const [key, safe] of Object.entries({ filesystem: "read", shell: "deny" }))
