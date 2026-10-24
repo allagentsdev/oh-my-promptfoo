@@ -1,6 +1,16 @@
 import type * as ChildProcess from "node:child_process";
 import { execFileSync, type SpawnOptions, spawn } from "node:child_process";
-import { chmod, cp, mkdir, mkdtemp, readlink, rm, symlink, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  cp,
+  link,
+  mkdir,
+  mkdtemp,
+  readlink,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test, vi } from "vitest";
@@ -142,6 +152,38 @@ test("capture returns explicit truncation for an oversized file", async () => {
       expect(result.truncation.codes).toContain("FILE_BYTES");
       expect(result.truncation.omittedPaths).toEqual(["huge"]);
     }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("capture never reads a hardlink to a file outside the workspace", async () => {
+  const root = await mkdtemp(join(tmpdir(), "capture-"));
+  try {
+    const path = join(root, "view");
+    await mkdir(path);
+    const secret = join(root, "secret.txt");
+    await writeFile(secret, "TOP-SECRET-CREDENTIAL\n");
+    const handle = {
+      path,
+      seedPath: path,
+      manifestDigest: "sha256:abc" as const,
+      sources: [],
+      adapters: [],
+    };
+    const baseline = await establishBaseline(handle);
+    await link(secret, join(path, "stolen.txt"));
+    await writeFile(join(path, "ok.txt"), "fine\n");
+    const result = await captureFileChanges(handle, baseline);
+    const serialized = JSON.stringify(result);
+    expect(serialized).not.toContain("TOP-SECRET");
+    expect(serialized).not.toContain(Buffer.from("TOP-SECRET-CREDENTIAL\n").toString("base64"));
+    expect(result.status).toBe("truncated");
+    if (result.status !== "truncated") return;
+    expect(result.truncation.codes).toContain("HARDLINK");
+    expect(result.truncation.omittedPaths).toEqual(["stolen.txt"]);
+    expect(result.changedFiles["ok.txt"].change).toBe("added");
+    expect(result.changedFiles["stolen.txt"]).toBeUndefined();
   } finally {
     await rm(root, { recursive: true, force: true });
   }

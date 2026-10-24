@@ -101,6 +101,15 @@ async function readEntry(path: string): Promise<Entry> {
     const opened = await fd.stat();
     if (opened.ino !== before.ino || opened.dev !== before.dev)
       throw new Error("File changed while opening");
+    // A hardlink may alias an inode outside the workspace; never copy its bytes.
+    if (opened.nlink > 1)
+      return {
+        kind: "file",
+        mode: before.mode & 0o111 ? "100755" : "100644",
+        size: opened.size,
+        sha256: "sha256:uncaptured",
+        omittedCode: "HARDLINK",
+      };
     const bytes = Buffer.alloc(before.size + 1);
     const { bytesRead } = await fd.read(bytes, 0, bytes.length, 0);
     const content = bytes.subarray(0, bytesRead);
