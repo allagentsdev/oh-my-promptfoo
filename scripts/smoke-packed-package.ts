@@ -1,5 +1,4 @@
 import { spawnSync } from "node:child_process";
-import { realpathSync } from "node:fs";
 import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -90,9 +89,7 @@ import Providers = require('oh-my-promptfoo/providers');`,
   // Use the compiler installed in this consumer, with no workspace aliases or symlinks.
   run("node", ["node_modules/typescript/bin/tsc", "--project", "tsconfig.json"], cwd);
 }
-// The workspace reader compares declared link targets with realpath; Windows tmpdir() can be
-// an 8.3 short path (RUNNER~1) that only the native realpath expands.
-const temp = await mkdtemp(join(realpathSync.native(tmpdir()), "allagents-pack-"));
+const temp = await mkdtemp(join(tmpdir(), "allagents-pack-"));
 try {
   const packed = JSON.parse(
     run(
