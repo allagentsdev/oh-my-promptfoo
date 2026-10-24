@@ -25,6 +25,11 @@ export interface CopilotModelConfig {
   model: string;
   reasoning_effort?: CopilotReasoningEffort;
   response_format?: { type: "json_object" };
+  /**
+   * Output token limit for each reply. Defaults to the model's maximum output tokens from
+   * Copilot's model list.
+   */
+  max_tokens?: number;
 }
 
 export interface CopilotModelOptions {
@@ -78,6 +83,7 @@ interface Generation {
   provider: NativeProvider;
   endpoint: CopilotModelEndpoint;
   prices?: CopilotTokenPrices;
+  maxOutputTokens?: number;
   refreshAt: number;
   active: number;
   retired: boolean;
@@ -93,6 +99,7 @@ const CONFIG_KEYS: Record<string, true> = {
   model: true,
   reasoning_effort: true,
   response_format: true,
+  max_tokens: true,
   basePath: true,
 };
 
@@ -106,7 +113,7 @@ export function copilotModelConfig(input: unknown): Readonly<CopilotModelConfig>
     throw new Error(
       `CopilotModel does not accept config.${unsupported.join(", config.")}; the endpoint and credentials come from Copilot discovery.`,
     );
-  const { model, reasoning_effort, response_format } = config;
+  const { model, reasoning_effort, response_format, max_tokens } = config;
   if (typeof model !== "string" || !model.trim() || model !== model.trim())
     throw new Error("CopilotModel requires an explicit config.model.");
   if (
@@ -123,6 +130,8 @@ export function copilotModelConfig(input: unknown): Readonly<CopilotModelConfig>
       response_format.type !== "json_object")
   )
     throw new Error('CopilotModel config.response_format must be { type: "json_object" }.');
+  if (max_tokens !== undefined && !positiveInteger(max_tokens))
+    throw new Error("CopilotModel config.max_tokens must be a positive integer.");
   return Object.freeze({
     model,
     ...(reasoning_effort === undefined
@@ -131,10 +140,26 @@ export function copilotModelConfig(input: unknown): Readonly<CopilotModelConfig>
     ...(response_format === undefined
       ? {}
       : { response_format: Object.freeze({ type: "json_object" as const }) }),
+    ...(max_tokens === undefined ? {} : { max_tokens: max_tokens as number }),
   });
 }
 
 const describe = (value: unknown) => (typeof value === "string" ? JSON.stringify(value) : "none");
+
+const positiveInteger = (value: unknown): value is number =>
+  typeof value === "number" && Number.isSafeInteger(value) && value > 0;
+
+/**
+ * The model's maximum output tokens from Copilot's model list
+ * (`capabilities.limits.max_output_tokens`), when reported.
+ */
+function modelOutputLimit(models: unknown, model: string): number | undefined {
+  if (!Array.isArray(models)) return undefined;
+  const entry = (models as CopilotModelInfo[]).find((candidate) => candidate?.id === model);
+  const limits = entry?.capabilities?.limits as { max_output_tokens?: unknown } | undefined;
+  const limit = limits && typeof limits === "object" ? limits.max_output_tokens : undefined;
+  return positiveInteger(limit) ? limit : undefined;
+}
 
 /** The Copilot API a discovery snapshot describes; anything but the three HTTP APIs is rejected. */
 function endpointOf(snapshot: CopilotEndpoint, model: string): CopilotModelEndpoint {
@@ -255,13 +280,21 @@ function anthropicReasoning(
   return { thinking: { type: "adaptive" }, effort };
 }
 
-/** The Promptfoo provider id and options that send `config` to the discovered endpoint. */
+/**
+ * The Promptfoo provider id and options that send `config` to the discovered endpoint.
+ * `maxOutputTokens` replaces Promptfoo's default output cap and ambient `*_MAX_TOKENS`;
+ * without it Promptfoo's default stands. Temperature is never sent: Promptfoo defaults it
+ * to 0 (or ambient `*_TEMPERATURE`), which some models reject, so an `undefined` override
+ * that is spread last drops the key from the request body.
+ */
 function nativeProvider(
   config: Readonly<CopilotModelConfig>,
   snapshot: CopilotEndpoint,
   { endpoint, headers }: Connection,
   models: unknown,
+  maxOutputTokens: number | undefined,
 ): { id: string; options: object } {
+  const noTemperature = { temperature: undefined };
   const { model, reasoning_effort, response_format } = config;
   if (endpoint === "messages") {
     if (response_format !== undefined)
@@ -276,6 +309,11 @@ function nativeProvider(
           ...(reasoning_effort === undefined
             ? {}
             : anthropicReasoning(models, model, reasoning_effort)),
+          ...(maxOutputTokens === undefined ? {} : { max_tokens: maxOutputTokens }),
+          // The Anthropic SDK refuses non-streaming requests whose max_tokens implies more
+          // than ten minutes; a model's full output limit does.
+          stream: true,
+          extra_body: noTemperature,
           // Only the answer: thinking text would precede a judge's JSON verdict.
           showThinking: false,
           apiBaseUrl: snapshot.baseUrl,
@@ -305,9 +343,15 @@ function nativeProvider(
         config: {
           // Promptfoo sends reasoning_effort on Chat Completions only for model names it
           // knows reason; the passthrough puts it on the wire for every model.
-          ...(reasoning_effort === undefined
+          ...(reasoning_effort === undefined ? {} : { reasoning_effort }),
+          // Promptfoo caps reasoning models with max_completion_tokens, others with max_tokens.
+          ...(maxOutputTokens === undefined
             ? {}
-            : { reasoning_effort, passthrough: { reasoning_effort } }),
+            : { max_tokens: maxOutputTokens, max_completion_tokens: maxOutputTokens }),
+          passthrough: {
+            ...(reasoning_effort === undefined ? {} : { reasoning_effort }),
+            ...noTemperature,
+          },
           ...openai,
         },
       },
@@ -317,6 +361,8 @@ function nativeProvider(
     options: {
       config: {
         ...(reasoning_effort === undefined ? {} : { reasoning_effort }),
+        ...(maxOutputTokens === undefined ? {} : { max_output_tokens: maxOutputTokens }),
+        passthrough: noTemperature,
         store: false,
         ...openai,
       },
@@ -389,6 +435,9 @@ function copilotReply(response: unknown, generation: Generation): unknown {
         ...reply.metadata,
         copilotEndpoint: generation.endpoint,
         ...(generation.prices ? { copilotTokenPrices: generation.prices } : {}),
+        ...(generation.maxOutputTokens === undefined
+          ? {}
+          : { copilotMaxOutputTokens: generation.maxOutputTokens }),
       },
     },
     generation.endpoint,
@@ -445,7 +494,8 @@ export function createCopilotModel({
     } catch {
       // Without the model list, prices go unreported and settings that need it fail.
     }
-    const { id, options } = nativeProvider(config, snapshot, route, models);
+    const maxOutputTokens = config.max_tokens ?? modelOutputLimit(models, config.model);
+    const { id, options } = nativeProvider(config, snapshot, route, models, maxOutputTokens);
     const { endpoint, refreshAt } = route;
     const prices = tokenPrices(models, config.model);
     const provider = await loadProvider(id, { options });
@@ -458,6 +508,7 @@ export function createCopilotModel({
       provider,
       endpoint,
       prices,
+      maxOutputTokens,
       refreshAt,
       active: 0,
       retired: false,
