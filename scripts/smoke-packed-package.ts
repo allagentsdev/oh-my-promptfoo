@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process";
+import { realpathSync } from "node:fs";
 import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -89,7 +90,9 @@ import Providers = require('oh-my-promptfoo/providers');`,
   // Use the compiler installed in this consumer, with no workspace aliases or symlinks.
   run("node", ["node_modules/typescript/bin/tsc", "--project", "tsconfig.json"], cwd);
 }
-const temp = await mkdtemp(join(tmpdir(), "allagents-pack-"));
+// Consumer smokes compare paths with process.cwd(), which is already canonical: macOS
+// tmpdir() is under the /var -> /private/var symlink and Windows may use 8.3 names.
+const temp = await mkdtemp(join(realpathSync.native(tmpdir()), "allagents-pack-"));
 try {
   const packed = JSON.parse(
     run(
