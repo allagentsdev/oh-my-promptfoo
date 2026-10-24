@@ -223,7 +223,9 @@ export async function ownedRoot(path: string, kind: string): Promise<void> {
       // an empty root, then race competing publishers with the atomic rename.
       if (process.platform === "win32" && (await exists(absolute))) {
         await rmdir(absolute).catch((error: NodeJS.ErrnoException) => {
-          if (!["ENOENT", "ENOTEMPTY", "EEXIST"].includes(error.code ?? "")) throw error;
+          // Windows also reports EPERM when another publisher wins this race.
+          // The rename path below still requires its complete ownership marker.
+          if (!["ENOENT", "ENOTEMPTY", "EEXIST", "EPERM"].includes(error.code ?? "")) throw error;
         });
       }
       try {
