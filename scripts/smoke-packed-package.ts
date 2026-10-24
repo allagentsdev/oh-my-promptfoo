@@ -90,7 +90,9 @@ import Providers = require('oh-my-promptfoo/providers');`,
   // Use the compiler installed in this consumer, with no workspace aliases or symlinks.
   run("node", ["node_modules/typescript/bin/tsc", "--project", "tsconfig.json"], cwd);
 }
-const temp = await mkdtemp(join(realpathSync(tmpdir()), "allagents-pack-"));
+// The workspace reader compares declared link targets with realpath; Windows tmpdir() can be
+// an 8.3 short path (RUNNER~1) that only the native realpath expands.
+const temp = await mkdtemp(join(realpathSync.native(tmpdir()), "allagents-pack-"));
 try {
   const packed = JSON.parse(
     run(
