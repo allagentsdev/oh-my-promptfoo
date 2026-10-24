@@ -319,7 +319,12 @@ async function walk(
       const info = await lstat(ignorePath);
       if (info.isFile()) {
         const entry = await readEntry(ignorePath);
-        if (!entry.bytes) throw Error("Ignore rules exceed per-file capture bound");
+        if (!entry.bytes)
+          throw Error(
+            entry.omittedCode === "HARDLINK"
+              ? "Ignore rules file is hardlinked"
+              : "Ignore rules exceed per-file capture bound",
+          );
         ignoreBytes += entry.bytes.length;
         if (ignoreBytes > LIMITS.totalBytes)
           throw Error("Frozen ignore rules exceed capture bound");
