@@ -189,6 +189,45 @@ test("capture never reads a hardlink to a file outside the workspace", async () 
   }
 });
 
+test("baseline reports a hardlinked .gitignore distinctly", async () => {
+  const root = await mkdtemp(join(tmpdir(), "capture-"));
+  try {
+    const path = join(root, "view");
+    await mkdir(path);
+    await writeFile(join(root, "rules"), "*.tmp\n");
+    await link(join(root, "rules"), join(path, ".gitignore"));
+    const handle = {
+      path,
+      seedPath: path,
+      manifestDigest: "sha256:abc" as const,
+      sources: [],
+      adapters: [],
+    };
+    expect((await establishBaseline(handle)).failure).toBe("Ignore rules file is hardlinked");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("baseline reports an oversized .gitignore as exceeding the capture bound", async () => {
+  const root = await mkdtemp(join(tmpdir(), "capture-"));
+  try {
+    await writeFile(join(root, ".gitignore"), Buffer.alloc(256 * 1024 + 1, 10));
+    const handle = {
+      path: root,
+      seedPath: root,
+      manifestDigest: "sha256:abc" as const,
+      sources: [],
+      adapters: [],
+    };
+    expect((await establishBaseline(handle)).failure).toBe(
+      "Ignore rules exceed per-file capture bound",
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("baseline ignore rules remain frozen when agent replaces .gitignore", async () => {
   const root = await mkdtemp(join(tmpdir(), "capture-"));
   try {
