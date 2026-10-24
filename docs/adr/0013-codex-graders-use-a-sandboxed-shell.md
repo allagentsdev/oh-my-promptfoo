@@ -16,7 +16,7 @@ The reader is our own path-containment code. [#149](https://github.com/allagents
 A Codex grader runs stock Promptfoo `openai:codex-sdk`, with Promptfoo's own options forcing it read-only:
 
 - `sandbox_mode: read-only`, `approval_policy: never`, `network_access_enabled: false`, `web_search_enabled: false` and `web_search_mode: disabled`. A grader config that sets any of them to another value is rejected, as before. `deep_tracing` and `mcpServers` stay rejected.
-- The grader adds no `cli_config` of its own. Nothing disables the shell or adds an MCP server, and a `cli_config` in the grader config reaches Codex as it does in stock Promptfoo; before, the reader policy replaced it.
+- The grader adds no `cli_config` of its own, so nothing disables the shell or adds an MCP server. A `cli_config` in the grader config is still rejected by the closed Codex grader schema, unlike stock Promptfoo, so authors cannot override the forced options through it.
 - Promptfoo's default minimal `cli_env` applies (no `inherit_process_env`), so the host environment's tokens do not reach Codex. The Codex process, and therefore its commands, still receives the grader's own API key: Promptfoo sets `CODEX_API_KEY`, and the runner forwards each `grader.env` key, such as `OPENAI_API_KEY`, through `cli_env`. Codex's `shell_environment_policy` stays at its default, which keeps variables named like keys and tokens. The runner redacts these values from the grader's output and errors.
 
 Delete `workspace-reader.ts`, its process entry, its packed-package smoke and its tests.
