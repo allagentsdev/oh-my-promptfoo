@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
-import { lstat, realpath, stat } from "node:fs/promises";
-import { isAbsolute, resolve } from "node:path";
+import { stat } from "node:fs/promises";
+import { isAbsolute } from "node:path";
 import { pathToFileURL } from "node:url";
 import * as bundledTelemetry from "@opentelemetry/api";
 import { AsyncLocalStorageContextManager } from "@opentelemetry/context-async-hooks";
@@ -16,13 +16,7 @@ import {
   safeMultiplier,
   sessionAccounting,
 } from "./copilot-accounting.js";
-import {
-  claudeReadAllowed,
-  disabledWorkspaceSkills,
-  graderConfig,
-  graderReadScope,
-  workspaceReaderPath,
-} from "./grader-policy.js";
+import { claudeReadAllowed, graderConfig, graderReadScope } from "./grader-policy.js";
 import {
   claudeMcpOptions,
   copilotMcpAttributes,
@@ -328,48 +322,9 @@ async function runNative(
     | { callApi: (...args: unknown[]) => Promise<JsonObject>; cleanup?: () => Promise<void> }
     | undefined;
   try {
+    // Codex graders are stock Promptfoo: graderConfig forces its read-only options.
     let nativePolicy: JsonObject = {};
-    if (frame.readOnly && frame.delegate === "openai:codex-sdk") {
-      const sourceRoots: Record<string, string> = {};
-      for (const source of frame.readOnly.sourceRoots) {
-        const path = resolve(frame.workingDir, source);
-        try {
-          if ((await lstat(path)).isSymbolicLink()) sourceRoots[source] = await realpath(path);
-        } catch (error) {
-          if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-        }
-      }
-      nativePolicy = {
-        cli_config: {
-          // The SDK flattens object keys as dotted TOML without quoting them.
-          [`projects.${JSON.stringify(frame.workingDir)}.trust_level`]: "untrusted",
-          project_doc_max_bytes: 0,
-          skills: {
-            include_instructions: false,
-            config: await disabledWorkspaceSkills(frame.workingDir, frame.readOnly.sourceRoots),
-          },
-          features: {
-            shell_tool: false,
-            unified_exec: false,
-            js_repl: false,
-            code_mode: false,
-            multi_agent: false,
-            multi_agent_v2: false,
-            apps: false,
-            hooks: false,
-            codex_hooks: false,
-            plugins: false,
-            plugin_hooks: false,
-          },
-          mcp_servers: {
-            workspace_reader: {
-              command: process.execPath,
-              args: [workspaceReaderPath(), frame.workingDir, JSON.stringify(sourceRoots)],
-            },
-          },
-        },
-      };
-    } else if (frame.readOnly && frame.delegate === "anthropic:claude-agent-sdk") {
+    if (frame.readOnly && frame.delegate === "anthropic:claude-agent-sdk") {
       const allowed = await graderReadScope(frame.workingDir, frame.readOnly.sourceRoots);
       const canRead = (tool: string, input: unknown) => claudeReadAllowed(tool, input, allowed);
       nativePolicy = {

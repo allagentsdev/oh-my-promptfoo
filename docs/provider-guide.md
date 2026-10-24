@@ -211,10 +211,16 @@ rules, criteria and evidence. An oversized prompt drops the diff with a notice
 stating the omitted byte count; if still too large, the assertion fails before
 starting a grader and reports the measured size and budget.
 
-Agent tools are restricted to filesystem reads, with shell and network denied;
-conflicting native settings are rejected. Model-service network traffic is not
-blocked. These SDK restrictions are not an OS sandbox against malicious
-same-user processes. No chmod or snapshot changes the candidate workspace.
+Claude, Copilot and Pi grader tools are restricted to filesystem reads within
+the workspace and declared protected sources, with shell and network denied.
+Codex graders run stock Promptfoo Codex: the shell stays inside the read-only
+sandbox, which blocks writes and command network access but can read the whole
+disk; commands get Promptfoo's minimal environment plus the grader's API key;
+and the workspace's `AGENTS.md` and skills load as in stock Codex. See
+[ADR 0013](adr/0013-codex-graders-use-a-sandboxed-shell.md). Conflicting
+native settings are rejected. Model-service network traffic is not blocked.
+These restrictions are not an OS sandbox against malicious same-user
+processes. No chmod or snapshot changes the candidate workspace.
 
 `timeoutMs` defaults to 120,000 ms and bounds execution across up to two attempts
 (one retry for malformed verdicts), starting after acquiring a grader slot.

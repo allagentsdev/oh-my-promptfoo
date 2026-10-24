@@ -232,15 +232,13 @@ test("agentAssert shares component scoring and inspects the live workspace with 
         assert.equal(recorded[0].config.network_access_enabled, false);
         assert.equal(recorded[0].config.web_search_enabled, false);
         assert.equal(recorded[0].config.web_search_mode, "disabled");
-        const cliConfig = recorded[0].config.cli_config as {
-          features: { shell_tool: boolean; unified_exec: boolean };
-          mcp_servers: { workspace_reader: { command: string; args: string[] } };
-        };
-        assert.equal(cliConfig.features.shell_tool, false);
-        assert.equal(cliConfig.features.unified_exec, false);
-        assert.equal(cliConfig.mcp_servers.workspace_reader.command, process.execPath);
-        assert.equal(cliConfig.mcp_servers.workspace_reader.args[1], workspace);
-      } else if (id === "anthropic:claude-agent-sdk") {
+        // Stock Promptfoo Codex: no cli_config disables the shell or adds a reader.
+        assert.equal(recorded[0].config.cli_config, undefined);
+        assert.match(recorded[0].prompt, /shell commands in a read-only sandbox/);
+      } else {
+        assert.match(recorded[0].prompt, /shell execution and network access denied/);
+      }
+      if (id === "anthropic:claude-agent-sdk") {
         assert.deepEqual(recorded[0].config.tools, ["Read", "Glob", "Grep"]);
         assert.equal(recorded[0].config.allow_dangerously_skip_permissions, false);
         assert.equal(recorded[0].config.allow_all_tools, false);
@@ -250,7 +248,7 @@ test("agentAssert shares component scoring and inspects the live workspace with 
         assert.equal(recorded[0].config.strict_mcp_config, true);
         for (const denied of ["Bash", "Edit", "Write", "WebFetch", "WebSearch", "Task", "Agent"])
           assert.ok((recorded[0].config.disallowed_tools as string[]).includes(denied));
-      } else {
+      } else if (id === "copilot-sdk") {
         assert.deepEqual(
           recorded[0].permissions?.map(({ kind }) => kind),
           ["approve-once", "reject", "reject", "reject", "reject"],

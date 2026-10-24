@@ -7,7 +7,6 @@ import { fileURLToPath } from "node:url";
 import { test } from "vitest";
 import {
   claudeReadAllowed,
-  disabledWorkspaceSkills,
   graderConfig,
   graderReadScope,
 } from "../packages/oh-my-promptfoo/src/grader-policy";
@@ -53,7 +52,6 @@ async function withReadPolicy(
     ];
     const shared = `const paths=${JSON.stringify(paths)}.map(path=>path===null?undefined:path);`;
     const promptfoo = `${shared}
-import {spawn} from 'node:child_process';
 export async function loadApiProvider(id,options){const config=options.options.config;return {
  async callApi(){
   if(id==='anthropic:claude-agent-sdk'){
@@ -73,15 +71,7 @@ export async function loadApiProvider(id,options){const config=options.options.c
    }
    return {output:JSON.stringify({decisions,allowed:config.custom_allowed_tools,skills:config.skills,mode:config.permission_mode})};
   }
-  const reader=config.cli_config.mcp_servers.workspace_reader;
-  const requests=paths.map((path,index)=>({jsonrpc:'2.0',id:index+1,method:'tools/call',params:{name:'read_file',arguments:{path}}}));
-  requests.push({jsonrpc:'2.0',id:99,method:'tools/list'});
-  const child=spawn(reader.command,reader.args,{stdio:['pipe','pipe','pipe']});
-  let output='',error='';child.stdout.on('data',chunk=>output+=chunk);child.stderr.on('data',chunk=>error+=chunk);
-  const closed=new Promise((resolve,reject)=>{child.on('error',reject);child.on('close',code=>code===0?resolve():reject(Error(error||'Reader failed')));});
-  child.stdin.end(requests.map(request=>JSON.stringify(request)).join('\\n')+'\\n');
-  await closed;
-  return {output:JSON.stringify({responses:output.trim().split('\\n').map(line=>JSON.parse(line)),config:config.cli_config})};
+  return {output:JSON.stringify(config)};
  },async cleanup(){}
 };}`;
     const copilot = `${shared}
@@ -208,35 +198,19 @@ test("Copilot grader reads require a real contained path and never load workspac
   });
 }, 20_000);
 
-test("Codex reader accepts contained absolute paths and denies outside files and symlink escapes", async () => {
-  await withReadPolicy(async ({ call, workspace }) => {
+test("Codex graders run stock Promptfoo Codex read-only, with no workspace reader", async () => {
+  await withReadPolicy(async ({ call }) => {
     const response = await call("openai:codex-sdk");
-    const result = JSON.parse(response.output as string);
-    assert.deepEqual(
-      result.responses
-        .slice(0, 8)
-        .map((entry: { result: { isError?: boolean } }) => !entry.result.isError),
-      pathAllowed,
-    );
-    for (const tool of result.responses[8].result.tools) {
-      assert.equal(tool.annotations.readOnlyHint, true);
-      assert.equal(tool.annotations.destructiveHint, false);
-      assert.equal(tool.annotations.openWorldHint, false);
-    }
-    assert.equal(result.config[`projects.${JSON.stringify(workspace)}.trust_level`], "untrusted");
-    assert.equal(result.config.projects, undefined);
-    assert.equal(result.config.features.shell_tool, false);
-    assert.equal(result.config.features.unified_exec, false);
-    assert.equal(result.config.skills.include_instructions, false);
-    assert.equal(result.config.project_doc_max_bytes, 0);
-    for (const parent of [".agents", ".codex"])
-      assert.ok(
-        result.config.skills.config.some(
-          (entry: { path: string; enabled: boolean }) =>
-            entry.path === join(workspace, parent, "skills", "unsafe", "SKILL.md") &&
-            !entry.enabled,
-        ),
-      );
+    const config = JSON.parse(response.output as string);
+    assert.equal(config.sandbox_mode, "read-only");
+    assert.equal(config.approval_policy, "never");
+    assert.equal(config.network_access_enabled, false);
+    assert.equal(config.web_search_enabled, false);
+    assert.equal(config.web_search_mode, "disabled");
+    assert.equal(config.inherit_process_env, undefined);
+    // No cli_config disables the shell or adds an MCP server: the shell works as in stock Promptfoo.
+    assert.equal(config.cli_config, undefined);
+    assert.equal(config.mcpServers, undefined);
   });
 }, 20_000);
 
@@ -290,18 +264,5 @@ test("Claude Glob checks literal symlink prefixes as well as the search director
       await claudeReadAllowed("Glob", { path: ".", pattern: "source/**" }, allowed),
       true,
     );
-  });
-});
-
-test("Codex skill scanning never follows undeclared host links", async () => {
-  await withReadPolicy(async ({ workspace, outside, protectedRoot }) => {
-    const skill = join(protectedRoot, "safe-skill");
-    await mkdir(skill);
-    await writeFile(join(skill, "SKILL.md"), "Protected skill");
-    await symlink(skill, join(workspace, ".agents", "skills", "declared"), "dir");
-    const disabled = await disabledWorkspaceSkills(workspace, ["source"]);
-    assert.ok(disabled.some((entry) => entry.path === join(skill, "SKILL.md") && !entry.enabled));
-    await symlink(outside, join(workspace, ".agents", "skills", "host-link"), "dir");
-    await assert.rejects(disabledWorkspaceSkills(workspace, ["source"]), /skills must stay inside/);
   });
 });

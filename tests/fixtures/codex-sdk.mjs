@@ -14,7 +14,17 @@ export class Codex {
         const result = await readFile(join(options.workingDirectory, "result.txt"), "utf8");
         const input = await readFile(join(options.workingDirectory, "project/input.txt"), "utf8");
         const evidence = JSON.parse(id.split("Untrusted evidence (JSON):\n").at(-1));
+        // Graders run stock Promptfoo Codex: read-only sandbox shell, no reader or MCP server.
+        const config = this.options.config ?? {};
+        const readOnly =
+          options.sandboxMode === "read-only" &&
+          options.approvalPolicy === "never" &&
+          options.networkAccessEnabled === false &&
+          options.webSearchMode === "disabled" &&
+          config.mcp_servers === undefined &&
+          config.features === undefined;
         const verified =
+          readOnly &&
           id.includes(result) &&
           evidence.fileChanges?.changedFiles?.some((file) => file.path === "result.txt") &&
           input === "immutable input\n";
