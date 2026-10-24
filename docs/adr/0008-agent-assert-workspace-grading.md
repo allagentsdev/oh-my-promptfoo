@@ -2,6 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-10-21
+- Amended: 2026-10-25, Codex graders now run stock Promptfoo Codex read-only, without the bundled reader or instruction isolation; see [ADR 0013](0013-codex-graders-use-a-sandboxed-shell.md)
 
 ## Context
 

@@ -1,7 +1,5 @@
-import { existsSync } from "node:fs";
-import { readdir, realpath } from "node:fs/promises";
-import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
-import { fileURLToPath } from "node:url";
+import { realpath } from "node:fs/promises";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { type DelegateId, type JsonObject, validateDelegateConfig } from "./config.js";
 
 export const READ_TOOLS = ["Read", "Glob", "Grep"];
@@ -152,56 +150,4 @@ export async function claudeReadAllowed(
     if (literal.length && !(await allowed(join(searchRoot as string, ...literal)))) return false;
   }
   return true;
-}
-
-/** Codex discovers skills even in untrusted projects; disable them by canonical file path. */
-export async function disabledWorkspaceSkills(workingDir: string, sourceRoots: string[]) {
-  const allowed = await graderReadScope(workingDir, sourceRoots);
-  const disabled: { path: string; enabled: false }[] = [];
-  const visited = new Set<string>();
-  async function visit(path: string): Promise<void> {
-    let physical: string;
-    try {
-      physical = await realpath(path);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
-      throw error;
-    }
-    if (!(await allowed(physical)))
-      throw new Error(
-        "Codex workspace skills must stay inside the workspace or declared protected sources",
-      );
-    if (visited.has(physical)) return;
-    visited.add(physical);
-    for (const entry of await readdir(physical, { withFileTypes: true })) {
-      const candidate = resolve(physical, entry.name);
-      if (entry.name === "SKILL.md" && (entry.isFile() || entry.isSymbolicLink())) {
-        if (!(await allowed(candidate)))
-          throw new Error(
-            "Codex workspace skills must stay inside the workspace or declared protected sources",
-          );
-        disabled.push({ path: await realpath(candidate), enabled: false });
-      } else if (entry.isDirectory()) await visit(candidate);
-      else if (entry.isSymbolicLink()) {
-        try {
-          await visit(candidate);
-        } catch (error) {
-          if ((error as NodeJS.ErrnoException).code !== "ENOTDIR") throw error;
-        }
-      }
-    }
-  }
-  for (const parent of [".agents", ".codex"]) await visit(resolve(workingDir, parent, "skills"));
-  return disabled;
-}
-
-export function workspaceReaderPath(): string {
-  const here = typeof __dirname === "string" ? __dirname : dirname(fileURLToPath(import.meta.url));
-  const built = join(here, "workspace-reader.js");
-  if (existsSync(built)) return built;
-  // A source checkout has no sibling build; Vitest's global setup bundles the entries.
-  const prebuilt = process.env.OH_MY_PROMPTFOO_TEST_ENTRIES;
-  if (prebuilt && existsSync(join(here, "workspace-reader.ts")))
-    return join(prebuilt, "workspace-reader.js");
-  throw new Error("Workspace reader is missing; build or reinstall oh-my-promptfoo");
 }

@@ -120,7 +120,6 @@ try {
     "dist/providers.d.ts",
     "dist/providers.d.cts",
     "dist/delegate-runner.js",
-    "dist/workspace-reader.js",
     "dist/mcp-launcher.js",
     "dist/copilot-endpoint-worker.js",
     "dist/cli.js",
@@ -325,53 +324,6 @@ for(const [assertion,Fallback] of [[llmAssert,EsmFallback],[llmAssert,cp.Fallbac
 `,
     );
     await writeFile(
-      join(cwd, "workspace-reader-smoke.mjs"),
-      `import assert from 'node:assert/strict';
-import {spawnSync} from 'node:child_process';
-import {createRequire} from 'node:module';
-import {mkdirSync,writeFileSync,symlinkSync,readFileSync} from 'node:fs';
-import {dirname,join} from 'node:path';
-const require=createRequire(import.meta.url);
-const root=join(process.cwd(),'reader-workspace');mkdirSync(root);
-writeFileSync(join(root,'large.txt'),'a'.repeat(256*1024)+'bb');
-writeFileSync(join(process.cwd(),'outside.txt'),'outside secret');
-const protectedRoot=join(process.cwd(),'protected-source');mkdirSync(protectedRoot);
-writeFileSync(join(protectedRoot,'protected.txt'),'protected source');
-symlinkSync(protectedRoot,join(root,'protected-link'),'dir');
-symlinkSync(join(protectedRoot,'protected.txt'),join(root,'undeclared-link'));
-const requests=[
- {id:1,method:'initialize',params:{protocolVersion:'2024-11-05',capabilities:{},clientInfo:{name:'packed-smoke',version:'1'}}},
- {method:'notifications/initialized'},
- {id:2,method:'tools/list'},
- {id:3,method:'tools/call',params:{name:'read_file',arguments:{path:'large.txt'}}},
- {id:4,method:'tools/call',params:{name:'read_file',arguments:{path:'large.txt',offset:256*1024,length:2}}},
- {id:5,method:'tools/call',params:{name:'list_directory',arguments:{path:'.',limit:1}}},
- {id:6,method:'tools/call',params:{name:'read_file',arguments:{path:'../protected.txt'}}},
- {id:7,method:'tools/call',params:{name:'read_file',arguments:{path:join(root,'large.txt')}}},
- {id:8,method:'tools/call',params:{name:'read_file',arguments:{path:'large.txt',length:256*1024+1}}},
- {id:9,method:'tools/call',params:{name:'write_file',arguments:{path:'large.txt'}}},
- {id:10,method:'tools/call',params:{name:'read_file',arguments:{path:'protected-link/protected.txt'}}},
- {id:11,method:'tools/call',params:{name:'read_file',arguments:{path:'undeclared-link'}}},
- {id:12,method:'tools/call',params:{name:'read_file',arguments:{path:join(process.cwd(),'outside.txt')}}},
-];
-const child=spawnSync(process.execPath,[join(dirname(require.resolve('oh-my-promptfoo')),'workspace-reader.js'),root,JSON.stringify({'protected-link':protectedRoot})],{
- input:requests.map(request=>JSON.stringify({jsonrpc:'2.0',...request})).join('\\n')+'\\n',encoding:'utf8',timeout:5000,maxBuffer:2*1024*1024,
-});
-assert.equal(child.status,0,child.stderr);
-const replies=child.stdout.trim().split('\\n').map(line=>JSON.parse(line));assert.equal(replies.length,12);
-const response=id=>replies.find(reply=>reply.id===id).result;
-const value=id=>JSON.parse(response(id).content[0].text);
-assert.deepEqual(response(2).tools.map(tool=>tool.name),['read_file','list_directory']);
-assert.ok(response(2).tools.every(tool=>tool.annotations.readOnlyHint&&!tool.annotations.destructiveHint));
-assert.equal(value(3).text.length,256*1024);assert.equal(value(3).truncated,true);assert.equal(value(3).nextOffset,256*1024);
-assert.equal(value(4).text,'bb');assert.equal(value(4).truncated,false);
-assert.equal(value(5).entries.length,1);assert.equal(value(5).truncated,true);
-assert.equal(value(7).text,'a'.repeat(256*1024));
-for(const id of [6,8,9,11,12])assert.equal(response(id).isError,true,'Unsafe workspace reader request '+id);
-assert.equal(value(10).text,'protected source');assert.equal(readFileSync(join(root,'large.txt'),'utf8').length,256*1024+2);
-`,
-    );
-    await writeFile(
       join(cwd, "copilot-model-smoke.mjs"),
       `import assert from 'node:assert/strict';
 import {fork} from 'node:child_process';
@@ -458,7 +410,6 @@ for(const provider of [judge,{text:judge},fallback])await assert.rejects(grade(p
     await compileDeclarations(cwd);
     run("node", ["node_modules/oh-my-promptfoo/dist/cli.js", "--help"], cwd);
     run("node", ["assertions-smoke.mjs"], cwd);
-    run("node", ["workspace-reader-smoke.mjs"], cwd);
     run(manager.command, [...manager.args, `@github/copilot-sdk@${copilotVersion}`], cwd);
     run("node", ["smoke.mjs", "with-copilot"], cwd);
     run("node", ["copilot-model-smoke.mjs"], cwd);

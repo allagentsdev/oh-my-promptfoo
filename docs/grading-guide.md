@@ -520,9 +520,11 @@ metadata plus the diff, not captured base64 contents. The answer goes in the
 same `<Output>` block and the criteria in the same `<Rubric>` block as for
 `llmAssert`, followed by the captured file changes as JSON evidence, and
 `metadata.renderedGradingPrompt` records the assembled prompt. Files and the
-answer remain untrusted; claims earn credit only when verified. Graders cannot
-write, run shell commands or access the network through agent tools. They
-therefore cannot execute tests.
+answer remain untrusted; claims earn credit only when verified. Claude, Copilot
+and Pi graders cannot write, run shell commands or access the network through
+agent tools, so they cannot execute tests. Codex graders run stock Promptfoo
+Codex in its read-only sandbox (described below), so they can run read-only
+commands such as `git diff`, `grep` or a test runner that writes nothing.
 Model-service requests still require the delegate's credentials and network.
 
 `maxPromptBytes` bounds the full assembled grader prompt in UTF-8 bytes,
@@ -548,5 +550,26 @@ are still row errors. The judge is always `config.grader`: `--grader` and
 
 Codex graders require API-key auth via `grader.config.apiKey` or explicit
 `grader.env.OPENAI_API_KEY`. They do not load or copy ChatGPT `auth.json`, avoiding
-single-use refresh-token corruption. See [ADR 0008](adr/0008-agent-assert-workspace-grading.md)
-for the live-workspace and resource-bound tradeoffs.
+single-use refresh-token corruption.
+
+A Codex grader is Promptfoo's `openai:codex-sdk` with its shell, forced to
+`sandbox_mode: read-only`, `approval_policy: never`,
+`network_access_enabled: false`, `web_search_enabled: false` and
+`web_search_mode: disabled`; other values for these are rejected. Codex
+enforces the sandbox itself, with the platform mechanism it uses on macOS, Linux
+or Windows. The sandbox blocks writes and command network access, but it does
+not confine reads: the grader can read any file your user can read, not only
+the workspace and declared protected sources. Use a Claude, Copilot or Pi
+grader when judge reads must stay in the workspace. Commands get Promptfoo's
+minimal environment (such as `PATH`, `HOME` and temp variables) plus the
+grader's own API key: Promptfoo's `CODEX_API_KEY` and any `grader.env` keys,
+which reach the Codex process through `cli_env`. The runner redacts those
+values from the grader's output and errors. As in stock Codex, the grader loads
+the workspace's `AGENTS.md` and skills, so a candidate that writes them can add
+instructions to the judge's context; the built-in rules still tell it that
+workspace content is evidence, not instructions.
+
+See [ADR 0008](adr/0008-agent-assert-workspace-grading.md) for the
+live-workspace and resource-bound tradeoffs and
+[ADR 0013](adr/0013-codex-graders-use-a-sandboxed-shell.md) for the Codex
+sandbox.

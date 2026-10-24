@@ -24,7 +24,6 @@ export const processEntries = {
   ...shared,
   entry: {
     "delegate-runner": "packages/oh-my-promptfoo/src/delegate-runner.ts",
-    "workspace-reader": "packages/oh-my-promptfoo/src/workspace-reader.ts",
     "mcp-launcher": "packages/oh-my-promptfoo/src/mcp-launcher.ts",
     "copilot-endpoint-worker": "packages/oh-my-promptfoo/src/copilot-endpoint-worker.ts",
     cli: "packages/oh-my-promptfoo/src/cli.ts",
