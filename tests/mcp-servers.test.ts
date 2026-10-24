@@ -1,9 +1,11 @@
+import { execFileSync } from "node:child_process";
 import { existsSync, realpathSync } from "node:fs";
 import { mkdir, mkdtemp, readdir, readFile, stat, symlink, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
+import { pathToFileURL } from "node:url";
 import { context, propagation, trace } from "@opentelemetry/api";
 import { AsyncLocalStorageContextManager } from "@opentelemetry/context-async-hooks";
 import { W3CTraceContextPropagator } from "@opentelemetry/core";
@@ -59,50 +61,53 @@ async function consumerProject(moduleName = "@github/copilot-sdk") {
 
 // The SDK boundary consumes the translated configuration and exchanges real JSON-RPC
 // over stdio. No model, network service, or private implementation seam is involved.
-test("workspace candidate executes a protected local-source MCP tool over stdio", async () => {
-  const root = await consumerProject();
-  const provider = new Agent({
-    config: {
-      basePath: root,
-      delegate: {
-        id: "copilot-sdk",
-        config: {
-          mcpServers: {
-            fixture: {
-              path: ".eval-mocks/server.mjs",
-              env: { MOCK_MODE: "canned" },
-              tools: ["search_code"],
+test.skipIf(process.platform !== "linux")(
+  "workspace candidate executes a protected local-source MCP tool over stdio",
+  async () => {
+    const root = await consumerProject();
+    const provider = new Agent({
+      config: {
+        basePath: root,
+        delegate: {
+          id: "copilot-sdk",
+          config: {
+            mcpServers: {
+              fixture: {
+                path: ".eval-mocks/server.mjs",
+                env: { MOCK_MODE: "canned" },
+                tools: ["search_code"],
+              },
             },
           },
         },
+        workspace: {
+          sources: [
+            {
+              type: "local",
+              path: "./mocks",
+              destination: ".eval-mocks",
+              permissions: "read-only",
+            },
+          ],
+        },
       },
-      workspace: {
-        sources: [
-          {
-            type: "local",
-            path: "./mocks",
-            destination: ".eval-mocks",
-            permissions: "read-only",
-          },
-        ],
+      env: {
+        ALLAGENTS_CACHE_ROOT: join(root, "cache"),
+        ALLAGENTS_WORKSPACE_ROOT: join(root, "runtime"),
       },
-    },
-    env: {
-      ALLAGENTS_CACHE_ROOT: join(root, "cache"),
-      ALLAGENTS_WORKSPACE_ROOT: join(root, "runtime"),
-    },
-  });
-  try {
-    const response = await provider.callApi("search fixtures");
-    expect(response.error).toBeUndefined();
-    expect(JSON.parse(String(response.output))).toMatchObject({
-      result: "canned code match",
-      mode: "canned",
     });
-  } finally {
-    await provider.cleanup();
-  }
-});
+    try {
+      const response = await provider.callApi("search fixtures");
+      expect(response.error).toBeUndefined();
+      expect(JSON.parse(String(response.output))).toMatchObject({
+        result: "canned code match",
+        mode: "canned",
+      });
+    } finally {
+      await provider.cleanup();
+    }
+  },
+);
 
 test("public candidate constructor rejects case-variant reserved MCP environment names", () => {
   for (const id of ["copilot-sdk", "anthropic:claude-agent-sdk"]) {
@@ -139,6 +144,33 @@ type Candidate = "copilot-sdk" | "anthropic:claude-agent-sdk";
 const candidates: Candidate[] = ["copilot-sdk", "anthropic:claude-agent-sdk"];
 const projectFor = (id: Candidate) =>
   consumerProject(id === "copilot-sdk" ? "@github/copilot-sdk" : "@anthropic-ai/claude-agent-sdk");
+function pinnedMocks(root: string) {
+  const repository = join(root, "mocks");
+  execFileSync("git", ["init", "-q", repository]);
+  execFileSync("git", ["-C", repository, "add", "--all"]);
+  execFileSync("git", [
+    "-C",
+    repository,
+    "-c",
+    "user.name=Fixture",
+    "-c",
+    "user.email=fixture@example.test",
+    "commit",
+    "--allow-empty",
+    "-qm",
+    "MCP fixture",
+  ]);
+  const ref = execFileSync("git", ["-C", repository, "rev-parse", "HEAD"], {
+    encoding: "utf8",
+  }).trim();
+  return {
+    type: "git" as const,
+    repository: pathToFileURL(repository).href,
+    ref,
+    destination: ".eval-mocks",
+    permissions: "read-only" as const,
+  };
+}
 function candidate(
   root: string,
   id: Candidate,
@@ -163,9 +195,7 @@ function candidate(
       },
       ...(workingDir ? { workingDir } : {}),
       workspace: {
-        sources: [
-          { type: "local", path: "./mocks", destination: ".eval-mocks", permissions: "read-only" },
-        ],
+        sources: [pinnedMocks(root)],
       },
     },
     env: {

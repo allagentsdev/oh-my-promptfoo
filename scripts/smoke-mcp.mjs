@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { copyFile, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
@@ -33,6 +33,23 @@ try {
     join(root, "mocks", "server.mjs"),
   );
   await writeFile(join(root, "mocks", "native.txt"), "native read executed");
+  const repository = join(root, "mocks");
+  execFileSync("git", ["init", "-q", repository]);
+  execFileSync("git", ["-C", repository, "add", "--all"]);
+  execFileSync("git", [
+    "-C",
+    repository,
+    "-c",
+    "user.name=Fixture",
+    "-c",
+    "user.email=fixture@example.test",
+    "commit",
+    "-qm",
+    "MCP fixture",
+  ]);
+  const ref = execFileSync("git", ["-C", repository, "rev-parse", "HEAD"], {
+    encoding: "utf8",
+  }).trim();
   for (const [format, { Agent }] of [
     ["esm", esm],
     ["cjs", cjs],
@@ -98,8 +115,9 @@ try {
           workspace: {
             sources: [
               {
-                type: "local",
-                path: "./mocks",
+                type: "git",
+                repository: pathToFileURL(repository).href,
+                ref,
                 destination: ".eval-mocks",
                 permissions: "read-only",
               },
@@ -107,7 +125,6 @@ try {
           },
         },
         env: {
-          ALLAGENTS_LOCAL_SOURCE_ROOT: root,
           ALLAGENTS_CACHE_ROOT: join(root, "cache"),
           ALLAGENTS_WORKSPACE_ROOT: join(root, "runtime"),
         },

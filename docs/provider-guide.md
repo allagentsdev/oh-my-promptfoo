@@ -334,9 +334,11 @@ names without this Claude-specific restriction.
 Scripts must realpath to a regular file inside the workspace or one of its declared
 protected read-only sources. An undeclared symlink target, directory, absolute path,
 `..`, command, URL, HTTP/SSE transport, headers, or authored `cwd` is rejected.
-Use a read-only local source for mocks so ordinary candidate edits cannot change
-the canned answers; this is a recommendation, not a requirement. Node code remains
-trusted suite code, not an OS/network sandbox, just like JavaScript assertions.
+Use a read-only source for mocks so ordinary candidate edits cannot change the
+canned answers; this is a recommendation, not a requirement. `type: local`
+acquisition requires Linux; a pinned `type: git` source supports all platforms.
+Node code remains trusted suite code, not an OS/network sandbox, just like
+JavaScript assertions.
 
 See [`examples/mcp/promptfooconfig.yaml`](../examples/mcp/promptfooconfig.yaml).
 Per-test `options.delegate.config.mcpServers` (forwarded by Promptfoo as
