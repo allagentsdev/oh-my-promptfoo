@@ -898,7 +898,9 @@ describe("workspace provider publication and lifetime", () => {
     expect(await readFile(join(protectedPath, "input.txt"), "utf8")).toBe(
       "modified protected source",
     );
-  }, 30_000);
+    // About twenty workspace acquisitions take ~6s on Linux CI; on Windows each spawns
+    // PowerShell locks and icacls, and the test needs over 30s there.
+  }, 90_000);
   async function workspaceProvider(fileChanges = false, readOnly = false, workingDir?: string) {
     const path = await project("promptfoo", native);
     const repository = join(path, "source");
