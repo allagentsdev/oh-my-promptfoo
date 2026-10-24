@@ -27,6 +27,13 @@
 * Exercise the real Pi SDK with local model-service responses, including chunked streaming, bounded output, guarded directory and screenshot reads, credential errors, cancellation, skill evidence, and retained billing. Verify native Codex skill gates with two live SDK sessions, without tracing.
 * Remove obsolete `@types/diff`; workspace file-change capture uses the declarations bundled with `diff@9`.
 
+## [1.22.4](https://github.com/allagentsdev/oh-my-promptfoo/compare/v1.22.3...v1.22.4) (2026-10-24)
+
+
+### Bug Fixes
+
+* **workspace:** canonicalize Windows paths in the workspace reader ([#148](https://github.com/allagentsdev/oh-my-promptfoo/issues/148)) ([0f013e2](https://github.com/allagentsdev/oh-my-promptfoo/commit/0f013e20199364bded3990a352c2fb04d16c0957))
+
 ## [1.22.3](https://github.com/allagentsdev/oh-my-promptfoo/compare/v1.22.2...v1.22.3) (2026-10-24)
 
 
