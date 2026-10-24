@@ -135,6 +135,7 @@ providers:
     config:
       model: gpt-5.6-sol           # required, exactly as Copilot lists it
       reasoning_effort: medium     # optional: low, medium or high
+      max_tokens: 32000            # optional; defaults to the model's output limit
 defaultTest:
   options:
     provider:
@@ -145,7 +146,7 @@ defaultTest:
         response_format: { type: json_object }   # optional; the only accepted format
 ```
 
-Those three keys are the whole config. The endpoint and credentials always come
+Those four keys are the whole config. The endpoint and credentials always come
 from Copilot: a private Copilot SDK process signs in with `GH_TOKEN` (never your
 stored logins or `OPENAI_*`, `ANTHROPIC_*` or `AZURE_*` settings), asks Copilot for
 the model's endpoint and short-lived credentials, and refreshes them before they
@@ -169,6 +170,21 @@ API in its own shape:
 - `response_format: { type: json_object }` works on Responses and Chat
   Completions. The Anthropic Messages API has no JSON-object mode, so a Claude
   model with `response_format` fails and names the model.
+- `max_tokens` caps each reply's output tokens: the Responses
+  `max_output_tokens`, the Chat Completions `max_tokens` (or
+  `max_completion_tokens` for models Promptfoo treats as reasoning models) and
+  the Messages `max_tokens`. Without it, the cap is the model's
+  `capabilities.limits.max_output_tokens` from Copilot's model list, so long
+  answers are not cut off at Promptfoo's default of 1024 (2048 for Claude
+  thinking models). When the list reports no limit, Promptfoo's default
+  applies. The cap in force is in `metadata.copilotMaxOutputTokens`.
+  `OPENAI_MAX_TOKENS`, `OPENAI_MAX_COMPLETION_TOKENS` and
+  `ANTHROPIC_MAX_TOKENS` never override it.
+- No request carries a `temperature`, so each model uses its own default.
+  Promptfoo's default of 0 and `OPENAI_TEMPERATURE` or `ANTHROPIC_TEMPERATURE`
+  are not sent; some models, such as Claude Opus 4.7 and later, reject them.
+- Messages requests stream, because the Anthropic SDK refuses a
+  non-streaming request with a large `max_tokens`.
 - Claude replies contain only the answer, not its thinking.
 
 Every instance in a run shares that one SDK process. The provider id is

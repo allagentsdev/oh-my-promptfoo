@@ -46,8 +46,42 @@ interface Observation {
   body: Record<string, any>;
 }
 
-/** A reply in the shape of the API the request reached, with that API's usage fields. */
+/**
+ * A reply in the shape of the API the request reached, with that API's usage fields.
+ * CopilotModel streams Messages requests, so Messages replies are server-sent events.
+ */
 function reply(response: ServerResponse, path = "/responses", usage?: Record<string, unknown>) {
+  if (path.includes("/v1/messages")) {
+    const { output_tokens = 5, ...input } = usage ?? { input_tokens: 4, output_tokens: 5 };
+    const events = [
+      {
+        type: "message_start",
+        message: {
+          id: "loopback-message",
+          type: "message",
+          role: "assistant",
+          model: "loopback",
+          content: [],
+          stop_reason: null,
+          stop_sequence: null,
+          usage: { ...input, output_tokens: 0 },
+        },
+      },
+      { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
+      { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: verdict } },
+      { type: "content_block_stop", index: 0 },
+      {
+        type: "message_delta",
+        delta: { stop_reason: "end_turn", stop_sequence: null },
+        usage: { output_tokens },
+      },
+      { type: "message_stop" },
+    ];
+    response.setHeader("content-type", "text/event-stream");
+    return response.end(
+      events.map((event) => `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`).join(""),
+    );
+  }
   response.setHeader("content-type", "application/json");
   if (path.includes("/chat/completions"))
     return response.end(
@@ -58,17 +92,6 @@ function reply(response: ServerResponse, path = "/responses", usage?: Record<str
           { index: 0, finish_reason: "stop", message: { role: "assistant", content: verdict } },
         ],
         usage: usage ?? { prompt_tokens: 4, completion_tokens: 5, total_tokens: 9 },
-      }),
-    );
-  if (path.includes("/v1/messages"))
-    return response.end(
-      JSON.stringify({
-        id: "loopback-message",
-        type: "message",
-        role: "assistant",
-        content: [{ type: "text", text: verdict }],
-        stop_reason: "end_turn",
-        usage: usage ?? { input_tokens: 4, output_tokens: 5 },
       }),
     );
   response.end(
@@ -387,7 +410,7 @@ test("instances with distinct request settings share one SDK worker but keep the
     });
 });
 
-test("config accepts only an explicit model, a reasoning effort and a JSON-object format", () => {
+test("config accepts only an explicit model, a reasoning effort, a JSON-object format and an output limit", () => {
   const Provider = createCopilotModel({
     createEndpointClient() {
       throw new Error("Construction must not connect");
@@ -398,12 +421,18 @@ test("config accepts only an explicit model, a reasoning effort and a JSON-objec
       model,
       reasoning_effort: "high",
       response_format: { type: "json_object" },
+      max_tokens: 32_000,
       basePath: "/suite",
     },
   } as object);
   assert.deepEqual(accepted.toJSON(), {
     id: `copilot:${model}`,
-    config: { model, reasoning_effort: "high", response_format: { type: "json_object" } },
+    config: {
+      model,
+      reasoning_effort: "high",
+      response_format: { type: "json_object" },
+      max_tokens: 32_000,
+    },
   });
   for (const config of [
     {},
@@ -412,6 +441,11 @@ test("config accepts only an explicit model, a reasoning effort and a JSON-objec
     { model: "gpt-5.6-sol", reasoning_effort: "extreme" },
     { model: "gpt-5.6-sol", response_format: { type: "json_schema" } },
     { model: "gpt-5.6-sol", response_format: { type: "json_object", schema: {} } },
+    { model: "gpt-5.6-sol", max_tokens: 0 },
+    { model: "gpt-5.6-sol", max_tokens: -1 },
+    { model: "gpt-5.6-sol", max_tokens: 1.5 },
+    { model: "gpt-5.6-sol", max_tokens: "4096" },
+    { model: "gpt-5.6-sol", temperature: 0 },
     { model: "gpt-5.6-sol", apiBaseUrl: "http://elsewhere.invalid" },
     { model: "gpt-5.6-sol", apiKey: "redirected" },
     { model: "gpt-5.6-sol", headers: { authorization: "redirected" } },
@@ -743,6 +777,80 @@ test("reasoning effort and JSON format reach each API in its own shape", async (
   assert.deepEqual(bodies[claude]!.thinking, { type: "adaptive" });
   assert.deepEqual(bodies[claude]!.output_config, { effort: "low" });
   assert.equal(bodies[claude]!.temperature, undefined, "Thinking requests carry no temperature");
+});
+
+test("requests carry the model's reported output limit or the authored one, and no temperature", async () => {
+  const ambient = {
+    ...ambientOpenAi(),
+    ...ambientAnthropic(),
+    OPENAI_TEMPERATURE: "0.7",
+    ANTHROPIC_TEMPERATURE: "0.7",
+    OPENAI_MAX_TOKENS: "111",
+    OPENAI_MAX_COMPLETION_TOKENS: "222",
+    ANTHROPIC_MAX_TOKENS: "333",
+  };
+  for (const name of [
+    "OPENAI_TEMPERATURE",
+    "ANTHROPIC_TEMPERATURE",
+    "OPENAI_MAX_TOKENS",
+    "OPENAI_MAX_COMPLETION_TOKENS",
+    "ANTHROPIC_MAX_TOKENS",
+  ] as const)
+    vi.stubEnv(name, ambient[name]);
+  const http = await loopback();
+  const known = snapshots(http);
+  const endpoints: Record<string, CopilotEndpoint> = {
+    ...known,
+    "claude-opus-4.8": known[claude]!,
+    "gpt-4.1": known[kimi]!,
+    "gpt-4o": known[model]!,
+  };
+  // Each route, with a reasoning and a non-reasoning model where Promptfoo treats them apart.
+  const routes = {
+    [model]: "max_output_tokens",
+    "gpt-4o": "max_output_tokens",
+    [kimi]: "max_tokens",
+    "gpt-4.1": "max_tokens",
+    [claude]: "max_tokens",
+    "claude-opus-4.8": "max_tokens",
+  } as const;
+  const limits = Object.fromEntries(Object.keys(routes).map((id, index) => [id, 64_000 + index]));
+  const models = async (): Promise<CopilotModelInfo[]> =>
+    Object.entries(limits).map(([id, limit]) => ({
+      id,
+      capabilities: { limits: { max_prompt_tokens: 128_000, max_output_tokens: limit } },
+    }));
+  for (const authored of [undefined, 4_321]) {
+    for (const [selected, field] of Object.entries(routes)) {
+      const f = consumers(async (chosen) => endpoints[chosen]!, {}, models, {
+        config: { model: selected, ...(authored === undefined ? {} : { max_tokens: authored }) },
+      });
+      const result = await f.first.callApi("Grade local candidate");
+      assert.equal(result.error, undefined);
+      const expected = authored ?? limits[selected];
+      const { body } = http.requests.at(-1)!;
+      assert.equal(body[field], expected, `${selected} ${field}`);
+      for (const other of ["max_output_tokens", "max_completion_tokens", "max_tokens"])
+        if (other !== field && other in body)
+          assert.equal(body[other], expected, `${selected} ${other}`);
+      assert.equal("temperature" in body, false, `${selected} carries no temperature`);
+      if (selected.startsWith("claude")) assert.equal(body.stream, true, "Long Messages stream");
+      assert.equal(result.metadata?.copilotMaxOutputTokens, expected);
+    }
+  }
+});
+
+test("without a reported or authored limit the request keeps Promptfoo's output cap", async () => {
+  const http = await loopback();
+  const endpoints = snapshots(http);
+  const f = consumers(async (chosen) => endpoints[chosen]!, {}, undefined, {
+    config: { model: claude },
+  });
+  const result = await f.first.callApi("Grade local candidate");
+  assert.equal(result.error, undefined);
+  assert.equal(typeof http.requests.at(-1)!.body.max_tokens, "number");
+  assert.equal("temperature" in http.requests.at(-1)!.body, false);
+  assert.equal(result.metadata?.copilotMaxOutputTokens, undefined);
 });
 
 test("Anthropic settings Copilot or Promptfoo cannot honor fail naming the model", async () => {
