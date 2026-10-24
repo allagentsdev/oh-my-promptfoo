@@ -1,9 +1,9 @@
 {
   "schemaVersion": 1,
-  "date": "2026-10-23T20:11:37.029Z",
+  "date": "2026-10-24T14:22:23.998Z",
   "node": "v22.22.1",
   "promptfoo": "0.124.1",
-  "package": "1.21.2",
+  "package": "1.22.4",
   "surface": "npm-packed package loaded by stock promptfoo eval",
   "sdkMode": "deterministic Codex/Claude/Copilot SDK fixtures; real Pi SDK against a local model-service endpoint; independently npm-installed Promptfoo and real integration runtime",
   "stats": {
@@ -38,8 +38,8 @@
         }
       }
     },
-    "durationMs": 10509,
-    "evaluationDurationMs": 10509
+    "durationMs": 9532,
+    "evaluationDurationMs": 9532
   },
   "verifiedAssertions": [
     "contains",
@@ -81,6 +81,76 @@
       "toolTrajectory": true,
       "graderVerified": true
     },
+    "toolInventory": {
+      "successes": 2,
+      "failures": 2,
+      "errors": 0,
+      "tokenUsage": {
+        "prompt": 0,
+        "completion": 0,
+        "cached": 0,
+        "total": 0,
+        "numRequests": 0,
+        "completionDetails": {
+          "reasoning": 0,
+          "acceptedPrediction": 0,
+          "rejectedPrediction": 0,
+          "cacheReadInputTokens": 0,
+          "cacheCreationInputTokens": 0
+        },
+        "assertions": {
+          "total": 0,
+          "prompt": 0,
+          "completion": 0,
+          "cached": 0,
+          "numRequests": 0,
+          "completionDetails": {
+            "reasoning": 0,
+            "acceptedPrediction": 0,
+            "rejectedPrediction": 0,
+            "cacheReadInputTokens": 0,
+            "cacheCreationInputTokens": 0
+          }
+        }
+      },
+      "durationMs": 1100,
+      "evaluationDurationMs": 1100
+    },
+    "mixedSkillInventory": {
+      "successes": 0,
+      "failures": 1,
+      "errors": 0,
+      "tokenUsage": {
+        "prompt": 0,
+        "completion": 0,
+        "cached": 0,
+        "total": 0,
+        "numRequests": 0,
+        "completionDetails": {
+          "reasoning": 0,
+          "acceptedPrediction": 0,
+          "rejectedPrediction": 0,
+          "cacheReadInputTokens": 0,
+          "cacheCreationInputTokens": 0
+        },
+        "assertions": {
+          "total": 0,
+          "prompt": 0,
+          "completion": 0,
+          "cached": 0,
+          "numRequests": 0,
+          "completionDetails": {
+            "reasoning": 0,
+            "acceptedPrediction": 0,
+            "rejectedPrediction": 0,
+            "cacheReadInputTokens": 0,
+            "cacheCreationInputTokens": 0
+          }
+        }
+      },
+      "durationMs": 2230,
+      "evaluationDurationMs": 2230
+    },
     "normalCleanup": true,
     "skippedCleanupRecovery": true,
     "storageOutsideConsumer": true
@@ -104,5 +174,5 @@
     "llmAssert judge outage keeps row results",
     "llmAssert config.provider over test, --grader and defaultTest judges"
   ],
-  "stdout": "Cache is disabled.\n[OtelSdk] OpenTelemetry SDK initialized successfully\nStarting evaluation eval-4Vl-2026-10-23T20:09:10\n[Evaluation] Starting 3 test cases...\nRunning 3 test cases (up to 4 at a time)...\n[Evaluation] ✓ Complete! 3/3 tests in 10s\n[OtelSdk] OpenTelemetry SDK shut down successfully\n\n┌────────────────────────┬────────────────────────┬────────────────────────┬────────────────────────┬────────────────────────┐\n│ task                   │ sessionId              │ [readonly] {{task}}    │ [writable] {{task}}    │ [claude] {{task}}      │\n├────────────────────────┼────────────────────────┼────────────────────────┼────────────────────────┴────────────────────────┤\n│ readonly-row           │ fixture-thread         │ [PASS]                 │                                                 │\n│                        │                        │ {\"task\":\"readonly-row… │                                                 │\n├────────────────────────┼────────────────────────┼────────────────────────┼────────────────────────┬────────────────────────┤\n│ writable-row           │                        │                        │ [PASS]                 │                        │\n│                        │                        │                        │ {\"task\":\"writable-row… │                        │\n├────────────────────────┼────────────────────────┼────────────────────────┼────────────────────────┼────────────────────────┤\n│ claude-row             │ fixture-claude         │                        │                        │ [PASS]                 │\n│                        │                        │                        │                        │ {\"task\":\"claude-row\",… │\n└────────────────────────┴────────────────────────┴────────────────────────┴────────────────────────┴────────────────────────┘\n✓ Eval complete (ID: eval-4Vl-2026-10-23T20:09:10)\n\n» View results: promptfoo view\n» Share with your team: https://promptfoo.app\n» Feedback: https://promptfoo.dev/feedback\n\nTotal Tokens: 108\n  Provider: 54 (33 prompt, 21 completion, 2 cached)\n  Grading: 54 (39 prompt, 15 completion, 2 cached)\n\nResults:\n  ✓ 3 passed (100%)\n  0 failed (0%)\n  0 errors (0%)\nDuration: 11s (concurrency: 4)\n\nWriting output to <temporary-consumer>/results.json\n"
+  "stdout": "Cache is disabled.\n[OtelSdk] OpenTelemetry SDK initialized successfully\nStarting evaluation eval-rD9-2026-10-24T14:20:05\n[Evaluation] Starting 3 test cases...\nRunning 3 test cases (up to 4 at a time)...\n[Evaluation] ✓ Complete! 3/3 tests in 9s\n[OtelSdk] OpenTelemetry SDK shut down successfully\n\n┌────────────────────────┬────────────────────────┬────────────────────────┬────────────────────────┬────────────────────────┐\n│ task                   │ sessionId              │ [readonly] {{task}}    │ [writable] {{task}}    │ [claude] {{task}}      │\n├────────────────────────┼────────────────────────┼────────────────────────┼────────────────────────┴────────────────────────┤\n│ readonly-row           │ fixture-thread         │ [PASS]                 │                                                 │\n│                        │                        │ {\"task\":\"readonly-row… │                                                 │\n├────────────────────────┼────────────────────────┼────────────────────────┼────────────────────────┬────────────────────────┤\n│ writable-row           │                        │                        │ [PASS]                 │                        │\n│                        │                        │                        │ {\"task\":\"writable-row… │                        │\n├────────────────────────┼────────────────────────┼────────────────────────┼────────────────────────┼────────────────────────┤\n│ claude-row             │ fixture-claude         │                        │                        │ [PASS]                 │\n│                        │                        │                        │                        │ {\"task\":\"claude-row\",… │\n└────────────────────────┴────────────────────────┴────────────────────────┴────────────────────────┴────────────────────────┘\n✓ Eval complete (ID: eval-rD9-2026-10-24T14:20:05)\n\n» View results: promptfoo view\n» Share with your team: https://promptfoo.app\n» Feedback: https://promptfoo.dev/feedback\n\nTotal Tokens: 108\n  Provider: 54 (33 prompt, 21 completion, 2 cached)\n  Grading: 54 (39 prompt, 15 completion, 2 cached)\n\nResults:\n  ✓ 3 passed (100%)\n  0 failed (0%)\n  0 errors (0%)\nDuration: 10s (concurrency: 4)\n\nWriting output to <temporary-consumer>/results.json\n"
 }

@@ -1178,3 +1178,25 @@ test("lifecycle failure validates the same child identity without losing its obs
   });
   allFailClosed(result);
 });
+
+test.each([
+  { mcpServerName: 17, mcpToolName: "read" },
+  { mcpConfigServerName: 17, mcpServerName: "github", mcpToolName: "read" },
+  { mcpServerName: "github", mcpToolName: 17 },
+])("malformed MCP identity cannot certify server absence %#", async (mcp) => {
+  const event = start("malformed-mcp", "display-read");
+  const result = await response({
+    events: [{ ...event, data: { ...event.data, ...mcp } }, end("malformed-mcp")],
+  });
+  expect(result.error).toBeUndefined();
+  expect(inventory(result)).toMatchObject({
+    status: "incomplete",
+    incompleteReasons: expect.arrayContaining(["malformed-tool-event"]),
+  });
+  expect(grade(result, "tool-not-called", { mcpServer: "github" })).toMatchObject({
+    pass: false,
+    score: 0,
+    metadata: { graderError: true },
+  });
+  allFailClosed(result);
+});

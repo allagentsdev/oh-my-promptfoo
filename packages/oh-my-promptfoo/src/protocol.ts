@@ -1,5 +1,7 @@
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
@@ -28,6 +30,10 @@ export interface CallFrame {
   prompt: string;
   context: JsonObject;
   delegateEnvKeys?: string[];
+  /** Host-owned workspace and protected source roots; never authored configuration. */
+  mcpRoots?: string[];
+  /** Host-owned private control directory, removed even after a force-killed runner. */
+  mcpConfigDir?: string;
   readOnly?: { sourceRoots: string[]; codexHome?: string };
   /** Host execution deadline shared with bounded optional runtime telemetry. */
   deadlineMs?: number;
@@ -203,6 +209,23 @@ export function resolvePeer(basePath: string, name: string): string {
   }
 }
 export async function runDelegate(
+  frame: CallFrame,
+  env: Record<string, string>,
+  timeoutMs: number,
+  signal?: AbortSignal,
+): Promise<JsonObject> {
+  const directory =
+    frame.config.mcpServers && Object.keys(frame.config.mcpServers).length
+      ? await mkdtemp(join(tmpdir(), "allagents-mcp-config-"))
+      : undefined;
+  try {
+    return await runDelegateProcess({ ...frame, mcpConfigDir: directory }, env, timeoutMs, signal);
+  } finally {
+    if (directory) await rm(directory, { recursive: true, force: true });
+  }
+}
+
+async function runDelegateProcess(
   frame: CallFrame,
   env: Record<string, string>,
   timeoutMs: number,

@@ -484,10 +484,11 @@ try {
     "mixed-skill-inventory",
     {
       tracing: { enabled: false },
-      prompts: ['inventory:{"verifiedSkill":".agents/skills/demo/SKILL.md"}'],
+      prompts: ["{{task}}"],
       providers: skillProviders.filter((provider) => provider.label === "copilot-skills"),
       tests: [
         {
+          vars: { task: 'inventory:{"verifiedSkill":".agents/skills/demo/SKILL.md"}' },
           assert: [
             { type: "skill-used", value: "demo" },
             ...["tool-called", "tool-not-called", "skill-not-loaded"].map((name) =>

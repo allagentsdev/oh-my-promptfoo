@@ -1,4 +1,5 @@
 import type { JsonObject } from "./config.js";
+import { nativeMcpAttributes, type ResolvedMcpServer } from "./mcp.js";
 import { MAX_TOOL_CALLS, type ToolInventory, ToolInventoryBuilder } from "./tool-inventory.js";
 
 interface NativeSpan {
@@ -48,11 +49,14 @@ export class NativeToolInventory {
   private readonly builder: ToolInventoryBuilder;
   private readonly pending = new Map<string, NativeSpan>();
   private summaryId = 0;
-  constructor(sensitive: string[]) {
+  constructor(
+    sensitive: string[],
+    private readonly servers: ResolvedMcpServer[],
+  ) {
     this.builder = new ToolInventoryBuilder(sensitive);
     this.builder.incomplete("delegate-does-not-expose-tool-stream");
   }
-  span(span: NativeSpan, ended: boolean): void {
+  span(span: NativeSpan, ended: boolean, mcpAttributes?: JsonObject): void {
     const id = span.spanContext().spanId;
     if (!ended) {
       if (!isToolSpan(span.attributes)) return;
@@ -61,9 +65,13 @@ export class NativeToolInventory {
       return;
     }
     this.pending.delete(id);
-    this.record(span, true);
+    this.record(span, true, mcpAttributes);
   }
-  private record(span: NativeSpan, ended: boolean): void {
+  private record(
+    span: NativeSpan,
+    ended: boolean,
+    mcpAttributes = nativeMcpAttributes(span.attributes, this.servers),
+  ): void {
     const attrs = span.attributes;
     const toolName = attrs["gen_ai.tool.name"] ?? attrs["tool.name"];
     if (!isToolSpan(attrs)) return;
@@ -87,8 +95,12 @@ export class NativeToolInventory {
         toolName ?? span.name,
         decoded(args),
         time(span.startTime),
-        attrs["gen_ai.tool.mcp.server"] ?? attrs["codex.mcp.server"],
-        attrs["gen_ai.tool.mcp.tool"] ?? attrs["codex.mcp.tool"],
+        mcpAttributes["gen_ai.tool.mcp.server"] ??
+          attrs["gen_ai.tool.mcp.server"] ??
+          attrs["codex.mcp.server"],
+        mcpAttributes["gen_ai.tool.mcp.tool"] ??
+          attrs["gen_ai.tool.mcp.tool"] ??
+          attrs["codex.mcp.tool"],
       );
       if (
         call &&
@@ -129,7 +141,18 @@ export class NativeToolInventory {
           const entry = call as JsonObject;
           const id = this.identity(entry.id, "claude");
           if (this.builder.has(id)) continue;
-          this.builder.start(id, entry.name, entry.input, null);
+          const mcpAttributes = nativeMcpAttributes(
+            { "gen_ai.tool.name": entry.name },
+            this.servers,
+          );
+          this.builder.start(
+            id,
+            entry.name,
+            entry.input,
+            null,
+            mcpAttributes["gen_ai.tool.mcp.server"],
+            mcpAttributes["gen_ai.tool.mcp.tool"],
+          );
           // A retained result proves observation, but peer summaries do not carry event timestamps.
           if (entry.output !== undefined && entry.output !== null)
             this.builder.end(

@@ -121,6 +121,7 @@ try {
     "dist/providers.d.cts",
     "dist/delegate-runner.js",
     "dist/workspace-reader.js",
+    "dist/mcp-launcher.js",
     "dist/copilot-endpoint-worker.js",
     "dist/cli.js",
     "LICENSE",
@@ -465,6 +466,7 @@ for(const provider of [judge,{text:judge},fallback])await assert.rejects(grade(p
     run("node", [join(cwd, "judge-install-smoke.mjs")], elsewhere);
     run("node", ["node_modules/oh-my-promptfoo/dist/cli.js", "--help"], cwd);
     await compileDeclarations(cwd);
+    run("node", [join(repo, "scripts/smoke-mcp.mjs"), cwd], cwd);
     console.log(
       `${manager.name}: ${registryVersion ? "registry" : "packed"} ${expectedVersion} provider and assertion exports, declarations, CLI, and actual Copilot SDK ${copilotVersion} passed`,
     );

@@ -138,6 +138,12 @@ export class Agent extends Calls {
                 delegate: this.config.delegate.id,
                 basePath: this.basePath,
                 workingDir,
+                mcpRoots: [
+                  handle.path,
+                  ...handle.adapters
+                    .filter((view) => view.adapter === "read-only")
+                    .map((view) => view.path),
+                ],
                 config: merged,
                 prompt,
                 context: ctx,
