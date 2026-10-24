@@ -11,8 +11,14 @@ import { AsyncLocalStorageContextManager } from "@opentelemetry/context-async-ho
 import { W3CTraceContextPropagator } from "@opentelemetry/core";
 import { NodeTracerProvider, type ReadableSpan } from "@opentelemetry/sdk-trace-node";
 import { afterEach, expect, test, vi } from "vitest";
-import { agentAssert } from "../packages/oh-my-promptfoo/src/assertions";
+import {
+  agentAssert,
+  "skill-not-loaded" as skillNotLoaded,
+  "tool-called" as toolCalled,
+  "tool-not-called" as toolNotCalled,
+} from "../packages/oh-my-promptfoo/src/assertions";
 import { Agent, CopilotSdk } from "../packages/oh-my-promptfoo/src/providers";
+import { toolInventory as parseToolInventory } from "../packages/oh-my-promptfoo/src/tool-inventory";
 import { removeTree } from "../packages/workspace-core/src/fs";
 
 const roots: string[] = [];
@@ -511,6 +517,40 @@ for (const id of candidates) {
       expect(JSON.parse(String(span?.attributes["gen_ai.tool.call.arguments"]))).toEqual({
         query: "fixtures",
       });
+      const metadata = response.metadata;
+      if (!metadata || typeof metadata !== "object" || !("toolInventory" in metadata))
+        throw new Error("Provider response omitted the adapter-owned inventory");
+      const inventory = parseToolInventory(metadata.toolInventory);
+      expect(inventory.status).toBe(id === "copilot-sdk" ? "complete" : "incomplete");
+      expect(inventory.calls.find((call) => call.id === "mcp-1")).toMatchObject({
+        name: id === "copilot-sdk" ? "fixture-search_code" : "mcp__fixture__search_code",
+        mcpServer: "fixture",
+        mcpTool: "search_code",
+        arguments: { query: "fixtures" },
+        success: true,
+      });
+      const assertionContext = { providerResponse: response, config: { mcpServer: "fixture" } };
+      if (id === "copilot-sdk") {
+        expect(toolCalled(response.output, assertionContext)).toMatchObject({
+          pass: true,
+          score: 1,
+        });
+        expect(toolNotCalled(response.output, assertionContext)).toMatchObject({
+          pass: false,
+          score: 0,
+        });
+        expect(
+          skillNotLoaded(response.output, {
+            providerResponse: response,
+            config: { name: "forbidden" },
+          }),
+        ).toMatchObject({ pass: true, score: 1 });
+      } else {
+        for (const grade of [toolCalled, toolNotCalled, skillNotLoaded])
+          expect(
+            grade(response.output, { providerResponse: response, config: { name: "forbidden" } }),
+          ).toMatchObject({ pass: false, score: 0, metadata: { graderError: true } });
+      }
     } finally {
       await provider.cleanup();
       await telemetry.shutdown();

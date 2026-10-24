@@ -13,6 +13,10 @@ const require = createRequire(join(consumer, "package.json"));
 const cjsEntry = require.resolve("oh-my-promptfoo/providers");
 const esm = await import(pathToFileURL(join(dirname(cjsEntry), "providers.js")).href);
 const cjs = require("oh-my-promptfoo/providers");
+const assertions = {
+  esm: await import(pathToFileURL(join(dirname(cjsEntry), "assertions.js")).href),
+  cjs: require("oh-my-promptfoo/assertions"),
+};
 const root = await mkdtemp(join(consumer, ".mcp-smoke-"));
 try {
   for (const name of ["@github/copilot-sdk", "@anthropic-ai/claude-agent-sdk"]) {
@@ -137,6 +141,60 @@ try {
         const output = JSON.parse(response.output);
         assert.equal(output.result, "canned code match");
         assert.deepEqual(output.env, { MOCK_MODE: "canned" });
+        const inventory = response.metadata.toolInventory;
+        assert.equal(inventory.status, id === "copilot-sdk" ? "complete" : "incomplete");
+        const call = inventory.calls.find((entry) => entry.id === "mcp-1");
+        assert.ok(call, `${format} ${id}: MCP invocation missing from inventory`);
+        assert.deepEqual(
+          {
+            name: call.name,
+            server: call.mcpServer,
+            tool: call.mcpTool,
+            arguments: call.arguments,
+            success: call.success,
+          },
+          {
+            name: id === "copilot-sdk" ? "fixture-search_code" : "mcp__fixture__search_code",
+            server: "fixture",
+            tool: "search_code",
+            arguments: { query: "fixtures" },
+            success: true,
+          },
+        );
+        const grade = assertions[format];
+        if (id === "copilot-sdk") {
+          assert.equal(
+            grade["tool-called"](response.output, {
+              providerResponse: response,
+              config: { mcpServer: "fixture" },
+            }).pass,
+            true,
+          );
+          assert.equal(
+            grade["tool-not-called"](response.output, {
+              providerResponse: response,
+              config: { mcpServer: "unconfigured" },
+            }).pass,
+            true,
+          );
+          assert.equal(
+            grade["skill-not-loaded"](response.output, {
+              providerResponse: response,
+              config: { name: "forbidden" },
+            }).pass,
+            true,
+          );
+        } else {
+          for (const name of ["tool-called", "tool-not-called", "skill-not-loaded"]) {
+            const result = grade[name](response.output, {
+              providerResponse: response,
+              config: { name: "forbidden" },
+            });
+            assert.equal(result.pass, false);
+            assert.equal(result.score, 0);
+            assert.equal(result.metadata.graderError, true);
+          }
+        }
         if (id === "anthropic:claude-agent-sdk") {
           assert.deepEqual(output.native, {
             read: "native read executed",
@@ -157,7 +215,7 @@ try {
         const denied = await provider.callApi('mcp:{"tool":"restricted","bypassPermission":true}');
         assert.match(denied.error, /allow-list/);
         console.log(
-          `${format} ${id}: packed contained MCP round trip, literal env and tool denial passed`,
+          `${format} ${id}: packed MCP execution, normalized inventory, strict assertions and tool denial passed`,
         );
       } finally {
         await provider.cleanup();

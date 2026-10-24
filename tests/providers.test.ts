@@ -106,7 +106,7 @@ export async function loadApiProvider(id, options) {
  return {async callApi(prompt,context,callOptions){
   if(prompt==='malformed')writeSync(1,'not-json\\n');
   if(prompt==='unknown-frame')writeSync(1,JSON.stringify({version:1,type:'unsupported'})+'\\n');
-  if(prompt==='duplicate')writeSync(1,JSON.stringify({version:1,type:'result',response:{output:'premature'}})+'\\n');
+  if(prompt==='duplicate')writeSync(1,JSON.stringify({version:1,type:'result',response:{output:'premature'},toolInventory:{schemaVersion:1,status:'incomplete',incompleteReasons:['fixture-injected-terminal'],calls:[],skillInventory:'read-tool-only',loadedSkills:[]}})+'\\n');
   if(prompt==='write')await writeFile(options.options.config.working_dir+'/generated.txt','generated durable content');
   if(prompt==='edit-local-skill')await writeFile(options.options.config.working_dir+'/.agents/skills/example/scripts/task.sh','echo agent\\n');
   if(prompt==='read-local-skill')return {output:await readFile(options.options.config.working_dir+'/.agents/skills/example/scripts/task.sh','utf8')};
@@ -140,6 +140,39 @@ function frame(
     context: { bustCache: true },
   };
 }
+describe("tool inventory public boundary", () => {
+  test("Agent preserves an adapter-certified complete Copilot inventory", async () => {
+    const fixture = await readFile(new URL("./fixtures/copilot-sdk.mjs", import.meta.url), "utf8");
+    const path = await project("@github/copilot-sdk", fixture);
+    const provider = new Agent({
+      config: {
+        basePath: path,
+        delegate: { id: "copilot-sdk" },
+        workspace: { sources: [] },
+      },
+      env: {
+        ALLAGENTS_CACHE_ROOT: join(path, "cache"),
+        ALLAGENTS_WORKSPACE_ROOT: join(path, "runtime"),
+      },
+    });
+    try {
+      const response = await provider.callApi("inventory tracer");
+      expect(response.error).toBeUndefined();
+      expect(response.metadata).toMatchObject({
+        toolInventory: {
+          schemaVersion: 1,
+          status: "complete",
+          incompleteReasons: [],
+          skillInventory: "sdk",
+          calls: [{ id: "write1", name: "write_file", argumentsTruncated: false, success: true }],
+        },
+      });
+    } finally {
+      await provider.cleanup();
+    }
+  });
+});
+
 describe("closed configuration", () => {
   test("providers export from ./providers alone, without a Provider suffix", () => {
     expect(Object.keys(providerEntry).sort()).toEqual([
@@ -1788,6 +1821,7 @@ describe("direct Copilot provider", () => {
           terminate?.mockRestore();
         }
         expect(response.error).toContain("aborted");
+        expect(response.metadata).toMatchObject({ toolInventory: { status: "incomplete" } });
         expect(response.cost).toBeUndefined();
         expect((response.metadata as any).copilot.accounting).toMatchObject({
           status: "partial",
@@ -2295,6 +2329,18 @@ export async function loadApiProvider(){return {
         const response = await runDelegate(f, {}, 5000);
         expect(response.output).toBe("traced");
         const metadata = object(response.metadata, "response metadata");
+        expect(metadata.toolInventory).toMatchObject({
+          status: "incomplete",
+          incompleteReasons: expect.arrayContaining(["delegate-does-not-expose-tool-stream"]),
+          calls: [
+            {
+              name: "read_file",
+              startedAt: expect.any(String),
+              endedAt: expect.any(String),
+              success: null,
+            },
+          ],
+        });
         const native = object(metadata.native, "native trace metadata");
         const spans = object(native.spans, "native span identities");
         expect(native.carrier).toEqual({
@@ -2359,5 +2405,12 @@ test("native peer resolution selects the evaluation project import condition", a
   expect(resolvePeer(path, "promptfoo")).toBe(join(root, "index.js"));
   const response = await runDelegate(frame(path, "import branch", "openai:codex-sdk"), {}, 5000);
   expect(response.error).toBeUndefined();
+  expect(response.metadata).toMatchObject({
+    toolInventory: {
+      status: "incomplete",
+      incompleteReasons: expect.arrayContaining(["delegate-does-not-expose-tool-stream"]),
+      calls: [],
+    },
+  });
   expect(response.output).toBe("import branch");
 });

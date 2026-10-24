@@ -75,9 +75,18 @@ export class CopilotClient {
     let callback = () => {};
     let connection;
     return {
+      rpc: {
+        skills: {
+          async getInvoked() {
+            return { skills: [] };
+          },
+        },
+      },
       on(fn) {
         callback = fn;
-        return () => {};
+        return () => {
+          callback = () => {};
+        };
       },
       async sendAndWait({ prompt }) {
         const request = scenario(prompt);
@@ -88,6 +97,7 @@ export class CopilotClient {
           const permissions = await Promise.all(
             request.permissions.map((item) => config.onPermissionRequest({ kind: "mcp", ...item })),
           );
+          callback({ type: "session.idle", data: {} });
           return { data: { content: JSON.stringify(permissions.map((item) => item.kind)) } };
         }
         if (!server) throw Error("Configured MCP server is unavailable");
@@ -113,12 +123,14 @@ export class CopilotClient {
         const content = await execute(connection, request, server);
         callback({ type: "tool.execution_complete", data: { toolCallId: "mcp-1", success: true } });
         callback({ type: "assistant.message", data: { content } });
+        callback({ type: "session.idle", data: {} });
         return { data: { content } };
       },
       async abort() {
         await connection?.close();
       },
       async disconnect() {
+        callback = () => {};
         await connection?.close();
       },
     };

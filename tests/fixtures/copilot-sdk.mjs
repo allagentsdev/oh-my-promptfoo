@@ -13,10 +13,28 @@ export class CopilotClient {
     if (config.provider && typeof config.provider !== "object")
       throw Error("Endpoint must be object");
     let callback = () => {};
+    const client = this;
     const invokedSkills = [];
     const rpc = {
       skills: {
         async getInvoked() {
+          for (const event of scenario?.skillRpcEvents ?? []) callback(event);
+          if (scenario?.skillState === "throw") throw Error("fixture skill RPC failed");
+          if (scenario?.skillState === "hang") await new Promise(() => {});
+          if (scenario?.skillState === "malformed") return { skills: "not-an-array" };
+          if (scenario?.verifiedSkill) {
+            const path = resolve(config.workingDirectory, scenario.verifiedSkill);
+            const content = (await readFile(path, "utf8"))
+              .replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, "")
+              .trim();
+            return {
+              skills: [
+                { name: scenario.verifiedSkill.split("/").at(-2), path, content, invokedAtTurn: 1 },
+                { name: {}, path: "/unrelated/SKILL.md", content: "malformed unrelated name" },
+              ],
+            };
+          }
+          if (scenario?.skills !== undefined) return { skills: scenario.skills };
           return { skills: invokedSkills };
         },
       },
@@ -33,9 +51,62 @@ export class CopilotClient {
         callback = fn;
         return () => {
           unsubscribed = true;
+          callback = () => {};
         };
       },
       async sendAndWait({ prompt }) {
+        if (prompt.startsWith("inventory:")) {
+          scenario = JSON.parse(prompt.slice("inventory:".length));
+          client.inventoryStopErrors = scenario.stopErrors;
+          if (config.includeSubAgentStreamingEvents !== true)
+            throw Error("Subagent tool streaming must be enabled");
+          if (scenario.skillState === "unsupported") delete rpc.skills;
+          if (scenario.eventBytes)
+            callback({ type: "session.info", data: { content: "x".repeat(scenario.eventBytes) } });
+          if (scenario.unsafeArguments) {
+            callback({
+              type: "tool.execution_start",
+              data: { toolCallId: "unsafe", toolName: "read", arguments: () => "unsafe" },
+            });
+            callback({
+              type: "tool.execution_complete",
+              data: { toolCallId: "unsafe", success: true },
+            });
+          }
+          for (let i = 0; i < (scenario.repeat ?? 0); i++) {
+            if (scenario.repeatKind === "events") callback({ type: "session.info", data: {} });
+            else {
+              callback({
+                type: "tool.execution_start",
+                data: {
+                  toolCallId: `call-${i}`,
+                  toolName: "read",
+                  arguments: { value: "x".repeat(scenario.argumentBytes ?? 0) },
+                },
+              });
+              callback({
+                type: "tool.execution_complete",
+                data: { toolCallId: `call-${i}`, success: true },
+              });
+            }
+          }
+          for (const event of scenario.events ?? []) {
+            // A subagent event is emitted only when the real session option enables it.
+            if (!event.agentId || config.includeSubAgentStreamingEvents) callback(event);
+          }
+          if (scenario.executionError) throw Error("fixture inventory execution failed");
+          if (scenario.sessionError)
+            callback({
+              type: "session.error",
+              data: { message: "fixture inventory session failed" },
+            });
+          const content = "inventory fixture output";
+          callback({ type: "assistant.message", data: { content } });
+          if (!scenario.missingIdle)
+            callback({ type: "session.idle", data: scenario.idleData ?? {} });
+          for (const event of scenario.afterIdleEvents ?? []) callback(event);
+          return { data: { content } };
+        }
         if (prompt.startsWith("accounting:")) {
           scenario = JSON.parse(prompt.slice("accounting:".length));
           if (scenario.metrics !== "unsupported") {
@@ -89,6 +160,7 @@ export class CopilotClient {
           settled = true;
           if (scenario.executionError)
             throw Error(scenario.executionError === "empty" ? "" : "fixture execution failed");
+          callback({ type: "session.idle", data: {} });
           return { data: { content } };
         }
         if (prompt.includes("AGENT_ASSERT_E2E:")) {
@@ -126,6 +198,7 @@ export class CopilotClient {
             data: { inputTokens: 13, outputTokens: 5, cost: 0.001 },
           });
           callback({ type: "assistant.message", data: { content } });
+          callback({ type: "session.idle", data: {} });
           return { data: { content } };
         }
         if (prompt === "hang") {
@@ -184,6 +257,7 @@ export class CopilotClient {
               });
             }
           }
+          callback({ type: "session.idle", data: {} });
           return { data: { content: "reviewed" } };
         }
         if (prompt.startsWith("read:")) {
@@ -216,6 +290,7 @@ export class CopilotClient {
           }
           const content = request.mode === "text-only" ? "I read SKILL.md" : "read attempted";
           callback({ type: "assistant.message", data: { content } });
+          callback({ type: "session.idle", data: {} });
           return { data: { content } };
         }
         callback({
@@ -233,6 +308,7 @@ export class CopilotClient {
         });
         const content = JSON.stringify({ task: prompt, ok: true });
         callback({ type: "assistant.message", data: { content } });
+        callback({ type: "session.idle", data: {} });
         return { data: { content } };
       },
       async abort() {
@@ -240,12 +316,18 @@ export class CopilotClient {
         rejectSend?.(Error("fixture execution aborted"));
       },
       async disconnect() {
+        if (unsubscribed && scenario?.disconnectEvents?.length)
+          throw Error("Observation detached before disconnect");
+        for (const event of scenario?.disconnectEvents ?? []) callback(event);
         disconnected = true;
+        // SDK _markDisconnected clears the registered event handlers.
+        callback = () => {};
         if (scenario?.cleanupError) throw Error("fixture cleanup failed");
       },
     };
   }
   async stop() {
+    if (this.inventoryStopErrors) return [Error("fixture shutdown failed")];
     if (this.sessionCreationFailed)
       await writeFile(join(this.options.workingDirectory, "accounting-stopped"), "stopped");
     return [];
