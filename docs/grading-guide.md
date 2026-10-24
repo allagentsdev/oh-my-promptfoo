@@ -546,6 +546,12 @@ true` and secrets redacted from the reason; invalid config and queue timeouts
 are still row errors. The judge is always `config.grader`: `--grader` and
 `options.provider` choose `llmAssert`'s judge, not this one.
 
+Codex graders read through a bundled read-only file server instead of a shell.
+It serves files and directory listings inside the workspace and declared
+protected sources only. It refuses files with more than one hard link, because
+another link may sit outside those roots, and any path whose resolved location
+changes while it is being opened.
+
 Codex graders require API-key auth via `grader.config.apiKey` or explicit
 `grader.env.OPENAI_API_KEY`. They do not load or copy ChatGPT `auth.json`, avoiding
 single-use refresh-token corruption. See [ADR 0008](adr/0008-agent-assert-workspace-grading.md)

@@ -1,5 +1,5 @@
-import { constants } from "node:fs";
-import { lstat, open, opendir, realpath, stat } from "node:fs/promises";
+import { type BigIntStats, constants } from "node:fs";
+import { type FileHandle, lstat, open, opendir, realpath, stat } from "node:fs/promises";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import { createInterface } from "node:readline";
 
@@ -73,7 +73,10 @@ function within(root: string, path: string): boolean {
   const rel = relative(root, path);
   return rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel);
 }
-async function contained(path: unknown): Promise<string> {
+/** Resolves a request; `allowed` is the canonical root its real path must stay within. */
+async function contained(
+  path: unknown,
+): Promise<{ target: string; physical: string; allowed: string }> {
   if (typeof path !== "string" || !path || path.includes("\0"))
     throw new Error("path must name a workspace or declared protected source entry");
   const target = resolve(root, path);
@@ -86,15 +89,28 @@ async function contained(path: unknown): Promise<string> {
   )
     throw new Error("path must stay inside the workspace or declared protected sources");
   const physical = await realpath(target);
-  if (within(physicalRoot, physical)) return physical;
+  if (within(physicalRoot, physical)) return { target, physical, allowed: physicalRoot };
   for (const { source, target: allowed, physical: allowedPhysical } of declared)
     if (
       (within(resolve(root, source), target) ||
         (isAbsolute(path) && (within(allowed, target) || within(allowedPhysical, target)))) &&
       within(allowedPhysical, physical)
     )
-      return physical;
+      return { target, physical, allowed: allowedPhysical };
   throw new Error("path follows a symlink outside the workspace or declared protected sources");
+}
+// O_NOFOLLOW guards only the last component, so a parent directory swapped for a
+// symlink after contained() can redirect the open. Once a handle is open, resolve
+// the path again and require that it still lands inside the same root, on the
+// handle's own inode. An outside inode can be reachable inside the root only
+// through a hard link (refused by the nlink check for files) or a bind mount,
+// which unprivileged users cannot create. BigInt stats keep dev/ino exact,
+// including NTFS file IDs on Windows.
+async function unchanged(target: string, allowed: string, opened: BigIntStats): Promise<void> {
+  const physical = await realpath(target);
+  const current = await stat(physical, { bigint: true });
+  if (!within(allowed, physical) || current.dev !== opened.dev || current.ino !== opened.ino)
+    throw new Error("path changed while it was being opened");
 }
 function integer(value: unknown, fallback: number, maximum: number, minimum = 0): number {
   if (value === undefined) return fallback;
@@ -103,7 +119,7 @@ function integer(value: unknown, fallback: number, maximum: number, minimum = 0)
   return value as number;
 }
 async function callTool(name: unknown, args: Record<string, unknown>) {
-  const path = await contained(args.path);
+  const { target, physical: path, allowed } = await contained(args.path);
   const offset = integer(args.offset, 0, Number.MAX_SAFE_INTEGER);
   if (name === "read_file") {
     if (Object.keys(args).some((key) => !["path", "offset", "length"].includes(key)))
@@ -114,16 +130,20 @@ async function callTool(name: unknown, args: Record<string, unknown>) {
       constants.O_RDONLY | constants.O_NONBLOCK | constants.O_NOFOLLOW,
     );
     try {
-      const info = await handle.stat();
+      const info = await handle.stat({ bigint: true });
       if (!info.isFile()) throw new Error("path must name a regular file");
-      const bytes = Buffer.alloc(Math.min(length, Math.max(0, info.size - offset)));
+      // Another link to this inode may sit outside the root, so its bytes are not the workspace's.
+      if (info.nlink > 1n) throw new Error("path must not name a file with multiple hard links");
+      await unchanged(target, allowed, info);
+      const size = Number(info.size);
+      const bytes = Buffer.alloc(Math.min(length, Math.max(0, size - offset)));
       const { bytesRead } = await handle.read(bytes, 0, bytes.length, offset);
       return {
         path: args.path,
         offset,
         nextOffset: offset + bytesRead,
-        size: info.size,
-        truncated: offset + bytesRead < info.size,
+        size,
+        truncated: offset + bytesRead < size,
         text: bytes.subarray(0, bytesRead).toString("utf8"),
       };
     } finally {
@@ -137,22 +157,46 @@ async function callTool(name: unknown, args: Record<string, unknown>) {
     const entries: { name: string; type: string }[] = [];
     let index = 0;
     let truncated = false;
-    for await (const entry of await opendir(path)) {
-      if (index++ < offset) continue;
-      if (entries.length === limit) {
-        truncated = true;
-        break;
+    // Node cannot list an fd, so POSIX lists the verified handle through its
+    // descriptor path. Windows has no such path; there the listing is bracketed
+    // by identity checks, which catch a swap that is still in place afterwards.
+    const fdDirectory =
+      process.platform === "linux"
+        ? "/proc/self/fd"
+        : process.platform === "darwin"
+          ? "/dev/fd"
+          : "";
+    let handle: FileHandle | undefined;
+    let before: BigIntStats;
+    try {
+      if (fdDirectory) {
+        handle = await open(
+          path,
+          constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NONBLOCK | constants.O_NOFOLLOW,
+        );
+        before = await handle.stat({ bigint: true });
+        await unchanged(target, allowed, before);
+      } else before = await stat(path, { bigint: true });
+      for await (const entry of await opendir(handle ? `${fdDirectory}/${handle.fd}` : path)) {
+        if (index++ < offset) continue;
+        if (entries.length === limit) {
+          truncated = true;
+          break;
+        }
+        entries.push({
+          name: entry.name,
+          type: entry.isDirectory()
+            ? "directory"
+            : entry.isFile()
+              ? "file"
+              : entry.isSymbolicLink()
+                ? "symlink"
+                : "other",
+        });
       }
-      entries.push({
-        name: entry.name,
-        type: entry.isDirectory()
-          ? "directory"
-          : entry.isFile()
-            ? "file"
-            : entry.isSymbolicLink()
-              ? "symlink"
-              : "other",
-      });
+      if (!handle) await unchanged(target, allowed, before);
+    } finally {
+      await handle?.close();
     }
     return { path: args.path, offset, nextOffset: offset + entries.length, truncated, entries };
   }
