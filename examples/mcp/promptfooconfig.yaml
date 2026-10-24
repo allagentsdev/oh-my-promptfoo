@@ -1,0 +1,55 @@
+prompts: ["{{task}}"]
+providers:
+  - id: package:oh-my-promptfoo/providers:Agent
+    label: copilot-mcp
+    config:
+      delegate:
+        id: copilot-sdk
+        env:
+          COPILOT_GITHUB_TOKEN: "{{env.GH_TOKEN}}"
+        config:
+          mcpServers:
+            github:
+              path: .eval-mocks/github-mcp.mjs
+              env: { MOCK_MODE: canned }
+              tools: [search_code]
+              timeoutMs: 30000
+      workspace:
+        sources:
+          - type: local
+            path: ./mocks
+            destination: .eval-mocks
+            permissions: read-only
+  - id: package:oh-my-promptfoo/providers:Agent
+    label: claude-mcp
+    config:
+      delegate:
+        id: anthropic:claude-agent-sdk
+        env:
+          ANTHROPIC_API_KEY: "{{env.ANTHROPIC_API_KEY}}"
+        config:
+          max_turns: 5
+          mcpServers:
+            github:
+              path: .eval-mocks/github-mcp.mjs
+              env: { MOCK_MODE: canned }
+              tools: [search_code]
+              timeoutMs: 30000
+      workspace:
+        sources:
+          - type: local
+            path: ./mocks
+            destination: .eval-mocks
+            permissions: read-only
+# Run from this directory: npx promptfoo eval
+# Model calls need the normal delegate credentials; the MCP mock itself is offline.
+tests:
+  - vars:
+      task: >-
+        Use the github MCP search_code tool to search for workspace preparation.
+        Report the matching file path and symbol from its canned response.
+    assert:
+      - type: contains
+        value: prepareWorkspace
+      - type: contains
+        value: src/workspace.ts
