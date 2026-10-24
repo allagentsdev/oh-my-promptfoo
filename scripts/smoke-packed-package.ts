@@ -3,6 +3,7 @@ import { realpathSync } from "node:fs";
 import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { npmCommand } from "./npm-command";
 
 const arguments_ = process.argv.slice(2);
 const registryVersion = arguments_[0] === "--registry" ? arguments_[1] : undefined;
@@ -15,7 +16,8 @@ if (
   throw new Error("Usage: smoke-packed-package.ts [--registry VERSION]");
 const repo = resolve(".");
 function run(command: string, args: string[], cwd: string) {
-  const result = spawnSync(command, args, { cwd, encoding: "utf8" });
+  const [file, argv] = npmCommand(command, args);
+  const result = spawnSync(file, argv, { cwd, encoding: "utf8" });
   if (result.status !== 0)
     throw new Error(`${command} ${args.join(" ")} failed:\n${result.stdout}\n${result.stderr}`);
   return result.stdout;
@@ -88,7 +90,9 @@ import Providers = require('oh-my-promptfoo/providers');`,
   // Use the compiler installed in this consumer, with no workspace aliases or symlinks.
   run("node", ["node_modules/typescript/bin/tsc", "--project", "tsconfig.json"], cwd);
 }
-const temp = await mkdtemp(join(realpathSync(tmpdir()), "allagents-pack-"));
+// The workspace reader compares declared link targets with realpath; Windows tmpdir() can be
+// an 8.3 short path (RUNNER~1) that only the native realpath expands.
+const temp = await mkdtemp(join(realpathSync.native(tmpdir()), "allagents-pack-"));
 try {
   const packed = JSON.parse(
     run(

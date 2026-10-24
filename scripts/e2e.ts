@@ -5,9 +5,11 @@ import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promi
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join, relative, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { removeTree } from "../packages/workspace-core/src/fs";
 import { WorkspaceManager } from "../packages/workspace-core/src/index";
 import { startPiModelServer, toolResults } from "../tests/fixtures/pi-model-server";
+import { npmCommand } from "./npm-command";
 
 const arguments_ = process.argv.slice(2);
 const registryVersion = arguments_[0] === "--registry" ? arguments_[1] : undefined;
@@ -35,7 +37,8 @@ const testEnvironment = {
   ALLAGENTS_LOCAL_SOURCE_ROOT: cwd,
 };
 function run(command: string, args: string[], dir = cwd, accepted = [0]) {
-  const r = spawnSync(command, args, { cwd: dir, encoding: "utf8", env: testEnvironment });
+  const [file, argv] = npmCommand(command, args);
+  const r = spawnSync(file, argv, { cwd: dir, encoding: "utf8", env: testEnvironment });
   if (r.status === null || !accepted.includes(r.status))
     throw Error(`${command} failed (${r.status})\n${r.stdout}\n${r.stderr}`);
   return r.stdout;
@@ -319,6 +322,20 @@ try {
     join(skillSource, "demo/SKILL.md"),
     "---\nname: demo\ndescription: Demo verification skill\n---\nDemo skill.\n",
   );
+  // Direct local sources need Linux descriptor-anchored traversal. Elsewhere the same skills
+  // reach the workspace through a file:// Git source, and local sources must fail closed.
+  const localSources = process.platform === "linux";
+  let skillCommit = "";
+  if (!localSources) {
+    run("git", ["init", "--initial-branch=main", skillSource]);
+    run("git", ["add", "."], skillSource);
+    run(
+      "git",
+      ["-c", "user.name=E2E", "-c", "user.email=e2e@example.invalid", "commit", "-m", "skills"],
+      skillSource,
+    );
+    skillCommit = run("git", ["rev-parse", "HEAD"], skillSource).trim();
+  }
   const skillProviders = [
     ["openai:codex-sdk", "codex-skills"],
     ["anthropic:claude-agent-sdk", "claude-skills"],
@@ -331,11 +348,16 @@ try {
         ...provider.config,
         fileChanges: false,
         workspace: {
-          sources: [".agents", ".claude", ".github"].map((directory) => ({
-            type: "local",
-            path: skillSource,
-            destination: `${directory}/skills`,
-          })),
+          sources: [".agents", ".claude", ".github"].map((directory) =>
+            localSources
+              ? { type: "local", path: skillSource, destination: `${directory}/skills` }
+              : {
+                  type: "git",
+                  repository: pathToFileURL(skillSource).href,
+                  ref: skillCommit,
+                  destination: `${directory}/skills`,
+                },
+          ),
         },
       },
     };
@@ -646,13 +668,20 @@ try {
         resultsPath,
       ],
       workspaceParent,
+      localSources ? [0] : [100],
     );
     const exported = JSON.parse(await readFile(resultsPath, "utf8")).results;
-    if (exported.stats.successes !== 1 || exported.stats.errors !== 0)
+    const error = exported.results[0]?.response?.error;
+    if (
+      localSources
+        ? exported.stats.successes !== 1 || exported.stats.errors !== 0
+        : exported.stats.errors !== 1 ||
+          !error?.includes("Local source acquisition requires Linux descriptor-anchored traversal")
+    )
       throw Error(
-        `Config-relative ${name} local source failed: ${JSON.stringify(exported.results[0]?.response?.error ?? exported.stats)}`,
+        `Config-relative ${name} local source failed: ${JSON.stringify(error ?? exported.stats)}`,
       );
-    relativeRuns[name] = exported.stats.successes;
+    relativeRuns[name] = localSources ? exported.stats.successes : exported.stats.errors;
   }
   const judgeRequests: {
     url: string | undefined;
@@ -1120,7 +1149,7 @@ try {
     )}\n`,
   );
   console.log(
-    `Built Promptfoo E2E passed: ${JSON.stringify(stats)}; config-relative local sources: ${JSON.stringify(relativeRuns)}`,
+    `Built Promptfoo E2E passed: ${JSON.stringify(stats)}; config-relative local sources ${localSources ? "staged" : "refused"}: ${JSON.stringify(relativeRuns)}`,
   );
 } finally {
   const recovery = new WorkspaceManager(

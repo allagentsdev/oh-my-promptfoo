@@ -88,8 +88,20 @@ async function installTelemetryPeer(path: string, name: string): Promise<void> {
   await symlink(packageRoot, join(scope, "api"), process.platform === "win32" ? "junction" : "dir");
 }
 // Echoes options as a JSON snapshot: Node's process.env (options.options.env) is not a plain object.
-const native = `import {chmod,readdir,readFile,utimes,writeFile} from 'node:fs/promises';
+// Tampering acts as a same-user delegate: POSIX owners may change a protected file's mode,
+// while Windows owners keep WRITE_DAC over the read-only ACL and can grant themselves access.
+const native = `import {execFileSync} from 'node:child_process';
+import {chmod,readdir,readFile,utimes,writeFile} from 'node:fs/promises';
 import {writeSync} from 'node:fs';
+import {join} from 'node:path';
+function grantWindowsOwner(file){
+ const system=join(process.env.SystemRoot??'C:/Windows','System32');
+ const sid=/,"(S-[0-9-]+)"/.exec(execFileSync(join(system,'whoami.exe'),['/user','/fo','csv','/nh'],{encoding:'utf8'}))[1];
+ execFileSync(join(system,'icacls.exe'),[join(file),'/grant','*'+sid+':F','/Q']);
+}
+async function unprotect(file){
+ if(process.platform==='win32')grantWindowsOwner(file);else await chmod(file,0o644);
+}
 export async function loadApiProvider(id, options) {
  return {async callApi(prompt,context,callOptions){
   if(prompt==='malformed')writeSync(1,'not-json\\n');
@@ -99,9 +111,9 @@ export async function loadApiProvider(id, options) {
   if(prompt==='edit-local-skill')await writeFile(options.options.config.working_dir+'/.agents/skills/example/scripts/task.sh','echo agent\\n');
   if(prompt==='read-local-skill')return {output:await readFile(options.options.config.working_dir+'/.agents/skills/example/scripts/task.sh','utf8')};
   if(prompt==='list-local-skills')return {output:(await readdir(options.options.config.working_dir+'/.agents/skills')).sort().join(',')};
-  if(prompt==='tamper-protected'){const file=options.options.config.working_dir+'/repo/input.txt';await chmod(file,0o644);await writeFile(file,'modified protected source');}
-  if(prompt==='tamper-secondary'){const file=options.options.config.working_dir+'/secondary/input.txt';await chmod(file,0o644);await writeFile(file,'modified protected source');}
-  if(prompt==='tamper-protected-metadata'){const file=options.options.config.working_dir+'/repo/.git/HEAD';await utimes(file,new Date(0),new Date(0));}
+  if(prompt==='tamper-protected'){const file=options.options.config.working_dir+'/repo/input.txt';await unprotect(file);await writeFile(file,'modified protected source');}
+  if(prompt==='tamper-secondary'){const file=options.options.config.working_dir+'/secondary/input.txt';await unprotect(file);await writeFile(file,'modified protected source');}
+  if(prompt==='tamper-protected-metadata'){const file=options.options.config.working_dir+'/repo/.git/HEAD';if(process.platform==='win32')grantWindowsOwner(file);await utimes(file,new Date(0),new Date(0));}
   if(prompt==='sleep'){await new Promise(()=>{});}
   if(prompt==='large') return {output:'x'.repeat(17000000)};
   if(prompt==='cache') return {output:'old',cached:true};
@@ -444,8 +456,13 @@ describe("workspace provider publication and lifetime", () => {
         },
       });
       const result = await provider.callApi("no delegate should run");
+      // Mount and capacity verification read Linux /proc/self/mountinfo; macOS and
+      // Windows refuse every external staging root before that check. Either refusal
+      // precedes the helper, which ALLAGENTS_NO_PRIVILEGED_HELPER would report as forbidden.
       expect(result.error).toMatch(
-        /Git staging (root must reside on a uniquely identified tmpfs mount|tmpfs byte\/inode capacity)/,
+        process.platform === "linux"
+          ? /Git staging (root must reside on a uniquely identified tmpfs mount|tmpfs byte\/inode capacity)/
+          : /^Git staging requires an absolute normalized Linux tmpfs directory$/,
       );
     } finally {
       try {
@@ -881,7 +898,9 @@ describe("workspace provider publication and lifetime", () => {
     expect(await readFile(join(protectedPath, "input.txt"), "utf8")).toBe(
       "modified protected source",
     );
-  }, 30_000);
+    // About twenty workspace acquisitions take ~6s on Linux CI; on Windows each spawns
+    // PowerShell locks and icacls, and the test needs over 30s there.
+  }, 90_000);
   async function workspaceProvider(fileChanges = false, readOnly = false, workingDir?: string) {
     const path = await project("promptfoo", native);
     const repository = join(path, "source");
