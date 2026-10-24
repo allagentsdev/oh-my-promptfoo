@@ -44,6 +44,147 @@ Delegate-specific provider configuration still differs. Use explicit labeled
 provider entries to select a delegate, not one templated delegate ID sharing
 incompatible config fields. Skill staging is unchanged.
 
+### Certified tool inventory and absence assertions
+
+All delegates return `metadata.toolInventory` with `schemaVersion: 1`,
+`status: complete | incomplete`, `incompleteReasons: string[]`, `calls`,
+`skillInventory: sdk | read-tool-only | failed`, and `loadedSkills: string[]`.
+Each call records `{ id, name, mcpServer?, mcpTool?, arguments,
+argumentsTruncated, startedAt, endedAt, success }`. Names preserve the runtime
+display name; stable MCP server/tool identity is separate. Failed attempts count
+as invocations. Missing completion/success and unknown native timestamps are
+`null`, never fabricated success or execution times. Copilot timestamps use the
+SDK event timestamp when present, otherwise the adapter's event receipt time.
+An omitted argument field is unavailable evidence: the retained value is `null`
+with `missing-tool-arguments`, and the inventory is incomplete. An explicitly
+reported JSON `null` is distinct and remains valid evidence.
+
+Copilot explicitly enables subagent streaming. It certifies `complete` only after
+`sendAndWait` succeeds, no session/cleanup/abort/stream errors occurred, every
+unique start has one matching completion with a boolean success, no evidence was
+truncated/redacted, and the SDK invoked-skill RPC returned a valid bounded list.
+A clean zero-call stream is complete. Orphan completions and duplicate IDs are
+incomplete, not silently ignored. Fixed bounds are 100,000 received events,
+16 MiB received event JSON, 1,024 retained calls, 8,192 UTF-8 bytes of JSON per
+call's arguments, and 4 MiB for the entire inventory. The retained-call byte
+budget reserves room for up to 1,024 SDK skill names of at most 512 characters,
+with a 768 KiB serialized SDK-name budget.
+Exceeding a bound is explicit and invalidates the certificate. Oversized arguments
+become a bounded `{ preview }` record with `argumentsTruncated: true`; unsafe
+JSON becomes `null` with the same flag. Known credential values and structural
+HTTP(S) URL userinfo (including username-only, mixed-case schemes and all userinfo
+through the final `@` in the authority) are redacted before argument retention.
+Paths and queries outside the authority are preserved. Any redaction of arguments,
+tool/MCP identities or SDK skill names makes the inventory incomplete: a replaced
+value cannot silently become a successful negative match. Raw secrets are never
+retained. All three assertions return a grader error for that evidence loss.
+
+For pinned SDK 1.0.22, a non-autopilot root `session.idle` explicitly means no
+background agents or attached shell commands remain in flight. The adapter must
+observe that clean root idle; a resolved `sendAndWait` promise alone is not a
+certificate. Child-only/autopilot idle cannot substitute for it. This certificate
+covers one fresh single-turn call, with no further prompts or runtime work
+configured after idle. Explicit `abort` and error `session.shutdown` events
+permanently invalidate the inventory, even if a later idle lacks an aborted flag.
+
+Each observed child is attributed to its own lifecycle using the SDK's lifecycle
+`agentId` (the child instance) and `data.toolCallId` (the spawning tool invocation).
+Starts and completions/failures establish and validate that association in both
+directions. A contradictory terminal identity cannot close another child or
+overwrite a sibling's association. This supports zero-tool children and child
+tool events carrying only `agentId`. Older parent-only lifecycle events remain
+supported; an event carrying both `agentId` and `parentToolCallId` can establish
+the same association when the lifecycle omitted its optional `agentId`.
+Unrelated siblings cannot borrow a lifecycle or another child's observed calls.
+Optional reported tool totals are reconciled per child. Missing/contradictory
+attribution, pending, failed, cancelled or malformed lifecycles prevent
+certification.
+
+The adapter remains subscribed until disconnect, but SDK disconnect clears its
+handlers before client shutdown: observation after detach is not claimed.
+Any tool, skill or subagent activity actually observed after the clean root idle
+(including before the promise settles or during detach) invalidates completeness.
+The clean global idle is the quiescent call boundary; successful shutdown alone
+cannot replace missing idle or upgrade incomplete evidence.
+
+`loadedSkills` contains all valid SDK-reported invoked skill names, deduplicated,
+even when a legacy `skillCalls` record is rejected because its local body/path
+cannot be verified. This list proves SDK-reported loading, not that the loaded
+body matched a staged file. Malformed/unbounded names, a failing or timed-out
+RPC, or an unsupported RPC cannot certify skill absence. The RPC has a one-second
+budget within the call's execution deadline. `metadata.skillCalls` and stock
+`skill-used` keep their existing stronger local-body verification behavior.
+A malformed unrelated entry invalidates the new SDK snapshot but does not drop
+separately valid verified `metadata.skillCalls` records: stock positive
+`skill-used` remains usable even when absence assertions return grader errors.
+
+Native Claude/Codex calls retain available tool spans (not model/root spans),
+Claude `metadata.toolCalls`, and Codex raw tool items, including observed command,
+MCP, search, plan-update and delegation calls. Summaries without timestamps retain
+`null` timestamps; known trace times are preserved. A missing native summary ID
+gets a stable per-response `native-summary:<source>:<ordinal>` observation ID and
+an explicit incomplete reason, never a fabricated execution timestamp.
+Native summaries/traces cannot
+certify a full stream, so native inventories remain `incomplete` with
+`delegate-does-not-expose-tool-stream`. Pi retains its observed start/end calls
+but remains incomplete because only read-tool skill evidence is available.
+Neither traces nor assistant prose prove universal absence.
+
+The inventory is reserved at the native adapter boundary: delegate-supplied
+`metadata.toolInventory` is rejected even if structurally valid. The adapter sends
+its own inventory separately from the delegate response. The host validates and
+attaches it with private process-local provenance; `Agent` accepts that generated
+inventory while rejecting an untrusted reserved key. This is an adapter trust
+boundary, not an OS sandbox against malicious same-user SDK code.
+
+Use stock Promptfoo JavaScript package assertions, not custom assertion types:
+
+```yaml
+assert:
+  - type: javascript
+    value: package:oh-my-promptfoo/assertions:tool-called
+    config:
+      name: { regex: '^(read|read_file|view)$' }
+      argumentsMatch: { path: /path, regex: 'README' }
+      before: { name: { regex: '^(write|write_file|create)$' } }
+  - type: javascript
+    value: package:oh-my-promptfoo/assertions:tool-not-called
+    config:
+      name: bash
+      argumentsMatch: { path: command, regex: 'git\s+pull' }
+  - type: javascript
+    value: package:oh-my-promptfoo/assertions:skill-not-loaded
+    config: { name: forbidden-skill }
+```
+
+Tool selectors combine optional exact `name`, regex `name: { regex, flags? }`,
+exact `mcpServer`, and `argumentsMatch: { path, regex }`. Programmatic callers
+may also pass `RegExp` values. Argument paths are JSON Pointer (`/items/0/name`,
+with `~0`/`~1` escaping), dotted own-property paths (`items.0.name`, optionally
+`$.items.0.name`), or an empty path for the whole arguments value. Regexes match
+strings directly and other JSON values as serialized JSON. Missing paths do not
+match. An empty selector matches every invocation.
+
+`before` is another tool selector, without nested `before`. It selects invocations
+whose **start event precedes the first matching reference start event** in SDK
+stream order. Equal timestamps are ordered by callback order; overlapping calls
+count by invocation order, not completion order. The reference invocation itself
+is excluded. A missing reference is a grader error, not vacuous absence.
+`skill-not-loaded` accepts a required exact/regex `name` and requires SDK skill
+completeness. All three assertions fail with `pass: false`, `score: 0`, and
+`metadata.graderError: true` for missing, malformed or incomplete inventories.
+
+The certificate covers tool invocations, not every side effect inside a tool.
+For example, a `bash` call's `git pull` arguments can be matched; a network call
+hidden inside a script is not separately visible. The
+[executable example](../examples/tool-inventory/promptfooconfig.yaml) uses the
+unmodified package loader. From an installed evaluation project, run
+`npx promptfoo eval -c examples/tool-inventory/promptfooconfig.yaml --no-cache`.
+For maintainers, after `corepack pnpm build`, `corepack pnpm pack:check` exercises
+strict packed ESM/CJS exports and declarations; `corepack pnpm e2e` installs the
+tarball alongside stock Promptfoo 0.124.1 and runs these exact package assertions
+against deterministic SDK fixtures (including incomplete grader errors).
+
 ### Agent workspace grading
 
 `package:oh-my-promptfoo/assertions:agentAssert` accepts the same `components`,

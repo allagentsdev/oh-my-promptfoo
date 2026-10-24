@@ -36,6 +36,10 @@ const copilotReply: Promise<unknown> = copilot.callApi('prompt', undefined, opti
 const rubric: Assertions.LlmAssertConfig = {components: [{metric: 'quality', value: 'Check answer'}]};
 const assertion: Promise<unknown> = Assertions.llmAssert('answer', {config: rubric});
 const agentAssertion: Promise<unknown> = Assertions.agentAssert('answer');
+const selector: Assertions.ToolAssertionConfig = {name: {regex: '^read$'}, argumentsMatch: {path: '/path', regex: 'README'}, before: {name: 'write'}};
+const called: unknown = Assertions['tool-called']('answer', {config: selector});
+const absent: unknown = Assertions['tool-not-called']('answer', {config: selector});
+const skillAbsent: unknown = Assertions['skill-not-loaded']('answer', {config: {name: 'demo'}});
 const fallbackConfig: Providers.FallbackConfig = {providers: ['openai:example'], cooldownMs: 0};
 const fallback = new Providers.Fallback({config: fallbackConfig});
 const fallbackId: string = fallback.id();
@@ -218,12 +222,25 @@ console.log('exports and loaded version passed');`,
       `import assert from 'node:assert/strict';
 import {createRequire} from 'node:module';
 import {llmAssert,agentAssert} from 'oh-my-promptfoo/assertions';
+import * as InventoryAssertions from 'oh-my-promptfoo/assertions';
 import {Fallback as EsmFallback} from 'oh-my-promptfoo/providers';
 const require=createRequire(import.meta.url);
 const c=require('oh-my-promptfoo/assertions');
 const cp=require('oh-my-promptfoo/providers');
 assert.equal(typeof llmAssert,'function');assert.equal(typeof c.llmAssert,'function');
 assert.equal(typeof agentAssert,'function');assert.equal(typeof c.agentAssert,'function');
+for(const entry of [InventoryAssertions,c]){
+  assert.deepEqual(Object.keys(entry).sort(),['agentAssert','llmAssert','skill-not-loaded','tool-called','tool-not-called']);
+  const complete={schemaVersion:1,status:'complete',incompleteReasons:[],calls:[],skillInventory:'sdk',loadedSkills:[]};
+  const context={config:{name:'forbidden'},providerResponse:{metadata:{toolInventory:complete}}};
+  assert.equal(entry['tool-not-called']('answer',context).pass,true);
+  assert.equal(entry['tool-called']('answer',context).pass,false);
+  assert.equal(entry['skill-not-loaded']('answer',context).pass,true);
+  for(const name of ['tool-called','tool-not-called','skill-not-loaded']){
+    const grade=entry[name]('answer',{...context,providerResponse:{metadata:{toolInventory:{...complete,status:'incomplete',incompleteReasons:['missing-tool-completion']}}}});
+    assert.equal(grade.pass,false);assert.equal(grade.metadata.graderError,true);
+  }
+}
 const invalidAgent={config:{components:[],grader:{id:'copilot-sdk'}}};
 for(const assertion of [agentAssert,c.agentAssert])await assert.rejects(assertion('answer',invalidAgent),/unique named components/);
 process.env.PROMPTFOO_DISABLE_TEMPLATING='false';

@@ -23,6 +23,7 @@ import {
   graderReadScope,
   workspaceReaderPath,
 } from "./grader-policy.js";
+import { NativeToolInventory } from "./native-tool-inventory.js";
 import { runPi } from "./pi-runner.js";
 import {
   type CallFrame,
@@ -33,6 +34,7 @@ import {
   secrets,
 } from "./protocol.js";
 import { observedSkillRead, type SkillCall, workspaceSkillDirectories } from "./skill-evidence.js";
+import { type ToolInventory, ToolInventoryBuilder } from "./tool-inventory.js";
 
 // Reserve stdout for protocol even if a peer logs during import or execution.
 const protocolWrite = process.stdout.write.bind(process.stdout);
@@ -47,12 +49,14 @@ let accepted = false,
   fatal: Error | undefined;
 let sensitive: string[] = [];
 let telemetryApi = bundledTelemetry;
+let nativeInventory: NativeToolInventory | undefined;
 // Native Promptfoo agent spans are collected in this child, then replayed on the
 // host's row trace. No unconfigured exporter or separate root trace is created.
 const tracerProvider = new NodeTracerProvider({
   spanProcessors: [
     {
       onStart(span, parentContext) {
+        nativeInventory?.span(span, false);
         if (terminal) return;
         emit({
           version: 1,
@@ -67,6 +71,7 @@ const tracerProvider = new NodeTracerProvider({
       },
       onEnd(span) {
         if (terminal) return;
+        nativeInventory?.span(span, true);
         const id = `native:${span.spanContext().spanId}`;
         const attributes: JsonObject = {};
         for (const [key, value] of Object.entries(span.attributes))
@@ -135,6 +140,7 @@ process.stdin.on("end", () => {
 
 async function execute(input: JsonObject): Promise<void> {
   let response: JsonObject | undefined;
+  let inventory: ToolInventory | undefined;
   let error: unknown;
   let tracingRegistered = false;
   try {
@@ -217,6 +223,7 @@ async function execute(input: JsonObject): Promise<void> {
         resolveImport("@opentelemetry/api", pathToFileURL(nativePeer).href)
       );
     }
+    if (nativePeer) nativeInventory = new NativeToolInventory(sensitive);
     tracingRegistered = true;
     telemetryApi.trace.setGlobalTracerProvider(tracerProvider);
     telemetryApi.context.setGlobalContextManager(new AsyncLocalStorageContextManager().enable());
@@ -232,6 +239,14 @@ async function execute(input: JsonObject): Promise<void> {
           ? runPi(frame, controller.signal, emit, sensitive)
           : runCopilot(frame, controller.signal),
     );
+    const metadata =
+      response.metadata === undefined ? {} : object(response.metadata, "delegate metadata");
+    if (nativeInventory) {
+      nativeInventory.response(response);
+      inventory = nativeInventory.finish();
+    } else inventory = metadata.toolInventory as ToolInventory;
+    delete metadata.toolInventory;
+    response.metadata = metadata;
     jsonSafe(response);
   } catch (e) {
     error = e;
@@ -267,6 +282,7 @@ async function execute(input: JsonObject): Promise<void> {
         version: 1,
         type: "result",
         response: JSON.parse(redact(jsonSafe(response), sensitive)),
+        toolInventory: inventory,
       });
   } catch (e) {
     emit({ version: 1, type: "error", error: redact((e as Error).message, sensitive) });
@@ -395,7 +411,14 @@ interface SessionLike {
     skills?: { getInvoked?: () => Promise<{ skills: unknown }> };
     usage?: { getMetrics?: () => Promise<unknown> };
   };
-  on(callback: (event: { type: string; data: JsonObject }) => void): (() => void) | undefined;
+  on(
+    callback: (event: {
+      type: string;
+      data: JsonObject;
+      timestamp?: string;
+      agentId?: string;
+    }) => void,
+  ): (() => void) | undefined;
   sendAndWait(
     options: { prompt: string },
     timeout: number,
@@ -511,6 +534,41 @@ async function runCopilot(frame: CallFrame, signal: AbortSignal): Promise<JsonOb
   const tools = new Set<string>();
   const skillReads = new Map<string, SkillCall>();
   const skillCalls: SkillCall[] = [];
+  const inventory = new ToolInventoryBuilder(sensitive);
+  const subagents = new Map<
+    string,
+    { active: boolean; observed: number; reported?: number; agentId?: string }
+  >();
+  const agentParents = new Map<string, string>();
+  const toolParents = new Map<string, string>();
+  const observedAgentIds = new Set<string>();
+  const observedParentIds = new Set<string>();
+  let mainSettled = false;
+  let observedIdle = false;
+  const bindSubagent = (parentId: string, agentId: unknown): boolean => {
+    if (agentId === undefined) return true;
+    if (typeof agentId !== "string" || !agentId || agentId.length > 512) {
+      inventory.incomplete("malformed-subagent-lifecycle");
+      return false;
+    }
+    const child = subagents.get(parentId);
+    const mappedParent = agentParents.get(agentId);
+    if (
+      !child ||
+      (child.agentId !== undefined && child.agentId !== agentId) ||
+      (mappedParent !== undefined && mappedParent !== parentId)
+    ) {
+      inventory.incomplete("subagent-lifecycle-identity-mismatch");
+      return false;
+    }
+    if (agentParents.size >= 1024 && mappedParent === undefined) {
+      inventory.incomplete("malformed-subagent-lifecycle");
+      return false;
+    }
+    child.agentId = agentId;
+    agentParents.set(agentId, parentId);
+    return true;
+  };
   const permissions = (frame.config.permissions ?? {}) as JsonObject;
   const approve = (request: JsonObject): JsonObject | Promise<JsonObject> => {
     if (request.kind === "read" && allowedRead)
@@ -537,6 +595,7 @@ async function runCopilot(frame: CallFrame, signal: AbortSignal): Promise<JsonOb
       ...(frame.config.provider ? { provider: frame.config.provider } : {}),
       onPermissionRequest: approve,
       enableConfigDiscovery: false,
+      includeSubAgentStreamingEvents: true,
       // Keep general config discovery off; expose only physical workspace skill directories.
       ...(frame.readOnly
         ? { enableSkills: false, skipCustomInstructions: true }
@@ -551,10 +610,100 @@ async function runCopilot(frame: CallFrame, signal: AbortSignal): Promise<JsonOb
         eventBytes += Buffer.byteLength(JSON.stringify(event));
         if (events > 100_000 || eventBytes > MAX_FRAME_BYTES) {
           sessionError = "Copilot event stream exceeds its bound";
+          inventory.incomplete("event-stream-bound");
           abort();
           return;
         }
         const data = event.data;
+        for (const identity of [event.agentId, data.parentToolCallId])
+          if (
+            identity !== undefined &&
+            (typeof identity !== "string" || !identity || identity.length > 512)
+          )
+            inventory.incomplete("malformed-subagent-lifecycle");
+        const subagentEvent = Boolean(event.agentId || data.parentToolCallId);
+        if (typeof event.agentId === "string") {
+          if (observedAgentIds.size < 1024) observedAgentIds.add(event.agentId);
+          else inventory.incomplete("malformed-subagent-lifecycle");
+        }
+        if (typeof data.parentToolCallId === "string") {
+          if (observedParentIds.size < 1024) observedParentIds.add(data.parentToolCallId);
+          else inventory.incomplete("malformed-subagent-lifecycle");
+        }
+        const agentActivity =
+          event.type.startsWith("tool.") ||
+          event.type.startsWith("skill.") ||
+          event.type.startsWith("subagent.");
+        if ((observedIdle || mainSettled) && agentActivity)
+          inventory.incomplete("post-idle-agent-activity");
+        if (event.type === "abort") inventory.incomplete("session-aborted");
+        if (event.type === "session.shutdown" && data.shutdownType === "error")
+          inventory.incomplete("session-shutdown-error");
+        if (event.type === "session.idle") {
+          if (data.aborted === true) inventory.incomplete("session-idle-aborted");
+          else if (data.aborted !== undefined && typeof data.aborted !== "boolean")
+            inventory.incomplete("malformed-session-idle");
+          else if (!subagentEvent && data.mode !== "autopilot") observedIdle = true;
+        }
+        if (event.type === "subagent.started") {
+          const id = data.toolCallId;
+          if (
+            typeof id !== "string" ||
+            !id ||
+            id.length > 512 ||
+            subagents.has(id) ||
+            subagents.size >= 1024
+          )
+            inventory.incomplete("malformed-subagent-lifecycle");
+          else {
+            subagents.set(id, { active: true, observed: 0 });
+            bindSubagent(id, event.agentId);
+          }
+        } else if (event.type === "subagent.completed" || event.type === "subagent.failed") {
+          if (data.cancelled !== undefined && typeof data.cancelled !== "boolean")
+            inventory.incomplete("malformed-subagent-lifecycle");
+          const id = data.toolCallId;
+          const child = typeof id === "string" ? subagents.get(id) : undefined;
+          if (!child?.active || typeof id !== "string")
+            inventory.incomplete("unmatched-subagent-completion");
+          else if (bindSubagent(id, event.agentId)) {
+            child.active = false;
+            if (data.totalToolCalls !== undefined) {
+              if (safeCount(data.totalToolCalls)) child.reported = data.totalToolCalls;
+              else inventory.incomplete("malformed-subagent-tool-count");
+            }
+          }
+          if (event.type === "subagent.failed" || data.cancelled === true)
+            inventory.incomplete("subagent-execution-incomplete");
+        }
+        // Lifecycle envelopes identify the child instance and its spawning tool.
+        // Older streams can also establish that same pair on attributed tool events.
+        const lifecycleEvent =
+          event.type === "subagent.started" ||
+          event.type === "subagent.completed" ||
+          event.type === "subagent.failed";
+        if (subagentEvent && !lifecycleEvent) {
+          const parent =
+            typeof data.parentToolCallId === "string" ? data.parentToolCallId : undefined;
+          const mapped =
+            typeof event.agentId === "string" ? agentParents.get(event.agentId) : undefined;
+          const childId = parent ?? mapped;
+          const child = childId === undefined ? undefined : subagents.get(childId);
+          if (!child?.active || childId === undefined || (parent && mapped && parent !== mapped))
+            inventory.incomplete("subagent-lifecycle-unavailable");
+          else if (bindSubagent(childId, event.agentId)) {
+            if (event.type === "tool.execution_start") {
+              child.observed++;
+              if (typeof data.toolCallId === "string" && toolParents.size < 1024)
+                toolParents.set(data.toolCallId, childId);
+            } else if (
+              event.type === "tool.execution_complete" &&
+              typeof data.toolCallId === "string" &&
+              toolParents.get(data.toolCallId) !== childId
+            )
+              inventory.incomplete("subagent-tool-attribution-mismatch");
+          }
+        }
         if (event.type === "assistant.message" && typeof data.content === "string")
           output = data.content;
         else if (event.type === "assistant.usage") {
@@ -570,34 +719,45 @@ async function runCopilot(frame: CallFrame, signal: AbortSignal): Promise<JsonOb
           else premiumCostComplete = false;
         } else if (event.type === "session.error")
           sessionError = typeof data.message === "string" ? data.message : "Copilot session failed";
-        else if (
-          event.type === "tool.execution_start" &&
-          typeof data.toolCallId === "string" &&
-          typeof data.toolName === "string"
-        ) {
+        else if (event.type === "tool.execution_start") {
+          inventory.start(
+            data.toolCallId,
+            data.toolName,
+            data.arguments,
+            event.timestamp,
+            data.mcpConfigServerName ?? data.mcpServerName,
+            data.mcpToolName,
+          );
+          if (typeof data.toolCallId !== "string" || typeof data.toolName !== "string")
+            throw new Error("Malformed Copilot tool start");
           if (tools.has(data.toolCallId)) throw new Error("Duplicate Copilot tool identity");
           tools.add(data.toolCallId);
           if (!data.mcpServerName) {
             const skillRead = observedSkillRead(data.toolName, data.arguments, frame.workingDir);
             if (skillRead) skillReads.set(data.toolCallId, skillRead);
           }
-          emit({
-            version: 1,
-            type: "tool",
-            phase: "start",
-            id: data.toolCallId,
-            name: redact(data.toolName, sensitive),
-            attributes: {
-              ...(data.arguments
-                ? { "gen_ai.tool.call.arguments": redact(jsonSafe(data.arguments), sensitive) }
-                : {}),
-            },
-          });
-        } else if (
-          event.type === "tool.execution_complete" &&
-          typeof data.toolCallId === "string" &&
-          tools.delete(data.toolCallId)
-        ) {
+          const attributes: JsonObject = {};
+          try {
+            if (data.arguments)
+              attributes["gen_ai.tool.call.arguments"] = redact(
+                jsonSafe(data.arguments),
+                sensitive,
+              );
+          } finally {
+            // Keep the trace paired even when argument validation rejects the event.
+            emit({
+              version: 1,
+              type: "tool",
+              phase: "start",
+              id: data.toolCallId,
+              name: redact(data.toolName, sensitive),
+              attributes,
+            });
+          }
+        } else if (event.type === "tool.execution_complete") {
+          inventory.end(data.toolCallId, data.success, event.timestamp);
+          if (typeof data.toolCallId !== "string" || !tools.delete(data.toolCallId))
+            throw new Error("Copilot tool completion without start");
           const skillRead = skillReads.get(data.toolCallId);
           skillReads.delete(data.toolCallId);
           if (skillRead && data.success === true) skillCalls.push(skillRead);
@@ -618,18 +778,36 @@ async function runCopilot(frame: CallFrame, signal: AbortSignal): Promise<JsonOb
       { prompt: frame.prompt },
       (frame.config.timeoutMs as number | undefined) ?? 900_000,
     );
+    mainSettled = true;
     if (signal.aborted) throw new Error("Copilot call aborted");
     if (!sessionError) {
+      let timer: ReturnType<typeof setTimeout> | undefined;
       try {
-        const invoked = await session.rpc?.skills?.getInvoked?.();
-        if (Array.isArray(invoked?.skills) && invoked.skills.length) {
-          for (const entry of invoked.skills) {
-            const loaded = verifiedSkillLoaderRecord(entry, frame.workingDir);
-            if (loaded) skillCalls.push(loaded);
-          }
+        const getInvoked = session.rpc?.skills?.getInvoked;
+        if (getInvoked) {
+          const budget = Math.max(
+            0,
+            Math.min(1000, (frame.deadlineMs ?? Infinity) - Date.now() - 50),
+          );
+          if (!budget) throw new Error("SDK skill inventory deadline elapsed");
+          const invoked = await Promise.race([
+            getInvoked.call(session.rpc!.skills),
+            new Promise<never>((_, reject) => {
+              timer = setTimeout(() => reject(new Error("SDK skill inventory timeout")), budget);
+            }),
+          ]);
+          // Positive local-body evidence remains independent of strict snapshot validation.
+          if (Array.isArray(invoked.skills))
+            for (const entry of invoked.skills.slice(0, 1024)) {
+              const loaded = verifiedSkillLoaderRecord(entry, frame.workingDir);
+              if (loaded) skillCalls.push(loaded);
+            }
+          inventory.sdkSkills(invoked.skills);
         }
       } catch {
-        // Experimental SDK inventory is optional; explicit read-tool evidence remains valid.
+        inventory.skillFailure();
+      } finally {
+        clearTimeout(timer);
       }
     }
     output = final?.data?.content ?? output;
@@ -677,6 +855,37 @@ async function runCopilot(frame: CallFrame, signal: AbortSignal): Promise<JsonOb
     }
     signal.removeEventListener("abort", abort);
     try {
+      if (!observedIdle) inventory.incomplete("missing-session-idle");
+      for (const id of observedAgentIds)
+        if (!agentParents.has(id)) inventory.incomplete("subagent-lifecycle-unavailable");
+      for (const id of observedParentIds)
+        if (!subagents.has(id)) inventory.incomplete("subagent-lifecycle-unavailable");
+      for (const child of subagents.values()) {
+        if (child.active) inventory.incomplete("pending-subagents-at-shutdown");
+        if (child.reported !== undefined && child.reported > child.observed)
+          inventory.incomplete("missing-subagent-tool-events");
+        else if (child.reported !== undefined && child.reported < child.observed)
+          inventory.incomplete("subagent-tool-count-mismatch");
+      }
+      if (session) await session.disconnect();
+    } catch (e) {
+      cleanupErrors.push(e);
+    }
+    try {
+      const errors = await client.stop();
+      if (Array.isArray(errors) && errors.length) {
+        inventory.incomplete("client-shutdown-failed");
+        await client.forceStop();
+      }
+    } catch {
+      inventory.incomplete("client-shutdown-failed");
+      try {
+        await client.forceStop();
+      } catch (error) {
+        cleanupErrors.push(error);
+      }
+    }
+    try {
       if (typeof unsubscribe === "function") unsubscribe();
     } catch (error) {
       cleanupErrors.push(error);
@@ -689,21 +898,6 @@ async function runCopilot(frame: CallFrame, signal: AbortSignal): Promise<JsonOb
         id,
         error: "Tool did not complete before session shutdown",
       });
-    try {
-      if (session) await session.disconnect();
-    } catch (e) {
-      cleanupErrors.push(e);
-    }
-    try {
-      const errors = await client.stop();
-      if (Array.isArray(errors) && errors.length) await client.forceStop();
-    } catch {
-      try {
-        await client.forceStop();
-      } catch (error) {
-        cleanupErrors.push(error);
-      }
-    }
   }
   const error = cleanupErrors.length
     ? "Copilot cleanup failed"
@@ -716,6 +910,7 @@ async function runCopilot(frame: CallFrame, signal: AbortSignal): Promise<JsonOb
     accounting.reason = "execution_incomplete";
   }
   const cost = copilotUsageValue(accounting);
+  if (callFailed || error || signal.aborted) inventory.incomplete("execution-incomplete");
   return {
     ...(error ? { error } : signal.aborted ? { error: "Copilot call aborted" } : {}),
     output,
@@ -734,6 +929,7 @@ async function runCopilot(frame: CallFrame, signal: AbortSignal): Promise<JsonOb
         },
       },
       skillCalls,
+      toolInventory: inventory.finish(),
     },
   };
 }

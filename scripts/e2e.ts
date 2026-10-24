@@ -316,6 +316,124 @@ try {
     const exported = JSON.parse(await readFile(join(cwd, `${name}-results.json`), "utf8"));
     return exported.results;
   }
+  const inventoryAssertion = (name: string, config: unknown) => ({
+    type: "javascript",
+    value: `package:oh-my-promptfoo/assertions:${name}`,
+    config,
+  });
+  const inventoryStart = (id: string, name: string, args = {}) => ({
+    type: "tool.execution_start",
+    data: {
+      toolCallId: id,
+      toolName: name,
+      arguments: args,
+      ...(name === "display-search" ? { mcpServerName: "github", mcpToolName: "search" } : {}),
+    },
+  });
+  const inventoryEnd = (id: string) => ({
+    type: "tool.execution_complete",
+    data: { toolCallId: id, success: true },
+  });
+  const incompleteInventoryCases = [
+    { id: "missing-completion", scenario: { events: [inventoryStart("open", "read")] } },
+    { id: "skill-rpc-failure", scenario: { skillState: "throw" } },
+  ];
+  const inventoryGates = await evaluateFixture(
+    "tool-inventory",
+    {
+      tracing: { enabled: false },
+      prompts: ["{{task}}"],
+      providers: [
+        {
+          id: "package:oh-my-promptfoo/providers:Agent",
+          config: { delegate: { id: "copilot-sdk" }, workspace: { sources: [] } },
+        },
+      ],
+      tests: [
+        {
+          description: "zero calls certify absence",
+          vars: { task: "inventory:{}" },
+          assert: [
+            inventoryAssertion("tool-not-called", { name: "forbidden" }),
+            inventoryAssertion("skill-not-loaded", { name: "forbidden" }),
+          ],
+        },
+        {
+          description: "subagent MCP chronology",
+          vars: {
+            task: `inventory:${JSON.stringify({
+              events: [
+                { type: "subagent.started", agentId: "child", data: { toolCallId: "parent" } },
+                {
+                  type: "tool.execution_start",
+                  agentId: "child",
+                  data: {
+                    toolCallId: "search",
+                    toolName: "display-search",
+                    arguments: { query: "needle" },
+                    mcpServerName: "github",
+                    mcpToolName: "search",
+                  },
+                },
+                { ...inventoryEnd("search"), agentId: "child" },
+                {
+                  type: "subagent.completed",
+                  agentId: "child",
+                  data: { toolCallId: "parent", totalToolCalls: 1 },
+                },
+                inventoryStart("write", "write"),
+                inventoryEnd("write"),
+              ],
+            })}`,
+          },
+          assert: [
+            inventoryAssertion("tool-called", {
+              name: { regex: "^display-" },
+              mcpServer: "github",
+              argumentsMatch: { path: "/query", regex: "needle" },
+              before: { name: "write" },
+            }),
+            inventoryAssertion("tool-not-called", { name: "bash" }),
+            inventoryAssertion("skill-not-loaded", { name: "forbidden" }),
+          ],
+        },
+        ...incompleteInventoryCases.map(({ id, scenario }) => ({
+          description: `incomplete proof: ${id}`,
+          vars: { task: `inventory:${JSON.stringify(scenario)}`, inventoryCase: id },
+          assert: ["tool-called", "tool-not-called", "skill-not-loaded"].map((name) =>
+            inventoryAssertion(name, { name: "forbidden" }),
+          ),
+        })),
+      ],
+    },
+    [100],
+  );
+  if (
+    inventoryGates.stats.successes !== 2 ||
+    inventoryGates.stats.failures !== 2 ||
+    inventoryGates.stats.errors !== 0
+  )
+    throw Error(
+      `Stock package inventory assertions misgraded: ${JSON.stringify(inventoryGates.stats)}`,
+    );
+  for (const { id } of incompleteInventoryCases) {
+    const authoredRows = inventoryGates.results.filter(
+      (row: any) => row.testCase?.vars?.inventoryCase === id,
+    );
+    if (authoredRows.length !== 1)
+      throw Error(`Expected exactly one authored incomplete inventory case: ${id}`);
+    const row = authoredRows[0];
+    const parts = row.gradingResult?.componentResults ?? [];
+    if (
+      row.response.metadata?.toolInventory?.status !== "incomplete" ||
+      parts.length !== 3 ||
+      parts.some(
+        (part: any) =>
+          part.pass !== false || part.score !== 0 || part.metadata?.graderError !== true,
+      )
+    )
+      throw Error(`Stock package assertion loading lost incomplete-inventory grader errors: ${id}`);
+  }
   const skillSource = join(cwd, "skills");
   await mkdir(join(skillSource, "demo"), { recursive: true });
   await writeFile(
@@ -362,6 +480,43 @@ try {
       },
     };
   });
+  const mixedSkillInventory = await evaluateFixture(
+    "mixed-skill-inventory",
+    {
+      tracing: { enabled: false },
+      prompts: ['inventory:{"verifiedSkill":".agents/skills/demo/SKILL.md"}'],
+      providers: skillProviders.filter((provider) => provider.label === "copilot-skills"),
+      tests: [
+        {
+          assert: [
+            { type: "skill-used", value: "demo" },
+            ...["tool-called", "tool-not-called", "skill-not-loaded"].map((name) =>
+              inventoryAssertion(name, { name: "forbidden" }),
+            ),
+          ],
+        },
+      ],
+    },
+    [100],
+  );
+  const mixedRows = mixedSkillInventory.results;
+  const mixedParts = mixedRows[0]?.gradingResult?.componentResults ?? [];
+  if (
+    mixedRows.length !== 1 ||
+    mixedSkillInventory.stats.errors !== 0 ||
+    mixedParts.length !== 4 ||
+    mixedParts[0]?.pass !== true ||
+    mixedRows[0].response.metadata?.toolInventory?.status !== "incomplete" ||
+    mixedParts
+      .slice(1)
+      .some(
+        (part: any) =>
+          part.pass !== false || part.score !== 0 || part.metadata?.graderError !== true,
+      )
+  )
+    throw Error(
+      "Malformed SDK names dropped stock skill-used evidence or authorized an absence proof",
+    );
   const skillGates: Record<string, { successes: number; failures: number; errors: number }> = {};
   type SkillResult = {
     gradingResult?: { pass: boolean };
@@ -1117,6 +1272,8 @@ try {
           nativeErrors: nativeError.stats.errors,
           skillUsedWithoutTracing: skillGates,
           piSdk: piGates,
+          toolInventory: inventoryGates.stats,
+          mixedSkillInventory: mixedSkillInventory.stats,
           normalCleanup: true,
           skippedCleanupRecovery: true,
           storageOutsideConsumer: true,

@@ -92,6 +92,22 @@ test("Pi records successful real SDK skill reads across the staged roots and agg
   expect(result.error).toBeUndefined();
   expect(result.output).toBe("verified real skill contents");
   const calls = object(result.metadata, "metadata").skillCalls;
+  expect(result.metadata).toMatchObject({
+    toolInventory: {
+      schemaVersion: 1,
+      status: "incomplete",
+      skillInventory: "read-tool-only",
+      calls: skillPaths.map((skill, index) => ({
+        id: `read-${index}`,
+        name: "read",
+        arguments: { path: skill },
+        argumentsTruncated: false,
+        startedAt: expect.any(String),
+        endedAt: expect.any(String),
+        success: true,
+      })),
+    },
+  });
   expect(calls).toHaveLength(skillPaths.length);
   expect(calls).toEqual(
     expect.arrayContaining(

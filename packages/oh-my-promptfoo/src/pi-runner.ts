@@ -14,6 +14,7 @@ import type { JsonObject } from "./config.js";
 import { graderConfig, graderReadScope } from "./grader-policy.js";
 import { type CallFrame, jsonSafe, MAX_FRAME_BYTES, redact, resolvePeer } from "./protocol.js";
 import { observedSkillRead, type SkillCall, workspaceSkillDirectories } from "./skill-evidence.js";
+import { ToolInventoryBuilder } from "./tool-inventory.js";
 
 type PiSdk = typeof PiSdkModule;
 const SDK_VERSION = "1.3.0";
@@ -67,6 +68,8 @@ export async function runPi(
   emit: (frame: JsonObject) => void,
   sensitive: string[],
 ): Promise<JsonObject> {
+  const inventory = new ToolInventoryBuilder(sensitive);
+  inventory.incomplete("delegate-cannot-certify-skill-inventory");
   const config = frame.readOnly ? graderConfig("pi-sdk", frame.config) : frame.config;
   const provider = config.provider;
   const modelId = config.model;
@@ -274,6 +277,7 @@ export async function runPi(
         }
         if (++events > 100_000) throw new Error("Pi event stream exceeds its bound");
         if (event.type === "tool_execution_start") {
+          inventory.start(event.toolCallId, event.toolName, event.args);
           if (tools.has(event.toolCallId)) throw new Error("Duplicate Pi tool identity");
           const argumentsJson = jsonSafe(event.args);
           meter(argumentsJson);
@@ -287,6 +291,7 @@ export async function runPi(
           });
           tools.add(event.toolCallId);
         } else if (event.type === "tool_execution_end" && tools.has(event.toolCallId)) {
+          inventory.end(event.toolCallId, !event.isError);
           meter(jsonSafe(event.result));
           tools.delete(event.toolCallId);
           const skill = skillReads.get(event.toolCallId);
@@ -304,9 +309,11 @@ export async function runPi(
             id: event.toolCallId,
             ...(event.isError ? { error: "Pi tool failed" } : {}),
           });
-        }
+        } else if (event.type === "tool_execution_end")
+          inventory.incomplete("unmatched-tool-completion");
       } catch (error) {
         streamError ??= error instanceof Error ? error.message : String(error);
+        inventory.incomplete("event-stream-incomplete");
         abort();
       }
     });
@@ -356,12 +363,14 @@ export async function runPi(
       errors.map((error) => (error instanceof Error ? error.message : String(error))).join("; "),
     );
   }
+  if (failure || signal.aborted) inventory.incomplete("execution-incomplete");
   const metadata = {
     pi: { sdkVersion: SDK_VERSION, provider, model: modelId, skillSupport: true },
     skillCalls,
+    toolInventory: inventory.finish(),
   };
   if (failure) {
-    if (!usage.numRequests && !cost) throw failure;
+    if (!usage.numRequests && !cost && !metadata.toolInventory.calls.length) throw failure;
     return {
       error: failure instanceof Error ? failure.message : String(failure),
       ...(output ? { output } : {}),

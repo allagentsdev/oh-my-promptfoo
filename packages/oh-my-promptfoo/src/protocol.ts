@@ -13,6 +13,7 @@ import {
 import { resolve as resolveImport } from "import-meta-resolve";
 import { closed, type DelegateId, type JsonObject, object, validateEnv } from "./config.js";
 import { copilotFailure } from "./copilot-accounting.js";
+import { attachToolInventory, toolInventory } from "./tool-inventory.js";
 
 export const MAX_FRAME_BYTES = 16 * 1024 * 1024;
 export const MAX_STDERR_BYTES = 64 * 1024;
@@ -41,7 +42,7 @@ export interface TraceFrame {
   error?: string;
 }
 export type RunnerFrame =
-  | { version: 1; type: "result"; response: JsonObject }
+  | { version: 1; type: "result"; response: JsonObject; toolInventory: unknown }
   | { version: 1; type: "error"; error: string }
   | TraceFrame;
 
@@ -147,7 +148,8 @@ export function redact(value: string, sensitive: string[]): string {
     result = result.split(JSON.stringify(secret).slice(1, -1)).join("[REDACTED]");
     result = result.split(encodeURIComponent(secret)).join("[REDACTED]");
   }
-  return result.replace(/(https?:\/\/)[^\s/]+:[^\s/@]+@/g, "$1[REDACTED]@");
+  // Restrict to the authority, greedily consuming userinfo through its final @.
+  return result.replace(/(https?:\/\/)[^\s/?#"<>\\]*@/gi, "$1[REDACTED]@");
 }
 export function minimalEnvironment(env: Record<string, string>): NodeJS.ProcessEnv {
   const output: NodeJS.ProcessEnv = {};
@@ -293,9 +295,13 @@ export async function runDelegate(
         if (f.version !== 1) throw new Error("Unsupported delegate protocol version");
         if (terminal) throw new Error("Duplicate or post-terminal delegate frame");
         if (f.type === "result") {
-          closed(f, ["version", "type", "response"], "result frame");
-          object(f.response, "delegate response");
-          jsonSafe(f.response);
+          closed(f, ["version", "type", "response", "toolInventory"], "result frame");
+          const response = object(f.response, "delegate response");
+          jsonSafe(response);
+          const metadata = response.metadata;
+          if (metadata && typeof metadata === "object" && Object.hasOwn(metadata, "toolInventory"))
+            throw new Error("Delegate metadata owns reserved toolInventory key");
+          toolInventory(f.toolInventory);
           terminal = f as unknown as RunnerFrame;
           completionGrace = setTimeout(
             () => stop(new Error("Delegate did not exit after its terminal frame")),
@@ -405,7 +411,16 @@ export async function runDelegate(
         interrupted && terminal?.type === "result" && frame.delegate === "copilot-sdk"
           ? copilotFailure(terminal.response, failure.message)
           : undefined;
-      if (retained) return JSON.parse(redact(jsonSafe(retained), sensitive)) as JsonObject;
+      if (retained && terminal?.type === "result") {
+        const inventory = toolInventory(terminal.toolInventory);
+        inventory.status = "incomplete";
+        if (!inventory.incompleteReasons.includes("host-execution-interrupted"))
+          inventory.incompleteReasons.push("host-execution-interrupted");
+        return attachToolInventory(
+          JSON.parse(redact(jsonSafe(retained), sensitive)) as JsonObject,
+          inventory,
+        );
+      }
       throw failure;
     }
     if (!terminal) throw new Error(`Delegate runner exited without a terminal frame: ${stderr}`);
@@ -413,7 +428,10 @@ export async function runDelegate(
     if (terminal.type !== "result") throw new Error("Delegate terminal frame is invalid");
     if (terminal.response.cached === true)
       throw new Error("Delegate returned a cached response; workspace calls require execution");
-    return JSON.parse(redact(jsonSafe(terminal.response), sensitive)) as JsonObject;
+    return attachToolInventory(
+      JSON.parse(redact(jsonSafe(terminal.response), sensitive)) as JsonObject,
+      JSON.parse(redact(jsonSafe(terminal.toolInventory), sensitive)),
+    );
   } catch (error) {
     throw new Error(redact(error instanceof Error ? error.message : String(error), sensitive));
   } finally {

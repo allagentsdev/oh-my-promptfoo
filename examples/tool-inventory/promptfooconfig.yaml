@@ -1,0 +1,32 @@
+# Run from an evaluation project with oh-my-promptfoo, promptfoo and @github/copilot-sdk installed:
+# npx promptfoo eval -c examples/tool-inventory/promptfooconfig.yaml --no-cache
+prompts: ["{{task}}"]
+providers:
+  - id: package:oh-my-promptfoo/providers:CopilotSdk
+    config:
+      working_dir: "{{env.COPILOT_WORKING_DIR}}"
+      permissions:
+        filesystem: write
+        shell: deny
+        network: deny
+      env:
+        COPILOT_GITHUB_TOKEN: "{{env.COPILOT_GITHUB_TOKEN}}"
+tests:
+  - vars:
+      task: Read README.md using a file-reading tool, then create tool-inventory-summary.txt with a one-sentence summary using a file-writing tool. Do not run shell commands or load the forbidden-skill skill.
+    assert:
+      - type: javascript
+        value: package:oh-my-promptfoo/assertions:tool-called
+        config:
+          name: { regex: '^(read|read_file|view)$' }
+          argumentsMatch: { path: /path, regex: 'README\.md$' }
+          before:
+            name: { regex: '^(write|write_file|create)$' }
+      - type: javascript
+        value: package:oh-my-promptfoo/assertions:tool-not-called
+        config:
+          name: { regex: '^(bash|shell|powershell)$' }
+      - type: javascript
+        value: package:oh-my-promptfoo/assertions:skill-not-loaded
+        config:
+          name: forbidden-skill

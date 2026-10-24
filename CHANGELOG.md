@@ -5,6 +5,8 @@
 ### Features
 
 * Add `pi-sdk` workspace and read-only agent-grader delegates using the maintained optional `@earendil-works/pi-coding-agent@1.3.0` peer, explicit model/credentials and local endpoint support. Isolated in-memory sessions report successful skill-file reads to stock `skill-used` without changing skill authoring.
+* Add adapter-owned schema-version-1 tool inventories with bounded/redacted arguments, explicit completeness and SDK skill-loading names. Copilot includes subagent streams and certifies only clean matched bounded execution; native/Pi retain observations without claiming unsupported completeness.
+* Publish stock Promptfoo JavaScript package assertions `tool-called`, `tool-not-called` and `skill-not-loaded`, with exact/regex names, MCP identity, argument paths and invocation chronology. Missing, malformed or incomplete evidence is a grader error, never a successful absence assertion.
 
 ### Bug Fixes
 
@@ -14,6 +16,8 @@
 * **accounting:** preserve empty-message execution failures, retain failure history after ledger overflow, and carry nested failed-attempt usage across bundled entrypoints without changing native-only throws or cancellation.
 * **accounting:** retain bounded Copilot-history provenance across nested ledger overflow, including later permanent fallback failures and throwing rubric retries; verify failure evidence across mixed packed ESM/CJS entrypoints.
 * **copilot:** accept Skill-loader evidence when Copilot CLI redacts secret-shaped prose such as `Bearer authentication` as `******`. Every visible character must still match the local `SKILL.md` body in order; each mask may hide only one non-empty single-line span of at most 256 characters, with at most 64 masks and at least 90% of the body visible.
+* **inventory:** require an observed clean root idle, reconcile tool counts and identities per subagent, and fail closed on omitted arguments, explicit abort/error shutdown and structural URL-userinfo redaction. Preserve verified positive skill evidence when an unrelated malformed SDK name invalidates the completeness snapshot.
+* **inventory:** bind SDK lifecycle child `agentId` and spawning `toolCallId` bidirectionally, allowing zero-tool and agentId-only child streams while rejecting contradictory starts/completions/failures without closing the wrong child or overwriting sibling identity.
 
 * **workspace:** remove a half-made runtime root when initialization fails after creating it, so later runs no longer refuse it. Recovery now names an unmarked runtime root and says it is a leftover from an interrupted run that is safe to delete when no eval is running, instead of a bare `ENOENT` ([#95](https://github.com/allagentsdev/oh-my-promptfoo/issues/95)).
 * **dependencies:** update the development Promptfoo peer to `0.124.1`, override get-uri's FTP client to patched `6.2.3`, and pin Forge's canonical RSA DigestInfo fix by immutable source commit. Add real-dependency rejection regressions to daily audits; document the Git audit coverage limit and intentional separate-host PASV restriction.
@@ -26,6 +30,7 @@
 * Verify `skill-used` with tracing disabled for Claude, Codex, and Copilot, including failed skill loads and text-only claims. Document native skill metadata preservation and that no OpenTelemetry collector is required.
 * Exercise the real Pi SDK with local model-service responses, including chunked streaming, bounded output, guarded directory and screenshot reads, credential errors, cancellation, skill evidence, and retained billing. Verify native Codex skill gates with two live SDK sessions, without tracing.
 * Remove obsolete `@types/diff`; workspace file-change capture uses the declarations bundled with `diff@9`.
+* Exercise public provider/protocol inventory boundaries, forged metadata, stream/call/byte/argument bounds, skill RPC failures and chronology. Extend strict packed ESM/CJS/declaration smokes and stock Promptfoo package-assertion E2E; document the certificate's tool-invocation scope and provide an executable example.
 
 ## [1.22.4](https://github.com/allagentsdev/oh-my-promptfoo/compare/v1.22.3...v1.22.4) (2026-10-24)
 

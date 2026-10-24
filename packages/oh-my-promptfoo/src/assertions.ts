@@ -3,6 +3,16 @@ import { type BatchedRubricConfig, gradeRubric, prepareRubric } from "./rubric-c
 
 export { type AgentRubricConfig, agentAssert } from "./agent-assert.js";
 export type { BatchedRubricConfig, RubricComponent } from "./rubric-contract.js";
+export {
+  type SkillNotLoadedConfig,
+  skillNotLoaded as "skill-not-loaded",
+  type ToolAssertionConfig,
+  type ToolName,
+  type ToolSelector,
+  toolCalled as "tool-called",
+  toolNotCalled as "tool-not-called",
+} from "./tool-assertions.js";
+export type { ToolCall, ToolInventory } from "./tool-inventory.js";
 
 /** llmAssert's config: the rubric, and optionally this assertion's own judge. */
 export interface LlmAssertConfig extends BatchedRubricConfig {

@@ -27,6 +27,7 @@ import {
 } from "./config.js";
 import { copilotFailure } from "./copilot-accounting.js";
 import { jsonSafe, redact, runDelegate, secrets, wireContext } from "./protocol.js";
+import { hasHostToolInventory, toolInventory } from "./tool-inventory.js";
 
 export interface WorkspaceMetadata {
   schemaVersion: 1;
@@ -162,6 +163,8 @@ export class Agent extends Calls {
             throw new Error("Delegate metadata must be a JSON object");
           if (Object.hasOwn(metadata, "workspace") || Object.hasOwn(metadata, "fileChanges"))
             throw new Error("Delegate metadata owns reserved workspace or fileChanges keys");
+          if (Object.hasOwn(metadata, "toolInventory") && !hasHostToolInventory(response))
+            throw new Error("Delegate metadata owns reserved toolInventory key");
           let fileChanges: FileChanges | undefined;
           if (this.config.fileChanges) {
             fileChanges = baseline
@@ -201,6 +204,15 @@ export class Agent extends Calls {
         error instanceof Error ? error.message : String(error),
         secrets(merged, env),
       );
+      if (response && hasHostToolInventory(response)) {
+        const metadata = response.metadata;
+        if (metadata && typeof metadata === "object" && "toolInventory" in metadata) {
+          const inventory = toolInventory(metadata.toolInventory);
+          inventory.status = "incomplete";
+          if (!inventory.incompleteReasons.includes("host-execution-failed"))
+            inventory.incompleteReasons.push("host-execution-failed");
+        }
+      }
       return (response && copilotFailure(response, message)) ?? { error: message };
     }
   }
