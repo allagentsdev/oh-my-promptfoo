@@ -1,9 +1,15 @@
-import { execFileSync } from "node:child_process";
+import type * as ChildProcess from "node:child_process";
+import { execFileSync, type SpawnOptions, spawn } from "node:child_process";
 import { chmod, cp, mkdir, mkdtemp, readlink, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 import { captureFileChanges, establishBaseline } from "../packages/workspace-core/src/file-changes";
+
+vi.mock("node:child_process", async (importOriginal) => {
+  const actual = await importOriginal<typeof ChildProcess>();
+  return { ...actual, spawn: vi.fn(actual.spawn) };
+});
 
 /**
  * Commits `files` plus `bulk` empty tracked files at view/project and seeds only its `.git`,
@@ -451,3 +457,55 @@ test("Git baseline failure names the Git command and its cause", async () => {
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("every Git command runs within one baseline or capture time bound", async () => {
+  const actual = await vi.importActual<typeof ChildProcess>("node:child_process");
+  const root = await mkdtemp(join(tmpdir(), "capture-deadline-"));
+  const realNow = Date.now;
+  let skew = 0;
+  const clock = vi.spyOn(Date, "now").mockImplementation(() => realNow() + skew);
+  const commands: string[] = [];
+  // `read-tree` appears to consume `consumed` ms of the operation's 90 s, and `update-index`
+  // is replaced by a child that never exits on its own, so only the production timer ends it.
+  const slowRefresh = (consumed: number) =>
+    vi.mocked(spawn).mockImplementation(((
+      command: string,
+      args: readonly string[],
+      options: SpawnOptions,
+    ) => {
+      commands.push(args.find((arg) => arg === "read-tree" || arg === "update-index") ?? "");
+      if (args.includes("read-tree")) skew += consumed;
+      if (!args.includes("update-index")) return actual.spawn(command, args, options);
+      return actual.spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], options);
+    }) as typeof spawn);
+  try {
+    const { handle } = await pinnedGitSource(root, { "a.txt": "a\n" });
+    // The baseline's next command gets the remaining second, not a fresh 90 s.
+    slowRefresh(89_000);
+    const started = realNow();
+    const failed = await establishBaseline(handle);
+    expect(realNow() - started).toBeLessThan(30_000);
+    expect(failed.failure).toBe(
+      "Private Git baseline failed: git update-index -q --refresh timed out at the 90-second capture bound",
+    );
+    // Once the capture's bound is spent, the next Git command never starts.
+    vi.mocked(spawn).mockImplementation(actual.spawn);
+    skew = 0;
+    const baseline = await establishBaseline(handle);
+    expect(baseline.failure).toBeUndefined();
+    commands.length = 0;
+    slowRefresh(90_001);
+    const result = await captureFileChanges(handle, baseline);
+    expect(commands).toEqual(["read-tree"]);
+    if (result.status !== "failed") throw Error("Expected an expired capture to fail");
+    expect(result.failure).toEqual({
+      code: "CAPTURE_FAILED",
+      message:
+        "Private Git baseline failed: git update-index -q --refresh was not started: the 90-second capture bound expired",
+    });
+  } finally {
+    vi.mocked(spawn).mockImplementation(actual.spawn);
+    clock.mockRestore();
+    await rm(root, { recursive: true, force: true });
+  }
+}, 60_000);

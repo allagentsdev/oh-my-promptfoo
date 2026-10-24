@@ -149,12 +149,16 @@ function records(separator: number, onRecord: (record: string) => boolean) {
     return true;
   };
 }
-/** Runs Git without a shell. A failure names the command and its cause and never has an empty detail. */
+/**
+ * Runs Git without a shell within the remaining time of its baseline or capture operation.
+ * A failure names the command and its cause and never has an empty detail.
+ */
 async function runGit(
   prefix: string[],
   args: string[],
   env: NodeJS.ProcessEnv,
   options: {
+    deadline: number;
     privatePaths: string[];
     input?: string;
     limit?: number;
@@ -162,6 +166,10 @@ async function runGit(
   },
 ): Promise<Buffer> {
   const label = `git ${args.join(" ")}`;
+  const bound = `the ${LIMITS.time / 1000}-second capture bound`;
+  const remaining = options.deadline - Date.now();
+  if (remaining <= 0)
+    throw Error(`Private Git baseline failed: ${label} was not started: ${bound} expired`);
   const child = spawn("git", [...prefix, ...args], { env, stdio: ["pipe", "pipe", "pipe"] });
   const limit = options.limit ?? 4 * 1024 * 1024;
   const chunks: Buffer[] = [];
@@ -197,10 +205,7 @@ async function runGit(
   const exited = Promise.withResolvers<[number | null, NodeJS.Signals | null]>();
   child.on("error", (error) => exited.reject(Error(`could not start (${error.message})`)));
   child.on("close", (code, signal) => exited.resolve([code, signal]));
-  const timer = setTimeout(
-    () => stop(`timed out after ${LIMITS.time / 1000} seconds`),
-    LIMITS.time,
-  );
+  const timer = setTimeout(() => stop(`timed out at ${bound}`), remaining);
   try {
     const [code, signal] = await exited.promise;
     if (stopped) return Buffer.alloc(0);
@@ -228,6 +233,7 @@ async function runGit(
 async function walk(
   handle: WorkspaceHandle,
   temp: string,
+  deadline: number,
   ignored: Baseline["ignored"],
   freeze: boolean,
   baseline?: Baseline,
@@ -238,7 +244,6 @@ async function walk(
   const gitBefore = new Map<string, GitBefore>();
   const unknown = new Set<string>();
   let incomplete = false;
-  const started = Date.now();
   let count = 0;
   let retainedBytes = 0;
   let ignoreBytes = 0;
@@ -342,7 +347,7 @@ async function walk(
       names.push(entry.name);
     }
     for (const name of names.sort()) {
-      if (++count > LIMITS.candidates || Date.now() - started > LIMITS.time) {
+      if (++count > LIMITS.candidates || Date.now() > deadline) {
         incomplete = true;
         return;
       }
@@ -400,8 +405,13 @@ async function walk(
     ];
     const run = (
       args: string[],
-      options: Omit<Parameters<typeof runGit>[3], "privatePaths"> = {},
-    ) => runGit(prefix, args, env, { ...options, privatePaths: [handle.seedPath, temp] });
+      options: Omit<Parameters<typeof runGit>[3], "deadline" | "privatePaths"> = {},
+    ) =>
+      runGit(prefix, args, env, {
+        ...options,
+        deadline,
+        privatePaths: [handle.seedPath, temp],
+      });
     // A private index of the pinned commit, refreshed by content against the worktree.
     await run(["read-tree", source.commit]);
     await run(["update-index", "-q", "--refresh"], { onChunk: () => true });
@@ -416,7 +426,7 @@ async function walk(
         }
         const [mode, , object] = header;
         header = undefined;
-        if (++count > LIMITS.candidates || Date.now() - started > LIMITS.time) {
+        if (++count > LIMITS.candidates || Date.now() > deadline) {
           incomplete = true;
           complete = false;
           return false;
@@ -482,7 +492,7 @@ async function walk(
       }
     }
     for (const root of [...roots].sort()) {
-      if (++count > LIMITS.candidates || Date.now() - started > LIMITS.time) {
+      if (++count > LIMITS.candidates || Date.now() > deadline) {
         incomplete = true;
         return;
       }
@@ -549,12 +559,15 @@ async function walk(
   return { entries, ignored, incomplete, git, protectedLinks, gitBefore, unknown };
 }
 export async function establishBaseline(handle: WorkspaceHandle): Promise<Baseline> {
+  // One time bound covers the whole baseline, including every Git command it runs.
+  const deadline = Date.now() + LIMITS.time;
   let temp: string | undefined;
   try {
     temp = await mkdtemp(join(tmpdir(), "allagents-baseline-"));
     const { entries, ignored, incomplete, git, protectedLinks } = await walk(
       handle,
       temp,
+      deadline,
       [],
       true,
     );
@@ -576,12 +589,13 @@ export async function captureFileChanges(
   handle: WorkspaceHandle,
   baseline: Baseline,
 ): Promise<FileChanges> {
+  // One time bound covers the walk, every Git command, and the comparison.
   const deadline = Date.now() + LIMITS.time;
   let temp: string | undefined;
   try {
     if (baseline.failure) throw Error(baseline.failure);
     temp = await mkdtemp(join(tmpdir(), "allagents-capture-"));
-    const after = await walk(handle, temp, baseline.ignored, false, baseline);
+    const after = await walk(handle, temp, deadline, baseline.ignored, false, baseline);
     const changedFiles: Record<string, CapturedFile> = {};
     const deletedFiles: string[] = [];
     const omittedPaths: string[] = [];
