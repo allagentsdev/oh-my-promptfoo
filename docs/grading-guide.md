@@ -1,6 +1,6 @@
 # Grading guide
 
-oh-my-promptfoo ships two Promptfoo assertions. `llmAssert` is Promptfoo's
+oh-my-promptfoo ships batched and workspace-aware Promptfoo assertions. `llmAssert` is Promptfoo's
 `llm-rubric` batched: one judge request scores many named criteria, and each
 criterion gets its own score in the results. `agentAssert` uses the same
 criteria format, but a read-only agent judge inspects the test's workspace,
@@ -573,3 +573,40 @@ See [ADR 0008](adr/0008-agent-assert-workspace-grading.md) for the
 live-workspace and resource-bound tradeoffs and
 [ADR 0013](adr/0013-codex-graders-use-a-sandboxed-shell.md) for the Codex
 sandbox.
+
+## Required assertions: veto without score inflation
+
+Wrap a JavaScript Promptfoo config with `withAssertions` before Promptfoo loads
+it. Assertions retain native dispatch; the helper installs the package's
+scoring function to interpret `required`:
+
+```javascript
+import { withAssertions } from "oh-my-promptfoo/assertions";
+
+export default withAssertions({
+  providers: ["echo"],
+  prompts: ["{{task}}"],
+  defaultTest: {
+    assert: [
+      { type: "contains", value: "accepted", required: true, metric: "gate" },
+      { type: "javascript", value: "0.6", metric: "quality" },
+    ],
+  },
+  tests: [{ vars: { task: "accepted" } }],
+});
+```
+
+A failed required assertion vetoes the case: `pass: false`, score `0`, and a
+`Required assertion veto` reason. Passing required assertions are gates, not
+votes: the example scores `0.6`, not `0.8`. All-gate cases score `1` when every
+gate passes. Named scores and native token accounting remain available.
+Unmarked assertions retain their native weighting and case-threshold behavior.
+Nested assertion sets retain their own thresholds, but cannot hide a veto.
+
+The marker works with built-in assertions and JavaScript package assertions,
+including `llmAssert`. Do not add it directly to an unwrapped YAML config:
+stock Promptfoo does not implement its scoring semantics. `withAssertions`
+accepts resolved test objects; resolve external test-file references first.
+Remove the old `assertScoringFunction`; the helper rejects conflicting scorers
+in defaults, tests, and scenarios instead of silently losing the veto.
+

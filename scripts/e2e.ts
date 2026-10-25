@@ -21,7 +21,7 @@ if (
 )
   throw new Error("Usage: e2e.ts [--registry VERSION]");
 const repo = resolve(".");
-const promptfooVersion = "0.124.1";
+const promptfooVersion = "0.125.1";
 const cwd = await mkdtemp(join(realpathSync(tmpdir()), "allagents-e2e-"));
 const workspaceParent = await mkdtemp(join(realpathSync(tmpdir()), "allagents-e2e-workspaces-"));
 // Local sources must work from the eval config alone, without a runner-supplied boundary.
@@ -74,9 +74,9 @@ try {
   if (installedPromptfoo.version !== promptfooVersion)
     throw new Error("Installed Promptfoo version mismatch");
   for (const [name, fixture, version] of [
-    ["@openai/codex-sdk", "codex-sdk.mjs", "0.1.0"],
+    ["@openai/codex-sdk", "codex-sdk.mjs", "0.156.1"],
     ["@github/copilot-sdk", "copilot-sdk.mjs", "1.0.22"],
-    ["@anthropic-ai/claude-agent-sdk", "claude-sdk.mjs", "0.1.0"],
+    ["@anthropic-ai/claude-agent-sdk", "claude-sdk.mjs", "0.3.273"],
   ]) {
     const dir = join(cwd, "node_modules", name);
     // Native SDK loaders also inspect dist files; replace the entire consumer fixture.

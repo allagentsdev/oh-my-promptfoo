@@ -50,7 +50,7 @@ Use `pnpm build`, which invokes `node --import tsx scripts/build.ts`; the explic
 
 ### Reviewed security overrides
 
-The private development workspace uses Promptfoo `0.124.1` and reviewed root overrides while upstream dependency pins or ranges block the fixes:
+The private development workspace uses stock Promptfoo `0.125.1` and reviewed root overrides while upstream dependency pins or ranges block the fixes. The public peer range also accepts `0.125.x`; packed Promptfoo E2E uses `0.125.1`:
 
 * `get-uri@8.0.1` uses `basic-ftp@6.2.3`, including the directory-listing and PASV parsing fixes. The consumed download/list API is compatible; the deliberate security change is that PASV transfers to a different non-loopback host are rejected. FTP PAC deployments that require separate transfer hosts are not compatible with this override. `get-uri` cannot opt back in and has a pre-existing unhandled download-rejection path; use same-host/EPSV FTP or an HTTPS PAC URL instead. Replace the override when the upstream proxy-agent/get-uri chain ships compatible secure ranges ([upstream PR](https://github.com/TooTallNate/proxy-agents/pull/500)).
 * `node-forge` uses the genuine source commit `db05494352dd3c9a5a07c5270333dcc78866cad2` from [Forge PR #1159](https://github.com/digitalbazaar/forge/pull/1159), which rejects noncanonical RSA DigestInfo encodings for CVE-2026-85393. This is an immutable, unmerged contributor commit, not an official patched release; its `1.4.1-0` version comes from upstream. The earlier element-count-only proposal does not cover all bypasses. Replace this source pin once an official release includes the canonical-encoding fix and passes the same regressions.
