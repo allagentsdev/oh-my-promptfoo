@@ -86,6 +86,8 @@ providers:
 
 `delegate` is a discriminated union for the three supported IDs. Each delegate has an internal adapter and an explicit field allowlist. The initial release excludes extra directories, session reuse, settings/plugin discovery, executable overrides, arbitrary native passthroughs, environment inheritance, and function-valued hooks. Prompt-level configuration may override only fields under `delegate.config`. The wrapper validates the merged allowlisted config and sets its private workspace root as `working_dir` last. Codex checks that its working directory is inside a Git repository, but source repositories sit beneath the workspace root. The wrapper therefore sets Codex's `skip_git_repo_check: true` last; neither provider configuration nor prompt overrides may change it. This skips Codex's root check, not the provider's source validation or isolation.
 
+2026-10-25: [ADR 0014](0014-pass-native-delegate-config-through.md) supersedes the Codex/Claude candidate field-allowlist decision above; wrapper, Copilot/Pi and grader schemas remain closed.
+
 `fileChanges` is optional and defaults to `false`. Enabling it captures bounded generated or modified contents, deleted paths, and a unified text diff before `callApi()` returns. It never changes workspace lifetime.
 
 Use stock Promptfoo directly:

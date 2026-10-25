@@ -242,7 +242,18 @@ provider authentication.
 
 ## Workspace provider configuration
 
-Provider config is closed: only `delegate`, `workspace`, `workspaceTimeoutMs`, `workingDir`, `fileChanges`, and `timeoutMs` are accepted. The delegates are exactly `openai:codex-sdk`, `anthropic:claude-agent-sdk`, `copilot-sdk`, and `pi-sdk`. Prompt-level config can change allowed `delegate.config` fields only. Delegate-level working directories, sessions, executable overrides, discovery, arbitrary native passthroughs, environment inheritance, acquisition variables, and cache controls are rejected. The wrapper forces execution and rejects cached responses. Use explicit `delegate.env` for model credentials.
+Provider config is closed: only `delegate`, `workspace`, `workspaceTimeoutMs`, `workingDir`, `fileChanges`, and `timeoutMs` are accepted. The delegates are exactly `openai:codex-sdk`, `anthropic:claude-agent-sdk`, `copilot-sdk`, and `pi-sdk`. Prompt-level config can change `delegate.config` fields only. The wrapper forces execution and rejects cached responses. Use explicit `delegate.env` for model credentials; reserved `ALLAGENTS_*` environment names are rejected, case-insensitively.
+
+For Codex and Claude **candidates**, `delegate.config` passes through to the consumer's native Promptfoo provider for validation. Options such as Codex `cli_config`, `additional_directories`, `codex_path_override`, Claude plugins, settings and settings discovery are allowed. Authors and their configuration are trusted; this is not a sandbox against malicious configuration. The wrapper still validates its contained stdio `mcpServers` structure and Claude `tools` configuration.
+
+Only native keys that conflict with provider-owned workspace, per-row sessions or CLI environment are denied, in both provider config and prompt overrides:
+
+| Delegate | Workspace keys | Session keys | Environment keys |
+| --- | --- | --- | --- |
+| `openai:codex-sdk` | `working_dir`, `copy_working_dir`, `skip_git_repo_check` | `thread_id`, `persist_threads`, `thread_pool_size` | `inherit_process_env`, `cli_env` |
+| `anthropic:claude-agent-sdk` | `working_dir` | `resume`, `fork_session`, `resume_session_at`, `continue`, `session_id`, `persist_session` | `env` |
+
+Use provider-level `workingDir` to select a contained workspace directory and `delegate.env` for CLI environment values. Copilot and Pi keep their closed delegate-config lists because their adapters run our own runtime code. Read-only `agentAssert` graders also keep explicit closed native-config lists: candidate passthrough does not admit `cli_config`, additional directories, executable overrides, plugins or settings discovery into a grader. See [ADR 0014](adr/0014-pass-native-delegate-config-through.md).
 
 Promptfoo forwards the judge selected by `--grader`, `defaultTest.options.provider`,
 or a test's `options.provider` into `context.prompt.config.provider`. It also
@@ -257,7 +268,7 @@ and `delegate.config.timeoutMs` remains constructor-only.
 | Field | Required | Purpose |
 | --- | --- | --- |
 | `delegate.id` | Yes | Selects one of the four supported agents |
-| `delegate.config` | Pi only | Sets allowed agent options; Pi requires nonempty `provider` and `model` |
+| `delegate.config` | Pi only | Passes native candidate options to Promptfoo for Codex/Claude, except provider-owned keys above; Copilot/Pi use closed lists, and Pi requires nonempty `provider` and `model` |
 | `delegate.env` | No | Passes only the named environment values to the agent |
 | `workspace.sources` | Yes | Lists Git, OCI, or host-local inputs; `[]` starts with an empty workspace |
 | `workspace.limits` | No | Narrows source count and download/extraction byte budgets |
@@ -492,7 +503,7 @@ Per-test `options.delegate.config.mcpServers` (forwarded by Promptfoo as
 `context.prompt.config.delegate.config.mcpServers`) replaces the complete
 server map; an empty map removes configured servers for that test. The same key is
 available directly in `CopilotSdk` config, with containment against its existing
-`working_dir`. Codex/Pi and read-only `agentAssert` graders reject it.
+`working_dir`. Pi and read-only `agentAssert` graders reject it. Contained stdio translation is available only for Claude and Copilot; Codex's native options are validated by Promptfoo.
 
 The package invokes only its bundled Node stdio launcher and the contained Node
 script. The actual script receives only its authored env, including when the SDK
@@ -513,8 +524,9 @@ termination does not depend on a main-thread disconnect callback or polling.
 Copilot receives explicit stdio options, tools and timeout with
 `enableConfigDiscovery: false`; permission requests approve only configured server
 and tool pairs. Claude receives Promptfoo's `mcp.servers`,
-`strict_mcp_config: true` and `setting_sources: []`, with configured MCP names added
-to its allowed-tools policy without replacing existing native restrictions.
+`strict_mcp_config: true`, with configured MCP names added to its allowed-tools
+policy without replacing existing native restrictions. Authored Claude
+`setting_sources`, settings and plugins pass through unchanged.
 Model-free consumer tests exercise native Read and permitted/denied Write/Edit
 filesystem actions through stock Promptfoo and a synthetic SDK executor, including
 custom/append allowed tools, disallowed tools, accept-edits, bypass and don't-ask
@@ -526,7 +538,8 @@ deadline for both delegates, even with bypass permissions. It accepts newline
 JSON-RPC only, bounds each frame at 16 MiB and pending requests at 1,024, and
 forwards no late success after timeout. Workspace `.mcp.json`, `.github/mcp.json`,
 `.vscode/mcp.json` and `.copilot/mcp-config.json` cannot add servers through these
-adapters. Plugins and setting-source configuration are not added by this feature.
+contained-tool adapters. Claude candidates can separately opt into native plugins
+and settings discovery through `delegate.config`; those options are trusted.
 
 Observed tool spans preserve display names, arguments and call IDs, and add stable
 `gen_ai.tool.mcp.server` and `gen_ai.tool.mcp.tool` attributes. MCP reads are not

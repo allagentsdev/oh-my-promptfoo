@@ -359,7 +359,7 @@ async function runNative(
       };
     }
     const candidateConfig =
-      frame.delegate === "anthropic:claude-agent-sdk" && !frame.readOnly
+      frame.delegate === "anthropic:claude-agent-sdk" && !frame.readOnly && mcpServers.length > 0
         ? claudeMcpOptions(frame.config, mcpServers)
         : frame.config;
     const config = {

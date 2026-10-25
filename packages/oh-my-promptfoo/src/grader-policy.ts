@@ -22,7 +22,7 @@ const DENIED_TOOLS = [
 
 /** Validate before starting a session, rather than silently ignoring unsafe intent. */
 export function graderConfig(id: DelegateId, input: JsonObject): JsonObject {
-  const config = validateDelegateConfig(id, input);
+  const config = validateDelegateConfig(id, input, "grader");
   const reject = (field: string): never => {
     throw new Error(
       `Agent assertion grader.config.${field} cannot weaken the read-only grader policy`,

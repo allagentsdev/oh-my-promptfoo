@@ -19,50 +19,12 @@ export interface McpServer {
 export interface CodexDelegate {
   id: "openai:codex-sdk";
   env?: Record<string, string>;
-  config?: {
-    apiKey?: string;
-    base_url?: string;
-    maxRetries?: number;
-    model?: string;
-    model_provider?: string;
-    sandbox_mode?: "read-only" | "workspace-write" | "danger-full-access";
-    model_reasoning_effort?: "minimal" | "low" | "medium" | "high" | "xhigh" | "max" | "ultra";
-    network_access_enabled?: boolean;
-    web_search_enabled?: boolean;
-    web_search_mode?: "disabled" | "cached" | "live";
-    collaboration_mode?: "coding" | "plan";
-    approval_policy?: "never" | "on-request" | "on-failure" | "untrusted";
-    output_schema?: JsonObject;
-    enable_streaming?: boolean;
-    deep_tracing?: boolean;
-  };
+  config?: JsonObject;
 }
 export interface ClaudeDelegate {
   id: "anthropic:claude-agent-sdk";
   env?: Record<string, string>;
-  config?: {
-    apiKey?: string;
-    apiKeyRequired?: boolean;
-    model?: string;
-    fallback_model?: string;
-    max_turns?: number;
-    max_thinking_tokens?: number;
-    max_budget_usd?: number;
-    permission_mode?: "default" | "plan" | "acceptEdits" | "bypassPermissions" | "dontAsk" | "auto";
-    allow_dangerously_skip_permissions?: boolean;
-    custom_system_prompt?: string;
-    append_system_prompt?: string;
-    tools?: string[] | { type: "preset"; preset: "claude_code" };
-    custom_allowed_tools?: string[];
-    append_allowed_tools?: string[];
-    allow_all_tools?: boolean;
-    disallowed_tools?: string[];
-    output_format?: JsonObject;
-    include_partial_messages?: boolean;
-    include_hook_events?: boolean;
-    forward_subagent_text?: boolean;
-    mcpServers?: Record<string, McpServer>;
-  };
+  config?: JsonObject;
 }
 export interface CopilotDelegate {
   id: "copilot-sdk";
@@ -125,7 +87,8 @@ export function immutable<T>(value: T): T {
 }
 
 type Rule = "string" | "boolean" | "number" | "object" | "strings" | readonly string[];
-const codex: Record<string, Rule> = {
+// Graders retain the pre-passthrough closed schemas; candidates use native Promptfoo validation.
+const graderCodex: Record<string, Rule> = {
   apiKey: "string",
   base_url: "string",
   maxRetries: "number",
@@ -142,7 +105,7 @@ const codex: Record<string, Rule> = {
   enable_streaming: "boolean",
   deep_tracing: "boolean",
 };
-const claude: Record<string, Rule> = {
+const graderClaude: Record<string, Rule> = {
   apiKey: "string",
   apiKeyRequired: "boolean",
   model: "string",
@@ -177,6 +140,32 @@ const pi: Record<string, Rule> = {
   baseUrl: "string",
   thinkingLevel: ["off", "minimal", "low", "medium", "high", "xhigh"],
   permissions: "object",
+};
+
+const workspaceOwned = "the provider owns the per-row workspace";
+const sessionOwned = "the provider owns per-row session isolation";
+const environmentOwned = "the provider owns the CLI environment; use delegate.env";
+const nativeOwned: Partial<Record<DelegateId, Record<string, string>>> = {
+  "openai:codex-sdk": {
+    working_dir: workspaceOwned,
+    copy_working_dir: workspaceOwned,
+    skip_git_repo_check: workspaceOwned,
+    thread_id: sessionOwned,
+    persist_threads: sessionOwned,
+    thread_pool_size: sessionOwned,
+    inherit_process_env: environmentOwned,
+    cli_env: environmentOwned,
+  },
+  "anthropic:claude-agent-sdk": {
+    working_dir: workspaceOwned,
+    resume: sessionOwned,
+    fork_session: sessionOwned,
+    resume_session_at: sessionOwned,
+    continue: sessionOwned,
+    session_id: sessionOwned,
+    persist_session: sessionOwned,
+    env: environmentOwned,
+  },
 };
 
 export function object(value: unknown, path: string): JsonObject {
@@ -311,22 +300,35 @@ function validateEndpoint(value: unknown): void {
     throw new Error("provider.baseUrl must be HTTP(S) without embedded credentials");
   if (p.azure !== undefined) fields(p.azure, { apiVersion: "string" }, "provider.azure");
 }
-export function validateDelegateConfig(id: DelegateId, value: unknown): JsonObject {
-  const rules =
-    id === "openai:codex-sdk"
-      ? codex
-      : id === "anthropic:claude-agent-sdk"
-        ? { ...claude, tools: "object" as Rule }
-        : id === "pi-sdk"
-          ? pi
-          : { ...copilot, provider: "object" as Rule, permissions: "object" as Rule };
+export function validateDelegateConfig(
+  id: DelegateId,
+  value: unknown,
+  scope: "candidate" | "grader" = "candidate",
+): JsonObject {
+  const owned = scope === "candidate" ? nativeOwned[id] : undefined;
   let config: JsonObject;
-  if (
-    id === "anthropic:claude-agent-sdk" &&
-    Array.isArray(object(value, "delegate.config").tools)
-  ) {
-    config = fields(value, { ...rules, tools: "strings" }, "delegate.config");
-  } else config = fields(value, rules, "delegate.config");
+  if (owned) {
+    config = object(value, "delegate.config");
+    for (const key of Object.keys(config)) {
+      if (Object.hasOwn(owned, key))
+        throw new Error(`delegate.config.${key} is owned by the provider: ${owned[key]}`);
+    }
+  } else {
+    const rules =
+      id === "openai:codex-sdk"
+        ? graderCodex
+        : id === "anthropic:claude-agent-sdk"
+          ? { ...graderClaude, tools: "object" as Rule }
+          : id === "pi-sdk"
+            ? pi
+            : { ...copilot, provider: "object" as Rule, permissions: "object" as Rule };
+    if (
+      id === "anthropic:claude-agent-sdk" &&
+      Array.isArray(object(value, "delegate.config").tools)
+    ) {
+      config = fields(value, { ...rules, tools: "strings" }, "delegate.config");
+    } else config = fields(value, rules, "delegate.config");
+  }
   if (config.mcpServers !== undefined) validateMcpServers(config.mcpServers, id);
   if (
     id === "anthropic:claude-agent-sdk" &&
@@ -337,6 +339,11 @@ export function validateDelegateConfig(id: DelegateId, value: unknown): JsonObje
     if (tools.type !== "preset" || tools.preset !== "claude_code")
       throw new Error("delegate.config.tools must use the claude_code preset");
   }
+  if (id === "anthropic:claude-agent-sdk" && Array.isArray(config.tools)) {
+    if (config.tools.some((tool) => typeof tool !== "string"))
+      throw new Error("delegate.config.tools must be an array of strings");
+  }
+  if (owned) return config;
   if (id === "copilot-sdk") {
     if (
       config.timeoutMs !== undefined &&

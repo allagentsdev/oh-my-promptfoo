@@ -117,7 +117,6 @@ export function claudeMcpOptions(config: JsonObject, servers: ResolvedMcpServer[
     ...rest,
     ...permissionTools,
     strict_mcp_config: true,
-    setting_sources: [],
     mcp: {
       enabled: true,
       servers: servers.map(({ name, command, args, env }) => ({ name, command, args, env })),
