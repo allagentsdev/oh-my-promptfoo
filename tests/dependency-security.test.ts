@@ -1,4 +1,6 @@
+import { spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
+import { fileURLToPath } from "node:url";
 import { expect, test } from "vitest";
 
 // Exercise the Forge copy used by Promptfoo's JKS/PKCS#12 loader, not a separate test pin.
@@ -100,4 +102,37 @@ for (const [name, encoded] of [
     const signature = key.sign(encoded.toString("latin1"), "NONE");
     expect(accepts(signature)).toBe(true);
   });
+}
+
+for (const [mode, invariant] of [
+  ["zod", "SDK Zod rejects oversized collections before visiting their elements"],
+  ["undici", "Pi undici rejects malicious encoding and integrity responses without crashing"],
+  ["azure", "Azure credentials retain trusted redemption and confidential-client guards"],
+] as const) {
+  test(invariant, () => {
+    const env: NodeJS.ProcessEnv = { CI: "1" };
+    for (const key of [
+      "PATH",
+      "HOME",
+      "USERPROFILE",
+      "SYSTEMROOT",
+      "SystemRoot",
+      "TEMP",
+      "TMP",
+      "TMPDIR",
+    ])
+      if (process.env[key]) env[key] = process.env[key];
+    const result = spawnSync(
+      process.execPath,
+      [fileURLToPath(new URL("./fixtures/dependency-audit.mjs", import.meta.url)), mode],
+      { env, encoding: "utf8", timeout: 25_000 },
+    );
+    expect(result.error, result.stderr).toBeUndefined();
+    expect(result.signal, result.stderr).toBeNull();
+    expect(result.status, result.stderr).toBe(0);
+    expect(JSON.parse(result.stdout.trim().split("\n").at(-1) ?? "null")).toEqual({
+      mode,
+      securityInvariant: "passed",
+    });
+  }, 30_000);
 }
