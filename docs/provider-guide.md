@@ -565,7 +565,29 @@ Direct Copilot uses `package:oh-my-promptfoo/providers:CopilotSdk` with an exist
 Both direct and workspace-backed Copilot responses report `metadata.skillCalls`
 and `metadata.copilot.skillSupport: true`. A successful local `read`,
 `read_file`, or `view` of a contained `SKILL.md` records
-`source: "read-tool"`. Copilot's built-in Skill loader also records
+`source: "read-tool"`. Shell reads record `source: "shell-read"` for this
+deliberately small literal-command subset:
+
+- `bash`: `cat [--] <path>`, optionally followed by `; ls <skill-directory>`.
+- `powershell`: `Get-Content <path>`, with optional `-Path` or `-LiteralPath`
+  and `-Raw`. Command and parameter names are case insensitive.
+
+One unquoted or simply quoted path is supported. Relative paths resolve against
+the delegate's working directory or an explicit contained `cwd` argument.
+Both start and completion must see a contained, non-symlinked skill file with
+the same complete body. The successful completion's model-facing `result.content`
+must contain that entire body, including frontmatter (CRLF is normalized).
+Reported nonzero exits, unfinished terminal results and reported cwd mismatches
+are rejected. This output check also prevents a successful trailing `ls` from
+masking a failed `cat`. Only names, paths and provenance enter `skillCalls`.
+
+Shell reads with missing, truncated or redacted bodies do not count. Neither do
+files over 1 MiB, empty files, `..` traversal, wildcards, expansions, pipelines,
+redirections, shell wrappers, `cd`, or other compound commands. Persistent shell
+cwd changes are not inferred. These rules apply to Copilot; Pi continues to
+record its guarded `read` tool only.
+
+Copilot's built-in Skill loader also records
 `source: "sdk-skill-loader"`, but only when its invoked-skill RPC supplies a
 contained, non-symlinked `SKILL.md` path and the loaded body matches the file
 after YAML frontmatter removal. Copilot redacts secret-shaped text in that body,

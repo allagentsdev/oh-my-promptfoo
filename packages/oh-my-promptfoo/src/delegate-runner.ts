@@ -36,7 +36,14 @@ import {
   resolvePeer,
   secrets,
 } from "./protocol.js";
-import { observedSkillRead, type SkillCall, workspaceSkillDirectories } from "./skill-evidence.js";
+import {
+  completedShellSkillRead,
+  observedShellSkillRead,
+  observedSkillRead,
+  type ShellSkillRead,
+  type SkillCall,
+  workspaceSkillDirectories,
+} from "./skill-evidence.js";
 import { type ToolInventory, ToolInventoryBuilder } from "./tool-inventory.js";
 
 // Reserve stdout for protocol even if a peer logs during import or execution.
@@ -516,6 +523,7 @@ async function runCopilot(frame: CallFrame, signal: AbortSignal): Promise<JsonOb
   const cleanupErrors: unknown[] = [];
   const tools = new Set<string>();
   const skillReads = new Map<string, SkillCall>();
+  const shellSkillReads = new Map<string, ShellSkillRead>();
   const skillCalls: SkillCall[] = [];
   const inventory = new ToolInventoryBuilder(sensitive);
   const subagents = new Map<
@@ -728,6 +736,12 @@ async function runCopilot(frame: CallFrame, signal: AbortSignal): Promise<JsonOb
           if (!data.mcpServerName && !data.mcpConfigServerName) {
             const skillRead = observedSkillRead(data.toolName, data.arguments, frame.workingDir);
             if (skillRead) skillReads.set(data.toolCallId, skillRead);
+            const shellRead = observedShellSkillRead(
+              data.toolName,
+              data.arguments,
+              frame.workingDir,
+            );
+            if (shellRead) shellSkillReads.set(data.toolCallId, shellRead);
           }
           const attributes: JsonObject = JSON.parse(redact(jsonSafe(mcpAttributes), sensitive));
           try {
@@ -754,6 +768,11 @@ async function runCopilot(frame: CallFrame, signal: AbortSignal): Promise<JsonOb
           const skillRead = skillReads.get(data.toolCallId);
           skillReads.delete(data.toolCallId);
           if (skillRead && data.success === true) skillCalls.push(skillRead);
+          const shellRead = shellSkillReads.get(data.toolCallId);
+          shellSkillReads.delete(data.toolCallId);
+          const completedRead =
+            shellRead && completedShellSkillRead(shellRead, data, frame.workingDir);
+          if (completedRead) skillCalls.push(completedRead);
           emit({
             version: 1,
             type: "tool",

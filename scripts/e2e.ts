@@ -436,10 +436,9 @@ try {
   }
   const skillSource = join(cwd, "skills");
   await mkdir(join(skillSource, "demo"), { recursive: true });
-  await writeFile(
-    join(skillSource, "demo/SKILL.md"),
-    "---\nname: demo\ndescription: Demo verification skill\n---\nDemo skill.\n",
-  );
+  const shellSkillBody =
+    "---\nname: demo\ndescription: Demo verification skill\n---\nDemo skill.\n";
+  await writeFile(join(skillSource, "demo/SKILL.md"), shellSkillBody);
   // Direct local sources need Linux descriptor-anchored traversal. Elsewhere the same skills
   // reach the workspace through a file:// Git source, and local sources must fail closed.
   const localSources = process.platform === "linux";
@@ -518,6 +517,52 @@ try {
     throw Error(
       "Malformed SDK names dropped stock skill-used evidence or authorized an absence proof",
     );
+  const shellSkillCases = [
+    { command: "cat .agents/skills/demo/SKILL.md", pass: true },
+    { command: "cat .agents/skills/demo/SKILL.md; ls .agents/skills/demo/", pass: true },
+    {
+      command: "Get-Content -LiteralPath '.agents/skills/demo/SKILL.md' -Raw",
+      tool: "powershell",
+      pass: true,
+    },
+    { command: "cat .agents/skills/demo/SKILL.md", content: "SKILL.md\n", pass: false },
+    {
+      command: "cat .agents/skills/demo/SKILL.md; ls .agents/skills/demo/",
+      content: "cat: permission denied\nSKILL.md\n",
+      pass: false,
+    },
+    { command: "echo cat .agents/skills/demo/SKILL.md", pass: false },
+    { command: "cat .agents/skills/demo/SKILL.md", success: false, pass: false },
+  ];
+  const shellSkillGates = await evaluateFixture("shell-skill-used", {
+    tracing: { enabled: false },
+    prompts: ["{{task}}"],
+    providers: skillProviders.filter((provider) => provider.label === "copilot-skills"),
+    tests: shellSkillCases.map(({ command, tool, content, success, pass }, index) => ({
+      vars: {
+        shellCase: index,
+        task: `inventory:${JSON.stringify({
+          events: [
+            inventoryStart("shell", tool ?? "bash", { command }),
+            {
+              type: "tool.execution_complete",
+              data: {
+                toolCallId: "shell",
+                success: success ?? true,
+                result: { content: content ?? shellSkillBody },
+              },
+            },
+          ],
+        })}`,
+      },
+      assert: [{ type: pass ? "skill-used" : "not-skill-used", value: "demo" }],
+    })),
+  });
+  if (
+    shellSkillGates.stats.successes !== shellSkillCases.length ||
+    shellSkillGates.stats.errors !== 0
+  )
+    throw Error(`Shell skill-used gates misgraded: ${JSON.stringify(shellSkillGates.stats)}`);
   const skillGates: Record<string, { successes: number; failures: number; errors: number }> = {};
   type SkillResult = {
     gradingResult?: { pass: boolean };
