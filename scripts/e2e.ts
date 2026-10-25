@@ -562,7 +562,7 @@ try {
               {
                 type: "javascript",
                 value:
-                  "return context.providerResponse.metadata.skillCalls.some(call => call.name === 'demo' && call.source === 'read-tool');",
+                  "context.providerResponse.metadata.skillCalls.some(call => call.name === 'demo' && call.source === 'read-tool')",
               },
             ]
           : []),
