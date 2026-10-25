@@ -36,6 +36,22 @@
 * Exercise public provider/protocol inventory boundaries, forged metadata, stream/call/byte/argument bounds, skill RPC failures and chronology. Extend strict packed ESM/CJS/declaration smokes and stock Promptfoo package-assertion E2E; document the certificate's tool-invocation scope and provide an executable example.
 * Exercise MCP candidate execution and packed consumers with pinned Git fixtures on all platforms; retain the Linux-specific protected local-source case.
 
+## [1.23.0](https://github.com/allagentsdev/oh-my-promptfoo/compare/v1.22.4...v1.23.0) (2026-10-25)
+
+
+### Features
+
+* **assertions:** certify bounded tool inventories (U2) ([#155](https://github.com/allagentsdev/oh-my-promptfoo/issues/155)) ([8d07620](https://github.com/allagentsdev/oh-my-promptfoo/commit/8d076204db699c968bb333b3bf9121356e1bdf6d))
+* **assertions:** let Codex graders read through a sandboxed shell ([#156](https://github.com/allagentsdev/oh-my-promptfoo/issues/156)) ([4271594](https://github.com/allagentsdev/oh-my-promptfoo/commit/427159439b3bdf53dbaa0ab477fe8b656790f009))
+* **mcp:** run contained stdio tools in agent delegates ([#154](https://github.com/allagentsdev/oh-my-promptfoo/issues/154)) ([082580d](https://github.com/allagentsdev/oh-my-promptfoo/commit/082580da2801b1ac563fe087a8432b02d8378388))
+* **providers:** pass native delegate config through to Promptfoo ([#157](https://github.com/allagentsdev/oh-my-promptfoo/issues/157)) ([2332c03](https://github.com/allagentsdev/oh-my-promptfoo/commit/2332c034aaa56ba905f0a8ce7da9028cd1cd47a0))
+
+
+### Bug Fixes
+
+* **deps:** override audited Zod, undici and MSAL transitive dependencies ([#158](https://github.com/allagentsdev/oh-my-promptfoo/issues/158)) ([9cdb001](https://github.com/allagentsdev/oh-my-promptfoo/commit/9cdb0014ebdf4be4173166dfad5d8401b4fc4e72))
+* **workspace:** report hardlinked ignore rules distinctly ([#151](https://github.com/allagentsdev/oh-my-promptfoo/issues/151)) ([89288ca](https://github.com/allagentsdev/oh-my-promptfoo/commit/89288ca7095f3af0fdf00a62d6bdf1a7fca6bcef)), closes [#145](https://github.com/allagentsdev/oh-my-promptfoo/issues/145)
+
 ## [1.22.4](https://github.com/allagentsdev/oh-my-promptfoo/compare/v1.22.3...v1.22.4) (2026-10-24)
 
 
