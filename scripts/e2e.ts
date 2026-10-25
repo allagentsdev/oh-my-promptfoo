@@ -555,7 +555,18 @@ try {
           ],
         })}`,
       },
-      assert: [{ type: pass ? "skill-used" : "not-skill-used", value: "demo" }],
+      assert: [
+        { type: pass ? "skill-used" : "not-skill-used", value: "demo" },
+        ...(pass
+          ? [
+              {
+                type: "javascript",
+                value:
+                  "return context.providerResponse.metadata.skillCalls.some(call => call.name === 'demo' && call.source === 'read-tool');",
+              },
+            ]
+          : []),
+      ],
     })),
   });
   if (

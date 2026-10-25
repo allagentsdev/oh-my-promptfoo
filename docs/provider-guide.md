@@ -565,8 +565,12 @@ Direct Copilot uses `package:oh-my-promptfoo/providers:CopilotSdk` with an exist
 Both direct and workspace-backed Copilot responses report `metadata.skillCalls`
 and `metadata.copilot.skillSupport: true`. A successful local `read`,
 `read_file`, or `view` of a contained `SKILL.md` records
-`source: "read-tool"`. Shell reads record `source: "shell-read"` for this
-deliberately small literal-command subset:
+`source: "read-tool"`. Verified shell reads use the same `read-tool` provenance:
+it denotes a verified tool-mediated file read, while `sdk-skill-loader` denotes
+the SDK's loader. The exact tool name and command remain in `toolInventory`.
+This preserves the existing source values for consumer assertions that accept
+verified read/loader records. Shell recognition admits this deliberately small
+literal-command subset:
 
 - `bash`: `cat [--] <path>`, optionally followed by `; ls <skill-directory>`.
 - `powershell`: `Get-Content <path>`, with optional `-Path` or `-LiteralPath`

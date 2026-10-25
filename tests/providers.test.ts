@@ -2275,7 +2275,7 @@ describe("direct Copilot provider", () => {
       );
       expect(response.error).toBeUndefined();
       expect((response.metadata as { skillCalls: unknown[] }).skillCalls).toEqual([
-        { name: "cus-gen-schema-review", path: join(path, skill), source: "shell-read" },
+        { name: "cus-gen-schema-review", path: join(path, skill), source: "read-tool" },
       ]);
       expect(JSON.stringify(response.metadata)).not.toContain(body);
       for (const scenario of [

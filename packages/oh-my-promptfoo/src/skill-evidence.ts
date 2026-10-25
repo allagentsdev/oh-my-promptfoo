@@ -6,7 +6,7 @@ import type { JsonObject } from "./config.js";
 export interface SkillCall {
   name: string;
   path: string;
-  source: "read-tool" | "shell-read" | "sdk-skill-loader";
+  source: "read-tool" | "sdk-skill-loader";
 }
 
 export interface ShellSkillRead {
@@ -138,7 +138,7 @@ export function observedShellSkillRead(
     const body = readFileSync(candidate, "utf8").replace(/\r\n/g, "\n");
     if (!body.trim()) return;
     return {
-      skill: { ...skill, source: "shell-read" },
+      skill,
       cwd,
       bodyHash: createHash("sha256").update(body).digest("hex"),
     };

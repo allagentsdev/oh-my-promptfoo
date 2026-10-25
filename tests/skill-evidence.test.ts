@@ -1,3 +1,4 @@
+import { execFile } from "node:child_process";
 import { realpathSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, symlink, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -49,7 +50,7 @@ describe("literal shell skill reads", () => {
     expect(read).toBeDefined();
     expect(
       completedShellSkillRead(read!, completion(`Output:\n${body}\nSKILL.md\n`), workspace()),
-    ).toEqual({ name: "example", path: join(workspace(), skill), source: "shell-read" });
+    ).toEqual({ name: "example", path: join(workspace(), skill), source: "read-tool" });
   });
 
   test.each([".agents", ".claude", ".github"])(
@@ -299,5 +300,3 @@ describe("shell read completion evidence", () => {
     },
   );
 });
-
-import { execFile } from "node:child_process";
