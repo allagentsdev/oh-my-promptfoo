@@ -2242,6 +2242,90 @@ describe("direct Copilot provider", () => {
       await provider.cleanup();
     }
   });
+  test("credits the consumer's completed cat and ls skill read", async () => {
+    const fixture = await readFile(new URL("./fixtures/copilot-sdk.mjs", import.meta.url), "utf8");
+    const path = await project("@github/copilot-sdk", fixture);
+    const skill = ".agents/skills/cus-gen-schema-review/SKILL.md";
+    const body = "---\nname: cus-gen-schema-review\n---\n# Review the Customs schema\n";
+    await mkdir(dirname(join(path, skill)), { recursive: true });
+    await writeFile(join(path, skill), body);
+    const provider = new CopilotSdk({ config: { basePath: path, working_dir: "." } });
+    try {
+      const response = await provider.callApi(
+        `inventory:${JSON.stringify({
+          events: [
+            {
+              type: "tool.execution_start",
+              data: {
+                toolCallId: "shell-read",
+                toolName: "bash",
+                arguments: { command: `cat ${skill}; ls .agents/skills/cus-gen-schema-review/` },
+              },
+            },
+            {
+              type: "tool.execution_complete",
+              data: {
+                toolCallId: "shell-read",
+                success: true,
+                result: { content: `${body}\nSKILL.md\n` },
+              },
+            },
+          ],
+        })}`,
+      );
+      expect(response.error).toBeUndefined();
+      expect((response.metadata as { skillCalls: unknown[] }).skillCalls).toEqual([
+        { name: "cus-gen-schema-review", path: join(path, skill), source: "read-tool" },
+      ]);
+      expect(JSON.stringify(response.metadata)).not.toContain(body);
+      for (const scenario of [
+        { startedOnly: true },
+        { success: false },
+        { content: "SKILL.md\n" },
+        { mcpServerName: "unrelated-server" },
+        { command: `echo cat ${skill}` },
+      ]) {
+        const request = scenario as {
+          startedOnly?: boolean;
+          success?: boolean;
+          content?: string;
+          mcpServerName?: string;
+          command?: string;
+        };
+        const negative = await provider.callApi(
+          `inventory:${JSON.stringify({
+            events: [
+              {
+                type: "tool.execution_start",
+                data: {
+                  toolCallId: "rejected",
+                  toolName: "bash",
+                  arguments: { command: request.command ?? `cat ${skill}` },
+                  ...(request.mcpServerName ? { mcpServerName: request.mcpServerName } : {}),
+                },
+              },
+              ...(request.startedOnly
+                ? []
+                : [
+                    {
+                      type: "tool.execution_complete",
+                      data: {
+                        toolCallId: "rejected",
+                        success: request.success ?? true,
+                        result: { content: request.content ?? body },
+                      },
+                    },
+                  ]),
+            ],
+          })}`,
+        );
+        expect(negative.error).toBeUndefined();
+        expect((negative.metadata as { skillCalls: unknown[] }).skillCalls).toEqual([]);
+      }
+    } finally {
+      await provider.cleanup();
+    }
+  });
   test("workspace Agent records only SDK-loaded matching local skill content", async () => {
     const fixture = await readFile(new URL("./fixtures/copilot-sdk.mjs", import.meta.url), "utf8");
     const path = await project("@github/copilot-sdk", fixture);
