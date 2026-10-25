@@ -162,6 +162,26 @@ test("Pi graders enforce read-only permissions without falling through Claude co
     /not supported/,
   );
 });
+for (const id of ["openai:codex-sdk", "anthropic:claude-agent-sdk"] as const) {
+  test(`${id} graders retain a closed native config schema`, () => {
+    for (const key of [
+      "cli_config",
+      "sandbox_workspace_write",
+      "additional_directories",
+      "codex_path_override",
+      "plugins",
+      "settings",
+      "setting_sources",
+      "hooks",
+      "extra_args",
+      "unknown_native_option",
+    ])
+      assert.throws(
+        () => graderConfig(id, { [key]: {} }),
+        new RegExp(`delegate\\.config\\.${key} is not supported`),
+      );
+  });
+}
 
 const pathAllowed = [true, false, false, false, true, true, false, false];
 

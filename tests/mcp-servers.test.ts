@@ -17,6 +17,7 @@ import {
   "tool-called" as toolCalled,
   "tool-not-called" as toolNotCalled,
 } from "../packages/oh-my-promptfoo/src/assertions";
+import { claudeMcpOptions } from "../packages/oh-my-promptfoo/src/mcp";
 import { Agent, CopilotSdk } from "../packages/oh-my-promptfoo/src/providers";
 import { toolInventory as parseToolInventory } from "../packages/oh-my-promptfoo/src/tool-inventory";
 import { removeTree } from "../packages/workspace-core/src/fs";
@@ -25,6 +26,29 @@ const roots: string[] = [];
 afterEach(async () => {
   vi.unstubAllEnvs();
   await Promise.all(roots.splice(0).map((root) => removeTree(root)));
+});
+
+test("contained Claude MCP translation preserves authored native discovery settings", () => {
+  const config = {
+    setting_sources: ["project", "user"],
+    settings: { model: "fixture" },
+    plugins: [{ type: "local", path: "./plugin" }],
+    tools: ["Read"],
+    mcpServers: { fixture: { path: "server.mjs" } },
+  };
+  const translated = claudeMcpOptions(config, [
+    {
+      name: "fixture",
+      command: process.execPath,
+      args: ["launcher.js"],
+      env: {},
+      cwd: "/workspace",
+    },
+  ]);
+  for (const key of ["setting_sources", "settings", "plugins", "tools"] as const)
+    expect(translated[key]).toBe(config[key]);
+  expect(translated.mcpServers).toBeUndefined();
+  expect(translated.mcp).toMatchObject({ enabled: true, servers: [{ name: "fixture" }] });
 });
 
 async function consumerProject(moduleName = "@github/copilot-sdk") {
@@ -708,7 +732,7 @@ for (const id of candidates) {
   });
 }
 
-for (const id of ["openai:codex-sdk", "pi-sdk"]) {
+for (const id of ["pi-sdk"]) {
   test(`${id} does not accept MCP configuration`, () => {
     expect(
       () =>

@@ -173,7 +173,7 @@ describe("tool inventory public boundary", () => {
   });
 });
 
-describe("closed configuration", () => {
+describe("provider configuration", () => {
   test("providers export from ./providers alone, without a Provider suffix", () => {
     expect(Object.keys(providerEntry).sort()).toEqual([
       "Agent",
@@ -198,12 +198,7 @@ describe("closed configuration", () => {
     expect(() =>
       validateAgentConfig({ delegate: { id: "allagents:workspace" }, workspace }),
     ).toThrow();
-    for (const id of [
-      "openai:codex-sdk",
-      "anthropic:claude-agent-sdk",
-      "copilot-sdk",
-      "pi-sdk",
-    ] as const) {
+    for (const id of ["copilot-sdk", "pi-sdk"] as const) {
       for (const key of [
         "working_dir",
         "bustCache",
@@ -237,6 +232,112 @@ describe("closed configuration", () => {
       expect(() =>
         validateAgentConfig({ delegate: { id: "openai:codex-sdk" }, workspace, workingDir }),
       ).toThrow(/config\.workingDir/);
+  });
+  for (const [id, denied] of [
+    [
+      "openai:codex-sdk",
+      {
+        working_dir: "workspace",
+        copy_working_dir: "workspace",
+        skip_git_repo_check: "workspace",
+        thread_id: "session",
+        persist_threads: "session",
+        thread_pool_size: "session",
+        inherit_process_env: "environment",
+        cli_env: "environment",
+      },
+    ],
+    [
+      "anthropic:claude-agent-sdk",
+      {
+        working_dir: "workspace",
+        resume: "session",
+        fork_session: "session",
+        resume_session_at: "session",
+        continue: "session",
+        session_id: "session",
+        persist_session: "session",
+        env: "environment",
+      },
+    ],
+  ] as const) {
+    for (const [key, ownership] of Object.entries(denied)) {
+      test(`${id} rejects provider-owned ${key} in constructor and prompt config`, () => {
+        const config = { [key]: false };
+        const reason =
+          ownership === "workspace"
+            ? "the provider owns the per-row workspace"
+            : ownership === "session"
+              ? "the provider owns per-row session isolation"
+              : "the provider owns the CLI environment; use delegate.env";
+        const message = `delegate.config.${key} is owned by the provider: ${reason}`;
+        expect(() =>
+          validateAgentConfig({ delegate: { id, config }, workspace: { sources: [] } }),
+        ).toThrow(message);
+        expect(() =>
+          promptConfig({ prompt: { config: { delegate: { config } } } }, id, {}),
+        ).toThrow(message);
+      });
+    }
+    test(`${id} passes native options through without wrapper value validation`, () => {
+      const config = { model: 123, base_url: "native-validation", max_turns: 1.5 };
+      expect(validateDelegateConfig(id, config)).toBe(config);
+    });
+  }
+  for (const [flag, ownership] of [
+    ["resume", "session"],
+    ["r", "session"],
+    ["continue", "session"],
+    ["c", "session"],
+    ["fork-session", "session"],
+    ["session-id", "session"],
+    ["resume-session-at", "session"],
+    ["resume-drops-turn", "session"],
+    ["no-session-persistence", "session"],
+    ["from-pr", "session"],
+    ["teleport", "session"],
+    ["cloud", "session"],
+    ["worktree", "workspace"],
+    ["w", "workspace"],
+  ] as const) {
+    test(`Claude rejects provider-owned extra_args ${flag} in constructor and prompt config`, () => {
+      const id = "anthropic:claude-agent-sdk";
+      for (const key of [flag, `--${flag.toUpperCase()}`, `-${flag}`, `${flag}=existing-session`]) {
+        const config = { extra_args: { [key]: "existing-session" } };
+        const reason =
+          ownership === "workspace"
+            ? "the provider owns the per-row workspace"
+            : "the provider owns per-row session isolation";
+        const message = `delegate.config.extra_args.${key} is owned by the provider: ${reason}`;
+        expect(() =>
+          validateAgentConfig({ delegate: { id, config }, workspace: { sources: [] } }),
+        ).toThrow(message);
+        expect(() =>
+          promptConfig({ prompt: { config: { delegate: { config } } } }, id, {}),
+        ).toThrow(message);
+      }
+    });
+  }
+  test("Claude preserves allowed extra_args including additional directories", () => {
+    const id = "anthropic:claude-agent-sdk";
+    const config = { extra_args: { "add-dir": "../trusted", model: "fixture", settings: "{}" } };
+    expect(validateDelegateConfig(id, config)).toBe(config);
+    expect(promptConfig({ prompt: { config: { delegate: { config } } } }, id, {})).toEqual(config);
+  });
+  test("every delegate rejects reserved ALLAGENTS environment names", () => {
+    for (const id of ["openai:codex-sdk", "anthropic:claude-agent-sdk", "copilot-sdk", "pi-sdk"]) {
+      for (const key of ["ALLAGENTS_GIT_TOKEN", "allagents_workspace_root"])
+        expect(() =>
+          validateAgentConfig({
+            delegate: {
+              id,
+              config: id === "pi-sdk" ? { provider: "openai", model: "fixture" } : {},
+              env: { [key]: "x" },
+            },
+            workspace: { sources: [] },
+          }),
+        ).toThrow(`delegate.env.${key} is reserved`);
+    }
   });
   test("keeps workspace preparation and agent call deadlines separate", () => {
     const config = validateAgentConfig({
@@ -384,7 +485,7 @@ describe("closed configuration", () => {
       { delegate: { id: "copilot-sdk" } },
       { delegate: { permissions: {} } },
       { delegate: { env: {} } },
-      { delegate: { config: { env: {} } } },
+      { delegate: { config: { cli_env: {} } } },
     ])
       expect(() =>
         promptConfig(
@@ -411,7 +512,7 @@ describe("closed configuration", () => {
             },
           },
         },
-        "openai:codex-sdk",
+        "copilot-sdk",
         {},
       ),
     ).toThrow("prompt.config.delegate.config.timeoutMs is constructor-only");
@@ -457,6 +558,54 @@ describe("closed configuration", () => {
       "https://example.test/repo.git",
     ]);
   });
+});
+describe("native delegate config passthrough", () => {
+  for (const [id, config, override] of [
+    [
+      "openai:codex-sdk",
+      {
+        cli_config: { model_verbosity: "low" },
+        additional_directories: ["../trusted"],
+        codex_path_override: "/trusted/codex",
+      },
+      { cli_config: { model_verbosity: "high" } },
+    ],
+    [
+      "anthropic:claude-agent-sdk",
+      {
+        plugins: [{ type: "local", path: "./trusted-plugin" }],
+        setting_sources: ["project", "user"],
+        additional_directories: ["../trusted"],
+        extra_args: { "add-dir": "../trusted", settings: "{}" },
+      },
+      { setting_sources: ["local"], extra_args: { "add-dir": "../other" } },
+    ],
+  ] as const) {
+    test(`${id} forwards constructor and prompt options unchanged to loadApiProvider`, async () => {
+      const path = await project("promptfoo", native);
+      const provider = new Agent({
+        config: { basePath: path, delegate: { id, config }, workspace: { sources: [] } },
+        env: {
+          ALLAGENTS_CACHE_ROOT: join(path, "cache"),
+          ALLAGENTS_WORKSPACE_ROOT: join(path, "runtime"),
+        },
+      });
+      try {
+        for (const promptOverride of [undefined, override]) {
+          const response = await provider.callApi(
+            "passthrough",
+            promptOverride ? { prompt: { config: { delegate: { config: promptOverride } } } } : {},
+          );
+          expect(response.error).toBeUndefined();
+          const metadata = response.metadata as { options: { options: { config: object } } };
+          const options = metadata.options;
+          expect(options.options.config).toMatchObject({ ...config, ...promptOverride });
+        }
+      } finally {
+        await provider.cleanup();
+      }
+    });
+  }
 });
 describe("workspace provider publication and lifetime", () => {
   test("provider refuses unsafe HTTPS staging instead of trying a privileged helper", async () => {

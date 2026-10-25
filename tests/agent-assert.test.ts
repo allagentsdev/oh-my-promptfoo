@@ -902,6 +902,26 @@ test("agentAssert rejects read-only policy overrides before delegate execution",
     assert.deepEqual(await calls(), []);
   });
 });
+test("agentAssert rejects native passthrough widening options before starting a grader", async () => {
+  await withGrader(async ({ queue, calls, context }) => {
+    await queue([]);
+    for (const id of ["openai:codex-sdk", "anthropic:claude-agent-sdk"] as const) {
+      for (const key of [
+        "cli_config",
+        "sandbox_workspace_write",
+        "additional_directories",
+        "codex_path_override",
+        "plugins",
+        "setting_sources",
+      ])
+        await assert.rejects(
+          agentAssert("candidate answer", context(id, { [key]: {} })),
+          new RegExp(`delegate\\.config\\.${key} is not supported`),
+        );
+    }
+    assert.deepEqual(await calls(), []);
+  });
+});
 
 test("agentAssert serializes grader sessions per process, including the malformed-reply retry", async () => {
   await withGrader(async ({ queue, calls, context }) => {
