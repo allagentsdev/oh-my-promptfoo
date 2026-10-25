@@ -253,6 +253,8 @@ Only native keys that conflict with provider-owned workspace, per-row sessions o
 | `openai:codex-sdk` | `working_dir`, `copy_working_dir`, `skip_git_repo_check` | `thread_id`, `persist_threads`, `thread_pool_size` | `inherit_process_env`, `cli_env` |
 | `anthropic:claude-agent-sdk` | `working_dir` | `resume`, `fork_session`, `resume_session_at`, `continue`, `session_id`, `persist_session` | `env` |
 
+Claude `extra_args` cannot bypass these ownership checks. Denied session flags are `resume`/`r`, `continue`/`c`, `fork-session`, `session-id`, `resume-session-at`, `resume-drops-turn`, `no-session-persistence`, `from-pr`, `teleport` and `cloud`; `worktree`/`w` is denied because it changes the workspace. Leading dashes, case and `=value` spelling do not bypass the check. `add-dir` remains allowed, just like `additional_directories`. All other extra flags pass through to Promptfoo.
+
 Use provider-level `workingDir` to select a contained workspace directory and `delegate.env` for CLI environment values. Copilot and Pi keep their closed delegate-config lists because their adapters run our own runtime code. Read-only `agentAssert` graders also keep explicit closed native-config lists: candidate passthrough does not admit `cli_config`, additional directories, executable overrides, plugins or settings discovery into a grader. See [ADR 0014](adr/0014-pass-native-delegate-config-through.md).
 
 Promptfoo forwards the judge selected by `--grader`, `defaultTest.options.provider`,

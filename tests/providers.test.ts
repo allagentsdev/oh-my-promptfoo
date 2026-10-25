@@ -284,6 +284,46 @@ describe("provider configuration", () => {
       expect(validateDelegateConfig(id, config)).toBe(config);
     });
   }
+  for (const [flag, ownership] of [
+    ["resume", "session"],
+    ["r", "session"],
+    ["continue", "session"],
+    ["c", "session"],
+    ["fork-session", "session"],
+    ["session-id", "session"],
+    ["resume-session-at", "session"],
+    ["resume-drops-turn", "session"],
+    ["no-session-persistence", "session"],
+    ["from-pr", "session"],
+    ["teleport", "session"],
+    ["cloud", "session"],
+    ["worktree", "workspace"],
+    ["w", "workspace"],
+  ] as const) {
+    test(`Claude rejects provider-owned extra_args ${flag} in constructor and prompt config`, () => {
+      const id = "anthropic:claude-agent-sdk";
+      for (const key of [flag, `--${flag.toUpperCase()}`, `-${flag}`, `${flag}=existing-session`]) {
+        const config = { extra_args: { [key]: "existing-session" } };
+        const reason =
+          ownership === "workspace"
+            ? "the provider owns the per-row workspace"
+            : "the provider owns per-row session isolation";
+        const message = `delegate.config.extra_args.${key} is owned by the provider: ${reason}`;
+        expect(() =>
+          validateAgentConfig({ delegate: { id, config }, workspace: { sources: [] } }),
+        ).toThrow(message);
+        expect(() =>
+          promptConfig({ prompt: { config: { delegate: { config } } } }, id, {}),
+        ).toThrow(message);
+      }
+    });
+  }
+  test("Claude preserves allowed extra_args including additional directories", () => {
+    const id = "anthropic:claude-agent-sdk";
+    const config = { extra_args: { "add-dir": "../trusted", model: "fixture", settings: "{}" } };
+    expect(validateDelegateConfig(id, config)).toBe(config);
+    expect(promptConfig({ prompt: { config: { delegate: { config } } } }, id, {})).toEqual(config);
+  });
   test("every delegate rejects reserved ALLAGENTS environment names", () => {
     for (const id of ["openai:codex-sdk", "anthropic:claude-agent-sdk", "copilot-sdk", "pi-sdk"]) {
       for (const key of ["ALLAGENTS_GIT_TOKEN", "allagents_workspace_root"])
@@ -536,8 +576,9 @@ describe("native delegate config passthrough", () => {
         plugins: [{ type: "local", path: "./trusted-plugin" }],
         setting_sources: ["project", "user"],
         additional_directories: ["../trusted"],
+        extra_args: { "add-dir": "../trusted", settings: "{}" },
       },
-      { setting_sources: ["local"] },
+      { setting_sources: ["local"], extra_args: { "add-dir": "../other" } },
     ],
   ] as const) {
     test(`${id} forwards constructor and prompt options unchanged to loadApiProvider`, async () => {

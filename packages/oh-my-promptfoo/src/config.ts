@@ -167,6 +167,22 @@ const nativeOwned: Partial<Record<DelegateId, Record<string, string>>> = {
     env: environmentOwned,
   },
 };
+const claudeOwnedArgs: Record<string, string> = {
+  resume: sessionOwned,
+  r: sessionOwned,
+  continue: sessionOwned,
+  c: sessionOwned,
+  "fork-session": sessionOwned,
+  "session-id": sessionOwned,
+  "resume-session-at": sessionOwned,
+  "resume-drops-turn": sessionOwned,
+  "no-session-persistence": sessionOwned,
+  "from-pr": sessionOwned,
+  teleport: sessionOwned,
+  cloud: sessionOwned,
+  worktree: workspaceOwned,
+  w: workspaceOwned,
+};
 
 export function object(value: unknown, path: string): JsonObject {
   if (
@@ -312,6 +328,21 @@ export function validateDelegateConfig(
     for (const key of Object.keys(config)) {
       if (Object.hasOwn(owned, key))
         throw new Error(`delegate.config.${key} is owned by the provider: ${owned[key]}`);
+    }
+    if (
+      id === "anthropic:claude-agent-sdk" &&
+      config.extra_args &&
+      typeof config.extra_args === "object"
+    ) {
+      for (const key of Object.keys(config.extra_args)) {
+        const name = key.replace(/^-+/, "").toLowerCase();
+        const equals = name.indexOf("=");
+        const flag = equals < 0 ? name : name.slice(0, equals);
+        if (Object.hasOwn(claudeOwnedArgs, flag))
+          throw new Error(
+            `delegate.config.extra_args.${key} is owned by the provider: ${claudeOwnedArgs[flag]}`,
+          );
+      }
     }
   } else {
     const rules =
