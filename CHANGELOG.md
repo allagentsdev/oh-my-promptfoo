@@ -36,6 +36,22 @@
 * Exercise public provider/protocol inventory boundaries, forged metadata, stream/call/byte/argument bounds, skill RPC failures and chronology. Extend strict packed ESM/CJS/declaration smokes and stock Promptfoo package-assertion E2E; document the certificate's tool-invocation scope and provide an executable example.
 * Exercise MCP candidate execution and packed consumers with pinned Git fixtures on all platforms; retain the Linux-specific protected local-source case.
 
+## [1.27.0](https://github.com/allagentsdev/oh-my-promptfoo/compare/v1.26.0...v1.27.0) (2026-10-26)
+
+
+### ⚠ BREAKING CHANGES
+
+* **assertions:** default llmAssert and agentAssert to binary scoring ([#170](https://github.com/allagentsdev/oh-my-promptfoo/issues/170))
+
+### Features
+
+* **assertions:** default llmAssert and agentAssert to binary scoring ([#170](https://github.com/allagentsdev/oh-my-promptfoo/issues/170)) ([db20931](https://github.com/allagentsdev/oh-my-promptfoo/commit/db209311efbce566fb23343989f1159b4e35ee4e))
+
+
+### Miscellaneous Chores
+
+* release 1.27.0 ([#172](https://github.com/allagentsdev/oh-my-promptfoo/issues/172)) ([e3959cb](https://github.com/allagentsdev/oh-my-promptfoo/commit/e3959cb80b788fdfd79002680db67edb3a801ffb))
+
 ## [1.26.0](https://github.com/allagentsdev/oh-my-promptfoo/compare/v1.25.0...v1.26.0) (2026-10-26)
 
 
