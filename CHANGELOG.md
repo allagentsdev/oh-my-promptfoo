@@ -36,6 +36,13 @@
 * Exercise public provider/protocol inventory boundaries, forged metadata, stream/call/byte/argument bounds, skill RPC failures and chronology. Extend strict packed ESM/CJS/declaration smokes and stock Promptfoo package-assertion E2E; document the certificate's tool-invocation scope and provide an executable example.
 * Exercise MCP candidate execution and packed consumers with pinned Git fixtures on all platforms; retain the Linux-specific protected local-source case.
 
+## [1.25.0](https://github.com/allagentsdev/oh-my-promptfoo/compare/v1.24.0...v1.25.0) (2026-10-26)
+
+
+### Features
+
+* **assertions:** attach captured workspace evidence to judge prompts ([#166](https://github.com/allagentsdev/oh-my-promptfoo/issues/166)) ([0215ac3](https://github.com/allagentsdev/oh-my-promptfoo/commit/0215ac3ce32278743c86f2506ad25be0b6143f3c))
+
 ## [1.24.0](https://github.com/allagentsdev/oh-my-promptfoo/compare/v1.23.1...v1.24.0) (2026-10-26)
 
 
