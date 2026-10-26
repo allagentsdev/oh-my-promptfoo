@@ -1159,6 +1159,7 @@ try {
       type: "javascript",
       value: "package:oh-my-promptfoo/assertions:llmAssert",
       config: {
+        scoring: "graded",
         components: [
           { metric: "accuracy", value: "Grounded" },
           { metric: "clarity", value: "Clear" },
