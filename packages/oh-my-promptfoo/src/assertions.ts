@@ -22,6 +22,11 @@ export {
 } from "./tool-assertions.js";
 export type { ToolCall, ToolInventory } from "./tool-inventory.js";
 export type { WorkspaceEvidenceOption } from "./workspace-evidence.js";
+export {
+  type WorkspaceFileConfig,
+  type WorkspaceFileCriterion,
+  workspaceFile as "workspace-file",
+} from "./workspace-file.js";
 
 /** llmAssert's config: the rubric, and optionally this assertion's own judge. */
 export interface LlmAssertConfig extends BatchedRubricConfig {
