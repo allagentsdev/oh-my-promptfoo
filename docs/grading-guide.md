@@ -610,7 +610,6 @@ accepts resolved test objects; resolve external test-file references first.
 Remove the old `assertScoringFunction`; the helper rejects conflicting scorers
 in defaults, tests, and scenarios instead of silently losing the veto.
 
-<<<<<<< HEAD
 ## Captured workspace evidence without a grader agent
 
 `llmAssert.config.workspaceEvidence` attaches final captured file contents to
@@ -702,4 +701,43 @@ absence assertions. Simple `command [-p] [--] executable` and
 such as `eval`, `source`, and `.` fail closed. External wrappers, interpreters,
 and scripts are not recursively interpreted. Use raw argument regexes only
 when their weaker semantics are appropriate.
+
+## Deterministic workspace-file assertion
+
+```yaml
+- type: javascript
+  value: package:oh-my-promptfoo/assertions:workspace-file
+  config:
+    files:
+      - path: output/result.json
+        isJson: true
+        jsonPath: { path: /items, equals: [1, 2] }
+      - path: output/notice.txt
+        equals: "done\n"
+        byteLength: 5
+      - path: output/obsolete.txt
+        absent: true
+```
+
+A single `{ path, ...clauses }` also works. All files and all their clauses are
+ANDed; results include one named sub-result and named score per unique path.
+Supported clauses are `equals`, `contains`, `regex` (a pattern string or
+`{ regex, flags? }`), `isJson`, `jsonPath`, `absent`, `byteLength`, and `encoding`.
+`jsonPath` accepts a dotted path or JSON Pointer. A string selects a field that
+must exist; `{ path, equals }` additionally compares its JSON value exactly.
+String clauses apply to that selected field when one is specified.
+
+Text defaults to strict UTF-8. `encoding` accepts `utf8`, `utf16le`, `ascii`,
+or byte-preserving `latin1`; invalid encoded text fails the criterion. Byte-order
+marks are preserved in decoded text rather than silently discarded by `equals`.
+`byteLength` counts raw bytes, independently of decoding. A byte-length-only
+check works for binary files. Use `equals` with `latin1` for a byte-preserving
+binary comparison. `absent: true` cannot be combined with content clauses.
+
+This assertion shares the capture-first reader described above. Deletion
+capture or a complete retained workspace can prove absence; a missing entry in
+`changedFiles` alone cannot. Missing paths without `absent: true`, missing or
+corrupt capture, symlinks, hardlinks, traversal, and unavailable retained files
+are grader errors. Paths cannot enter `.git`. Retained-file reads are bounded
+to 16 MiB and reject files changed while reading. No LLM is involved.
 
