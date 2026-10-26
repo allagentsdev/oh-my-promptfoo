@@ -204,6 +204,10 @@ test("agentAssert shares component scoring and inspects the live workspace with 
         passed.componentResults.map(({ assertion }) => assertion.metric),
         ["accuracy", "scope"],
       );
+      assert.deepEqual(
+        passed.componentResults.map(({ assertion }) => assertion.threshold),
+        [1, 1],
+      );
       const failed = await agentAssert("I fixed the parser", gradingContext);
       assert.equal(failed.pass, false);
       assert.equal(failed.score, 0.75);
@@ -222,6 +226,10 @@ test("agentAssert shares component scoring and inspects the live workspace with 
       assert.ok(recorded[0].prompt.startsWith("You grade the answer inside <Output>"));
       assert.equal(passed.metadata.renderedGradingPrompt, recorded[0].prompt);
       assert.match(recorded[0].prompt, /never an unverified claim/);
+      assert.match(
+        recorded[0].prompt,
+        /Score each criterion 1 if the answer fully meets it, otherwise 0/,
+      );
       assert.ok(
         recorded[0].prompt.includes(
           "The answer comes from an agent: credit what it states and the workspace outcomes you actually inspect",
@@ -260,6 +268,39 @@ test("agentAssert shares component scoring and inspects the live workspace with 
   });
 }, 30_000);
 
+test("agentAssert defaults to binary and requires graded mode for partial-credit passes", async () => {
+  await withGrader(async ({ queue, calls, context }) => {
+    const output = JSON.stringify({
+      components: [
+        { metric: "accuracy", score: 1, pass: true, reason: "Inspected input.txt" },
+        { metric: "scope", score: 0.9, pass: true, reason: "Nearly focused" },
+      ],
+    });
+    await queue([{ output }, { output }, { output }]);
+    const gradingContext = context();
+    const implicit = await agentAssert("I fixed the parser", gradingContext);
+    const explicit = await agentAssert("I fixed the parser", {
+      ...gradingContext,
+      config: { ...gradingContext.config, scoring: "binary" },
+    });
+    assert.equal(implicit.pass, false);
+    assert.equal(implicit.componentResults[1].pass, false);
+    assert.deepEqual(implicit.componentResults, explicit.componentResults);
+
+    const graded = await agentAssert("I fixed the parser", {
+      ...gradingContext,
+      config: { ...gradingContext.config, scoring: "graded" },
+    });
+    assert.equal(graded.pass, true);
+    assert.equal(graded.score, implicit.score);
+    assert.ok(graded.componentResults.every(({ assertion }) => assertion.threshold === undefined));
+    const recorded = await calls();
+    assert.equal(recorded[0].prompt, recorded[1].prompt);
+    assert.doesNotMatch(recorded[2].prompt, /Score each criterion 1/);
+    assert.match(recorded[2].prompt, /never an unverified claim/);
+  });
+});
+
 test("agentAssert applies a component threshold in place of config.threshold", async () => {
   await withGrader(async ({ queue, context }) => {
     const reply = (accuracy: number, scope: number) => ({
@@ -276,6 +317,7 @@ test("agentAssert applies a component threshold in place of config.threshold", a
       ...gradingContext,
       config: {
         ...gradingContext.config,
+        scoring: "graded" as const,
         threshold: 0.7,
         components: [
           { ...components[0], threshold: 0.9 },
@@ -953,6 +995,8 @@ test("agentAssert uses llmAssert validation and component error messages", async
       { components: [] },
       { components: [{ metric: "constructor", value: "Unsafe metric" }] },
       { components: [{ metric: "m", value: "Criterion", weight: 0 }] },
+      { threshold: 0.5 },
+      { components: [{ metric: "m", value: "Criterion", threshold: 0.5 }] },
       { scoring: "binary", threshold: 0.5 },
       { components: [{ metric: "m", value: "Criterion", threshold: 1.5 }] },
       { scoring: "binary", components: [{ metric: "m", value: "Criterion", threshold: 0.5 }] },

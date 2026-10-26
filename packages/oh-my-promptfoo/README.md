@@ -94,7 +94,8 @@ pinned Git and OCI sources, and larger runs.
   assertion works with all four agents, with no tracing setup.
 - **Grade many criteria in one judge call.** `llmAssert` works like
   `llm-rubric`, but scores a whole list of named criteria at once, and each
-  one shows up as its own score.
+  one shows up as its own score. Both rubric assertions default to binary
+  scoring; set `config.scoring: graded` for partial credit or thresholds below 1.
 - **Grade what the agent did, not what it says it did.** `agentAssert` sends a
   read-only agent into the workspace to check the changes. Turn on
   `fileChanges` to read them in your own JavaScript assertions.
