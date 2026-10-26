@@ -1,4 +1,5 @@
 import { object } from "./config.js";
+import { type NativeAssertionContext, workspaceRubric } from "./workspace-evidence.js";
 
 type RecordValue = Record<string, unknown>;
 interface Result {
@@ -141,6 +142,33 @@ export function withAssertions<T extends RecordValue>(configuration: T): T {
         ...(Array.isArray(scenario.tests) ? { tests: scenario.tests.map(mapTest) } : {}),
       };
     });
+  if (
+    mappedTests.some((test) => {
+      const options = test.options === undefined ? {} : object(test.options, "test options");
+      return options.workspaceEvidence !== undefined && options.workspaceEvidence !== false;
+    })
+  ) {
+    const mapRubric = (input: unknown): unknown => {
+      const assertion = object(input, "assertion");
+      if (assertion.type === "assert-set" && Array.isArray(assertion.assert))
+        return { ...assertion, assert: assertion.assert.map(mapRubric) };
+      if (assertion.type !== "llm-rubric") return assertion;
+      const { transform, ...native } = assertion;
+      return {
+        ...assertion,
+        type: "javascript",
+        value: (output: string, context: NativeAssertionContext) =>
+          workspaceRubric(
+            output,
+            context,
+            { ...native, type: "llm-rubric" },
+            transform !== undefined,
+          ),
+      };
+    };
+    for (const test of mappedTests)
+      if (Array.isArray(test.assert)) test.assert = test.assert.map(mapRubric);
+  }
   if (hasRequired) {
     const defaultTest =
       result.defaultTest === undefined ? {} : object(result.defaultTest, "defaultTest");
