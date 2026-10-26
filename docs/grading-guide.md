@@ -610,6 +610,7 @@ accepts resolved test objects; resolve external test-file references first.
 Remove the old `assertScoringFunction`; the helper rejects conflicting scorers
 in defaults, tests, and scenarios instead of silently losing the veto.
 
+<<<<<<< HEAD
 ## Captured workspace evidence without a grader agent
 
 `llmAssert.config.workspaceEvidence` attaches final captured file contents to
@@ -657,4 +658,48 @@ unchanged paths can be read from a retained final workspace when capture is
 complete; an incomplete capture cannot fall back to disk for missing entries.
 `agentAssert` remains the choice when a read-only judge needs to investigate
 which files matter rather than receive a known set of captured files.
+
+## Shell-aware tool selectors
+
+The package's `tool-called` and `tool-not-called` assertions accept token-aware
+shell command selectors, including in a `before` selector:
+
+```yaml
+- type: javascript
+  value: package:oh-my-promptfoo/assertions:tool-not-called
+  config:
+    name: bash
+    argumentsMatch:
+      path: command
+      shell: true
+      command:
+        program: dotnet
+        args: [--framework, net48]
+```
+
+`program` is an exact executable basename or `{ regex, flags? }`. `args` is a
+contiguous token sequence; each element is an exact string or `{ regex, flags? }`.
+Long `--flag=value` options normalize to two tokens. Framework selectors also
+normalize `-f`, `--framework`, and `-p:TargetFramework`, so all three net48
+spellings match the example. Optional `command.regex` matches a reconstructed
+single command, not the whole shell script. Existing regex-only
+`argumentsMatch` selectors are unchanged.
+
+Quotes and escapes are tokenized: `"/usr/bin/git" pull` is a git invocation,
+while `printf '%s\n' '; git pull'` is not. Pipelines and semicolon/newline lists
+count as executed commands. Commands in `&&`/`||` branches have
+`conditional: true` and are excluded by default; set
+`argumentsMatch.includeConditional: true` to include them. This is static
+classification, not an attempt to infer exit codes.
+
+`metadata.parsedCommands` records each parsed `program`, `args`, `conditional`
+flag, and `callId`; `matchedCallIds` retains the matching tool invocations.
+The parser never executes shell code. Expansion/substitution, shell control
+structures, groups, heredocs, background execution, and descriptor duplication
+are unsupported and fail closed with `metadata.graderError: true`, even in
+absence assertions. Simple `command [-p] [--] executable` and
+`exec [--] executable` wrappers are normalized. Unmodeled execution builtins
+such as `eval`, `source`, and `.` fail closed. External wrappers, interpreters,
+and scripts are not recursively interpreted. Use raw argument regexes only
+when their weaker semantics are appropriate.
 
