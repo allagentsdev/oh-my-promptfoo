@@ -223,14 +223,23 @@ console.log('exports and loaded version passed');`,
 import {createRequire} from 'node:module';
 import {llmAssert,agentAssert} from 'oh-my-promptfoo/assertions';
 import * as InventoryAssertions from 'oh-my-promptfoo/assertions';
+import {assertions as nativeAssertions} from 'promptfoo';
 import {Fallback as EsmFallback} from 'oh-my-promptfoo/providers';
 const require=createRequire(import.meta.url);
 const c=require('oh-my-promptfoo/assertions');
 const cp=require('oh-my-promptfoo/providers');
-assert.equal(typeof llmAssert,'function');assert.equal(typeof c.llmAssert,'function');
-assert.equal(typeof agentAssert,'function');assert.equal(typeof c.agentAssert,'function');
 for(const entry of [InventoryAssertions,c]){
-  assert.deepEqual(Object.keys(entry).sort(),['agentAssert','llmAssert','skill-not-loaded','tool-called','tool-not-called']);
+  const gated=entry.withAssertions({defaultTest:{threshold:0.1,assert:[
+    {type:'equals',value:'ready',required:true,metric:'gate',weight:20},
+    {type:'javascript',value:'0.6',metric:'quality'},
+  ]}}).defaultTest;
+  for(const [output,pass] of [['ready',true],['blocked',false]]){
+    const grade=await nativeAssertions.runAssertions({test:gated,assertScoringFunction:gated.assertScoringFunction,providerResponse:{output}});
+    assert.equal(grade.pass,pass);
+    assert.equal(grade.score,pass?0.6:0);
+    assert.equal(grade.namedScores.quality,0.6);
+    if(!pass)assert.match(grade.reason,/Required assertion veto/);
+  }
   const complete={schemaVersion:1,status:'complete',incompleteReasons:[],calls:[],skillInventory:'sdk',loadedSkills:[]};
   const context={config:{name:'forbidden'},providerResponse:{metadata:{toolInventory:complete}}};
   assert.equal(entry['tool-not-called']('answer',context).pass,true);

@@ -58,7 +58,12 @@ async function consumerProject(moduleName = "@github/copilot-sdk") {
   await mkdir(moduleDir, { recursive: true });
   await writeFile(
     join(moduleDir, "package.json"),
-    JSON.stringify({ name: moduleName, version: "0.1.0", type: "module", exports: "./index.js" }),
+    JSON.stringify({
+      name: moduleName,
+      version: moduleName === "@anthropic-ai/claude-agent-sdk" ? "0.3.273" : "0.1.0",
+      type: "module",
+      exports: "./index.js",
+    }),
   );
   await writeFile(
     join(moduleDir, "index.js"),

@@ -2,6 +2,7 @@ import { JUDGE_LIST_ERROR, judgeName, loadJudge } from "./judge.js";
 import { type BatchedRubricConfig, gradeRubric, prepareRubric } from "./rubric-contract.js";
 
 export { type AgentRubricConfig, agentAssert } from "./agent-assert.js";
+export { withAssertions } from "./assertion-integration.js";
 export type { BatchedRubricConfig, RubricComponent } from "./rubric-contract.js";
 export {
   type SkillNotLoadedConfig,

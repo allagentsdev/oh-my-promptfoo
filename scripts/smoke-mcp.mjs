@@ -24,7 +24,12 @@ try {
     await mkdir(directory, { recursive: true });
     await writeFile(
       join(directory, "package.json"),
-      JSON.stringify({ name, version: "0.1.0", type: "module", exports: "./index.js" }),
+      JSON.stringify({
+        name,
+        version: name === "@anthropic-ai/claude-agent-sdk" ? "0.3.273" : "0.1.0",
+        type: "module",
+        exports: "./index.js",
+      }),
     );
     await copyFile(
       new URL("../tests/fixtures/mcp-consumer.mjs", import.meta.url),
