@@ -353,17 +353,17 @@ address, so set the full v1 address rather than the resource root.
 
 ## llmAssert
 
-`llmAssert` batches named criteria into one judge request. A component passes
-when its judge verdict is not false, and a threshold adds a numeric bar on top
-of that verdict when you state one — the same contract as Promptfoo's own
-`llm-rubric`, which applies a threshold only when the assertion carries one.
-There is no default bar. `config.threshold` sets the bar for every component; a
-component's own `threshold` (0 to 1) replaces it for that component alone, so
-rubrics with different bars can share one request. When batching equally
+`llmAssert` batches named criteria into one judge request. Both `llmAssert` and
+`agentAssert` default to `scoring: binary`: the judge scores each criterion 1
+if met and 0 otherwise, and each component must score 1 with a judge verdict
+that is not false to pass. The overall score is the weighted mean, and the
+assertion passes only when every component passes. When batching equally
 weighted rubrics alongside other assertions, set the outer Promptfoo `weight` to
 the number of components to preserve the test's weighted score.
 
-Each `llm-rubric` assertion's `threshold:` becomes that component's `threshold`:
+For partial credit or custom thresholds, set `config.scoring: graded`.
+In that mode, each `llm-rubric` assertion's `threshold:` becomes that
+component's `threshold`:
 
 ```yaml
 # One judge request per rubric
@@ -384,6 +384,7 @@ assert:
   - type: javascript
     value: package:oh-my-promptfoo/assertions:llmAssert
     config:
+      scoring: graded
       components:
         - metric: accuracy
           value: States the refund window correctly.
@@ -393,21 +394,30 @@ assert:
           threshold: 0.5
 ```
 
-A component without its own `threshold` takes `config.threshold`, if any. Each
+In graded mode, a component's own `threshold` (0 to 1) overrides
+`config.threshold`; a component without either has no numeric bar. Each
 component result reports the bar it was held to as `assertion.threshold`.
 
-Set `config.scoring: binary` for a checklist, where a criterion is either met or
-not. The judge is told to score 1 if the answer fully meets a criterion and 0
-otherwise, to keep its subject, condition, polarity and scope rather than accept
-a weaker promise, and to treat a criterion whose condition the answer never
-reaches as met if the answer does nothing it forbids. The pass mark
-becomes a full score, so a `config.threshold` or component `threshold` beside
-the mode that is not 1 contradicts it and is rejected. Stating the mode replaces
-writing those rules into every rubric by hand.
+The default binary mode treats criteria as a checklist. The judge scores 1
+if the answer fully meets a criterion and 0 otherwise. It preserves the
+criterion's subject, condition, polarity and scope, and refuses a weaker
+promise. A conditional criterion is met when the answer never reaches its
+condition and does nothing it forbids. The pass mark is a full score, so a
+`config.threshold` or component `threshold` other than 1 is rejected unless
+you explicitly select `scoring: graded`.
 
-The default, `graded`, trusts the judge's verdict, adds no bar unless you state
-one, and says nothing about how to score. Partial credit for a near miss is
-what graded is for, so none of the checklist rules apply to it.
+Explicit `graded` mode trusts the judge's verdict, adds no bar unless you
+state one, and leaves the scoring scale to your rubric. It preserves native
+`llm-rubric` verdict/threshold semantics and supports fractional scores.
+The native `llm-rubric` and `agent-rubric` default prompts demonstrate pass/1
+and fail/0; our binary default makes that intent explicit and enforces a
+full-score bar. Native Promptfoo also accepts fractional scores, so this is
+a stricter contract rather than exact behavioral parity.
+
+**Migrating existing suites:** the previous default was `graded`. Add
+`config.scoring: graded` to retain partial-credit behavior, including suites
+whose config or component thresholds are below 1. The same migration applies
+to `agentAssert`.
 
 The judge sees the request the way `llm-rubric` frames it. The user message
 holds the answer in an `<Output>` block and the criteria in a `<Rubric>` block,

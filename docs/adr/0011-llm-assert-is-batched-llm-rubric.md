@@ -3,6 +3,7 @@
 - Status: Accepted; the judge source and judge failures settled by [ADR 0012](0012-llm-assert-judge-from-promptfoo-grading-provider.md)
 - Date: 2026-10-22
 - Amends: answer placement in [ADR 0006](0006-llm-assert-rubric-prompt.md)
+- Scoring default amended: [ADR 0004, 2026-10-26 amendment](0004-llm-assert-scoring-mode.md#amendment-binary-is-the-default-2026-10-26) makes binary the default for both assertions; the graded-default passages below describe the earlier behavior.
 
 ## Context
 

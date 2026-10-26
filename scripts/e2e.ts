@@ -956,6 +956,7 @@ try {
                 type: "javascript",
                 value: "package:oh-my-promptfoo/assertions:llmAssert",
                 config: {
+                  scoring: "graded",
                   threshold: 0.7,
                   rubricPrompt:
                     "Judge only {{ subject }}. Environment {% set e = env.PACKED_ASSERTION_SUBJECT %}{{ e }}; object {{ details }}; {% set parsed = encoded | load %}loaded {{ parsed.subject }}.",

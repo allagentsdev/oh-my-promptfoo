@@ -21,6 +21,7 @@ export interface BatchedRubricConfig {
   components: RubricComponent[];
   threshold?: number;
   rubricPrompt?: string;
+  /** Defaults to binary; opt into graded for partial credit and custom thresholds. */
   scoring?: "graded" | "binary";
 }
 
@@ -127,15 +128,11 @@ export function prepareRubric(
 ): PreparedRubric {
   const config = context?.config;
   const components = config?.components;
-  const scoring = config?.scoring ?? "graded";
-  // Promptfoo's own llm-rubric gates on the judge's pass flag and applies a numeric
-  // threshold only when the caller states one. Inventing a default bar here would make a
-  // drop-in replacement quietly stricter than the assertion it replaces, so an unstated
-  // threshold stays unstated. `binary` is the exception and says so: a checklist item is
-  // met or it is not, so the bar is a full score and a conflicting one is rejected.
-  // A component's own threshold is the batched form of an llm-rubric assertion's
-  // `threshold:`, so rubrics with different bars can share one judge request. It is held
-  // to the same range and the same binary rule as `config.threshold`.
+  const scoring = config?.scoring ?? "binary";
+  // Native llm-rubric and agent-rubric prompts demonstrate pass/1 and fail/0. Make
+  // that checklist intent the default for both assertions here, with a full-score bar.
+  // Explicit graded mode keeps fractional scores and applies a numeric bar only when
+  // stated. A component's own threshold overrides config.threshold in that mode.
   if (config && Object.hasOwn(config, "rubric")) {
     throw new Error("LLM assertion config.rubric was renamed to config.rubricPrompt");
   }
@@ -179,7 +176,7 @@ export function prepareRubric(
     (config.scoring !== undefined && config.scoring !== "graded" && config.scoring !== "binary")
   ) {
     throw new Error(
-      "LLM assertion requires unique named components with nonempty criteria, positive weights, a config.threshold and component thresholds between 0 and 1, a nonempty string rubricPrompt, and scoring of 'graded' or 'binary' without a conflicting config.threshold or component threshold",
+      "LLM assertion requires unique named components with nonempty criteria, positive weights, a config.threshold and component thresholds between 0 and 1, a nonempty string rubricPrompt, and scoring of 'graded' or 'binary' without a conflicting config.threshold or component threshold; scoring defaults to 'binary', so set scoring: 'graded' for thresholds other than 1",
     );
   }
   if (components.some(({ metric }) => Object.hasOwn(Object.prototype, metric))) {
@@ -199,13 +196,8 @@ export function prepareRubric(
     metric,
     value: render(value, vars, `component ${metric}`),
   }));
-  // Checklist judging, stated once here instead of in every caller's rubricPrompt. These
-  // rules ride with `binary` rather than applying to everyone: refusing an easier promise
-  // and treating an unentered condition as satisfied are how a checklist reads a criterion,
-  // while under `graded` partial credit for a near miss is the point. Making them
-  // unconditional would also move existing callers' scores on upgrade without them asking
-  // for anything. What a suite knows and the package cannot - which claims its own domain
-  // counts as unverified - stays in `rubricPrompt`.
+  // Checklist rules apply by default. Explicit graded mode leaves the scoring scale
+  // to the suite. Domain-specific evidence rules stay in rubricPrompt.
   const scoringRule =
     scoring === "binary"
       ? " Score each criterion 1 if the answer fully meets it, otherwise 0. Keep each criterion's subject, condition, polarity and scope, and do not accept a weaker promise for the outcome it requires. A criterion whose condition the answer never reaches is met if the answer does nothing it forbids."

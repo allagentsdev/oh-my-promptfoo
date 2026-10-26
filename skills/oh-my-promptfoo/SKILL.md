@@ -180,18 +180,23 @@ assert:
           value: Checks the change for unintended row updates.
 ```
 
-A component passes when the judge's verdict is not false. `threshold` adds a
-numeric bar on top of that verdict, per component rather than as an aggregate,
-and there is no default — the same contract as Promptfoo's `llm-rubric`.
-`config.threshold` sets the bar for every component; a component's own
-`threshold` (0 to 1) replaces it for that component, which is how an
-`llm-rubric` assertion's `threshold:` carries over when you batch it. The
-assertion passes only when every component passes. For a checklist, where a
-criterion is either met or not, set `scoring: binary` rather than a threshold:
-the judge is told to score exactly 1 or 0, to keep each criterion's scope and
-polarity, and the bar becomes a full score (a config or component threshold
-other than 1 is rejected), so none of that has to be repeated
-in each suite's `rubricPrompt`. Keep `rubricPrompt` for instructions only this
+Both `llmAssert` and `agentAssert` default to `scoring: binary`. Author criteria
+as requirements: the judge scores each one 1 if met and 0 otherwise, preserving
+its scope and polarity. Each component must score 1 with a verdict that is not
+false; the assertion passes only when every component passes. The overall
+score is the weighted mean. Config or component thresholds other than 1 are
+rejected in binary mode.
+
+For partial credit or custom thresholds, set `config.scoring: graded` and
+define the scoring scale in the rubric. In graded mode, the judge's verdict
+decides unless a threshold adds a numeric bar. `config.threshold` sets every
+component's bar; a component's own `threshold` (0 to 1) overrides it, which is
+how a native `llm-rubric` assertion's threshold carries over when batching.
+Without either threshold, graded mode adds no numeric bar. When migrating
+existing suites that relied on the previous default, add `scoring: graded`
+to preserve partial-credit behavior and thresholds below 1.
+
+Keep `rubricPrompt` for instructions only this
 suite needs, such as which claims its domain counts as unverified. It is added
 beneath the built-in rules and cannot replace them or the reply format, so do
 not paste an `llm-rubric` template that uses `{{ output }}` or `{{ rubric }}`:

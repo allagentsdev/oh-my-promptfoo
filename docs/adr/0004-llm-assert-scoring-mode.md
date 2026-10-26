@@ -1,6 +1,6 @@
 # ADR 0004: Name the llmAssert scoring mode rather than count its steps
 
-- Status: Accepted; Superseded for the `candidate` field by [ADR 0009](0009-remove-llm-assert-candidate.md)
+- Status: Accepted; Superseded for the `candidate` field by [ADR 0009](0009-remove-llm-assert-candidate.md); default amended below on 2026-10-26
 - Date: 2026-10-21
 
 ## Context
@@ -32,7 +32,13 @@ Each new scoring style costs an enum value and its prompt text, rather than fall
 
 The agent rule explicitly includes claims of edited or deleted files and build or test runs. This makes `candidate: agent` slightly stricter for callers who relied on crediting edit/build/test claims. That is intended: these are narrated actions the judge cannot verify, just like tool calls and file creation, so generic coding-agent suites should not need a repeated `rubricPrompt` workaround.
 
-The default stays `graded` with no added instructions. Its bar also follows Promptfoo rather than this package: `llm-rubric` gates on the judge's verdict and applies a numeric threshold only when the assertion states one, so `llmAssert` dropped the `0.7` default it had invented. A drop-in replacement that grades more strictly than the assertion it replaces is the kind of surprise that costs adoption, and the audience here is Promptfoo users rather than migrants from any one harness.
+At the time of this decision, the default stayed `graded` with no added instructions. Its bar followed Promptfoo's result handling: `llm-rubric` gates on the judge's verdict and applies a numeric threshold only when the assertion states one, so `llmAssert` dropped the `0.7` default it had invented. The amendment below replaces that default while preserving these semantics under explicit `scoring: graded`.
+
+### Amendment: binary is the default (2026-10-26)
+
+Both `llmAssert` and `agentAssert` now default to `scoring: binary` through their shared rubric contract. Promptfoo 0.124.1's [native grading prompts](https://github.com/promptfoo/promptfoo/blob/0.124.1/src/prompts/grading.ts#L9-L48) demonstrate pass/1 and fail/0 for both `llm-rubric` and `agent-rubric`. Requirements and skill checklists fit that intent; support for fractional scores in the native result format does not by itself establish graded scoring as the idiomatic default.
+
+Our binary mode makes the intent explicit: it adds checklist instructions and fixes every component's bar at 1. Native Promptfoo accepts fractional scores and gates on the verdict without an implicit numeric bar, so this remains a deliberate stricter contract, not exact behavioral parity. Existing suites that rely on partial credit or config/component thresholds below 1 must set `scoring: graded`; conflicting thresholds fail before a judge request with migration guidance. Weighted aggregate scoring is unchanged and can still be fractional even when individual checklist scores are 0 or 1.
 
 ### Prompt wording revision
 
