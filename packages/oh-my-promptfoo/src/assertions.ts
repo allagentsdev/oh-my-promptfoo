@@ -1,5 +1,11 @@
 import { JUDGE_LIST_ERROR, judgeName, loadJudge } from "./judge.js";
 import { type BatchedRubricConfig, gradeRubric, prepareRubric } from "./rubric-contract.js";
+import {
+  type CapturedWorkspaceEvidence,
+  EVIDENCE_RULE,
+  type WorkspaceEvidenceOption,
+  workspaceEvidence,
+} from "./workspace-evidence.js";
 
 export { type AgentRubricConfig, agentAssert } from "./agent-assert.js";
 export { withAssertions } from "./assertion-integration.js";
@@ -14,18 +20,24 @@ export {
   toolNotCalled as "tool-not-called",
 } from "./tool-assertions.js";
 export type { ToolCall, ToolInventory } from "./tool-inventory.js";
+export type { WorkspaceEvidenceOption } from "./workspace-evidence.js";
 
 /** llmAssert's config: the rubric, and optionally this assertion's own judge. */
 export interface LlmAssertConfig extends BatchedRubricConfig {
   /** A judge for this assertion only, in any shape `options.provider` takes. */
   provider?: unknown;
+  workspaceEvidence?: WorkspaceEvidenceOption;
 }
 
 interface LlmAssertionContext {
   config?: LlmAssertConfig;
   vars?: Record<string, unknown>;
   /** Promptfoo merges test `options.provider`, `--grader` and `defaultTest` into this. */
-  test?: { options?: { provider?: unknown }; assert?: unknown };
+  test?: {
+    options?: { provider?: unknown; workspaceEvidence?: WorkspaceEvidenceOption };
+    assert?: unknown;
+  };
+  providerResponse?: { metadata?: unknown };
   /** The provider under test; Promptfoo loads it with the eval's `config.basePath`. */
   provider?: { config?: { basePath?: unknown } };
 }
@@ -76,6 +88,25 @@ function judgeSpec(context: LlmAssertionContext | undefined): unknown {
 /** Score all named criteria with one judge request; every criterion must pass. */
 export async function llmAssert(output: unknown, context?: LlmAssertionContext) {
   const rubric = prepareRubric(output, context);
+  const option = context?.config?.workspaceEvidence ?? context?.test?.options?.workspaceEvidence;
+  let evidence: CapturedWorkspaceEvidence | undefined;
+  if (option !== undefined && option !== false) {
+    try {
+      evidence = await workspaceEvidence(option, context);
+    } catch (cause) {
+      return {
+        pass: false,
+        score: 0,
+        reason: cause instanceof Error ? cause.message : String(cause),
+        namedScores: {},
+        namedScoreWeights: {},
+        componentResults: [],
+        metadata: { graderError: true as const },
+      };
+    }
+    rubric.system += `\n\n${EVIDENCE_RULE}`;
+    rubric.user += `\n\n${evidence.block}`;
+  }
   const spec = judgeSpec(context);
   // Promptfoo gives every provider it loads the eval's base path, the directory its own
   // grader resolves judges from; the provider under test carries it to package code.
@@ -110,5 +141,6 @@ export async function llmAssert(output: unknown, context?: LlmAssertionContext) 
   });
   // With judges set at four levels, the result says which one graded it.
   result.metadata.judge = judgeName(spec, judge);
+  if (evidence) result.metadata.workspaceEvidence = evidence.metadata;
   return result;
 }

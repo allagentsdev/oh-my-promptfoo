@@ -610,3 +610,51 @@ accepts resolved test objects; resolve external test-file references first.
 Remove the old `assertScoringFunction`; the helper rejects conflicting scorers
 in defaults, tests, and scenarios instead of silently losing the veto.
 
+## Captured workspace evidence without a grader agent
+
+`llmAssert.config.workspaceEvidence` attaches final captured file contents to
+the judge request. No grader agent is launched:
+
+```yaml
+- type: javascript
+  value: package:oh-my-promptfoo/assertions:llmAssert
+  config:
+    workspaceEvidence:
+      files: [src/order-manager.ts]
+      maxBytes: 65536
+    components:
+      - metric: implementation
+        value: The implementation rejects duplicate order IDs.
+```
+
+Enable `fileChanges: true` in the candidate provider's config to capture final
+changed-file bytes. Retain the final workspace when selecting unchanged files.
+
+Use `true` for all captured changed files, or `{ files, maxBytes }` for an
+explicit selection and byte budget. Paths are workspace-relative POSIX paths,
+not globs. The default budget is 65,536 UTF-8 bytes; accepted budgets are 256
+bytes through 16 MiB. The budget covers the labelled JSON evidence envelope,
+including JSON escaping, capture status, omission counts, and omission names
+when space permits. Binary contents are labelled base64; partial binary
+contents end at a base64 quantum. Files are ordered by path.
+
+`defaultTest.options.workspaceEvidence` also supplies the default for
+`llmAssert`; its own config overrides it, and `false` disables it. To use this
+option with native `type: llm-rubric`, wrap the config with `withAssertions`.
+The package then attaches the evidence and delegates grading to stock
+Promptfoo's public assertion API, preserving its judge selection and verdict
+format. Merely adding the option to unwrapped native YAML has no effect.
+
+Evidence is labelled untrusted data, never judge instructions. The grade's
+`metadata.workspaceEvidence` records `includedPaths`, `omittedPaths`,
+`truncated`, `captureTruncated`, and `maxBytes`. A selected missing file,
+missing capture, corrupt snapshot, or failed capture is a grader error, not a
+pass. A capture or budget that omits every requested file is also an error.
+Truncation is explicit in the judge input; omitted contents do not prove absence.
+
+Captured changed-file bytes take precedence over the live workspace. Explicit
+unchanged paths can be read from a retained final workspace when capture is
+complete; an incomplete capture cannot fall back to disk for missing entries.
+`agentAssert` remains the choice when a read-only judge needs to investigate
+which files matter rather than receive a known set of captured files.
+
