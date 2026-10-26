@@ -10,6 +10,7 @@ import {
 export { type AgentRubricConfig, agentAssert } from "./agent-assert.js";
 export { withAssertions } from "./assertion-integration.js";
 export type { BatchedRubricConfig, RubricComponent } from "./rubric-contract.js";
+export type { ParsedCommand, ShellCommandSelector } from "./shell-selector.js";
 export {
   type SkillNotLoadedConfig,
   skillNotLoaded as "skill-not-loaded",
