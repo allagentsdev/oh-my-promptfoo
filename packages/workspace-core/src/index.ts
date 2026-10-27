@@ -34,6 +34,7 @@ import {
   SeedCache,
 } from "./seed-cache.js";
 import { resolveSources } from "./sources/index.js";
+import { validateLocalSourcePath } from "./sources/local.js";
 import type {
   Ownership,
   ProcessIdentity,
@@ -77,6 +78,7 @@ export function roots(channels: RuntimeChannels): { cache: string; runtime: stri
 }
 export class WorkspaceManager {
   readonly spec: WorkspaceSpec;
+  private readonly preparedSpecs: readonly WorkspaceSpec[];
   private cache!: SeedCache;
   private factory!: CheckoutFactory;
   private root!: string;
@@ -97,8 +99,10 @@ export class WorkspaceManager {
     spec: WorkspaceSpec,
     private channels: RuntimeChannels,
     workspaceTimeoutMs?: number,
+    declaredSpecs?: readonly WorkspaceSpec[],
   ) {
     this.spec = validateWorkspace(spec);
+    this.preparedSpecs = declaredSpecs?.map(validateWorkspace) ?? [this.spec];
     this.limits = {
       ...DEFAULT_LIMITS,
       ...this.spec.limits,
@@ -209,6 +213,12 @@ export class WorkspaceManager {
       ...(signal ? [signal] : []),
       AbortSignal.timeout(this.limits.timeoutMs),
     ]);
+    if (!this.localPinned) {
+      for (const source of this.spec.sources) {
+        combined.throwIfAborted();
+        if (source.type === "local") await validateLocalSourcePath(source, this.channels);
+      }
+    }
     const prebuilt =
       this.channels.ALLAGENTS_PREBUILT_ROOT !== undefined
         ? await PreparedSources.open(
@@ -217,6 +227,7 @@ export class WorkspaceManager {
             this.channels,
             roots(this.channels).cache,
             roots(this.channels).runtime,
+            this.preparedSpecs,
           )
         : undefined;
     const preparedSources = new Map<string, ResolvedSource>();
@@ -588,6 +599,7 @@ export class WorkspaceManager {
                 this.channels,
                 roots(this.channels).cache,
                 roots(this.channels).runtime,
+                this.preparedSpecs,
               );
               await prepared.check(
                 source,

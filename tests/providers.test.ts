@@ -173,6 +173,239 @@ describe("tool inventory public boundary", () => {
   });
 });
 
+describe("per-case workspace selection", () => {
+  test("rejects missing and unknown selections before acquiring sources", async () => {
+    const path = await project("promptfoo", native);
+    const provider = new Agent({
+      config: {
+        basePath: path,
+        delegate: { id: "openai:codex-sdk" },
+        workspace: {
+          fromVar: "environment",
+          variants: {
+            private: {
+              sources: [
+                {
+                  type: "git",
+                  repository: "https://example.invalid/private.git",
+                  ref: "HEAD",
+                  destination: "repo",
+                },
+              ],
+            },
+          },
+        },
+      },
+      env: {
+        ALLAGENTS_CACHE_ROOT: join(path, "cache"),
+        ALLAGENTS_WORKSPACE_ROOT: join(path, "runtime"),
+      },
+    });
+    const phases: string[] = [];
+    const listener = (event: unknown) => {
+      if (event && typeof event === "object" && "phase" in event && typeof event.phase === "string")
+        phases.push(event.phase);
+    };
+    subscribe("allagents.workspace.progress", listener);
+    try {
+      for (const vars of [
+        undefined,
+        {},
+        { environment: "unknown" },
+        { environment: "toString" },
+        { environment: 1 },
+        { environment: ["private"] },
+      ]) {
+        const result = await provider.callApi("success", { vars });
+        expect(result.error).toMatch(/workspace.*environment/i);
+      }
+      expect(phases).not.toContain("seed-start");
+      expect(phases).not.toContain("agent-start");
+    } finally {
+      unsubscribe("allagents.workspace.progress", listener);
+      await provider.cleanup();
+    }
+  });
+  test("validates every authored variant before creating runtime state", async () => {
+    const path = await project("promptfoo", native);
+    const source = {
+      type: "git",
+      repository: "https://example.invalid/repo.git",
+      ref: "HEAD",
+      destination: "repo",
+    };
+    for (const invalid of [
+      { sources: [{ ...source, destination: "../escape" }] },
+      { sources: [{ ...source, permissions: "write" }] },
+      { sources: [{ ...source, repository: "https://user:password@example.invalid/repo" }] },
+      { sources: [source], limits: { maxSources: 0 } },
+      { sources: [source, { ...source, destination: "repo/nested" }] },
+    ]) {
+      expect(
+        () =>
+          new Agent({
+            config: {
+              basePath: path,
+              delegate: { id: "openai:codex-sdk" },
+              workspace: { fromVar: "environment", variants: { empty: { sources: [] }, invalid } },
+            },
+            env: {
+              ALLAGENTS_CACHE_ROOT: join(path, "cache"),
+              ALLAGENTS_WORKSPACE_ROOT: join(path, "runtime"),
+            },
+          }),
+      ).toThrow();
+    }
+    expect(existsSync(join(path, "runtime"))).toBe(false);
+    expect(existsSync(join(path, "cache"))).toBe(false);
+    for (const workspace of [
+      { fromVar: "", variants: { empty: { sources: [] } } },
+      { fromVar: "environment", variants: {} },
+      { fromVar: "environment", variants: { empty: { sources: [] } }, sources: [] },
+    ])
+      expect(() => validateAgentConfig({ delegate: { id: "copilot-sdk" }, workspace })).toThrow();
+  });
+  const localTest = process.platform === "linux" ? test : test.skip;
+  localTest(
+    "concurrent variants isolate fixtures, edits, permissions and missing repositories",
+    async () => {
+      const path = await project("promptfoo", native);
+      for (const name of ["alpha", "beta"]) {
+        await mkdir(join(path, name));
+        await writeFile(join(path, name, "input.txt"), name);
+      }
+      const provider = new Agent({
+        config: {
+          basePath: path,
+          delegate: { id: "openai:codex-sdk", config: { model: "common" } },
+          fileChanges: true,
+          workspace: {
+            fromVar: "environment",
+            variants: {
+              alpha: {
+                sources: [
+                  { type: "local", path: "alpha", destination: "repo", permissions: "all" },
+                ],
+              },
+              beta: {
+                sources: [
+                  { type: "local", path: "beta", destination: "repo", permissions: "read-only" },
+                ],
+                viewMode: "copy-only",
+              },
+              missing: { sources: [] },
+            },
+          },
+        },
+        env: {
+          ALLAGENTS_CACHE_ROOT: join(path, "cache"),
+          ALLAGENTS_WORKSPACE_ROOT: join(path, "runtime"),
+        },
+      });
+      const paths: string[] = [];
+      try {
+        const contexts = ["alpha", "beta", "missing", "alpha"].map((environment, i) => ({
+          vars: { environment },
+          prompt: { config: { delegate: { config: { model: `case-${i}` } } } },
+        }));
+        const pending = contexts.map((context) => provider.callApi("write", context));
+        for (const context of contexts) context.vars.environment = "missing";
+        const results = await Promise.all(pending);
+        for (const [i, result] of results.entries()) {
+          expect(result.error).toBeUndefined();
+          const metadata = object(result.metadata, "metadata");
+          const workspace = object(metadata.workspace, "workspace");
+          const root = String(workspace.path);
+          paths.push(root);
+          expect(await readFile(join(root, "generated.txt"), "utf8")).toBe(
+            "generated durable content",
+          );
+          if (i === 2) await expect(access(join(root, "repo"))).rejects.toThrow();
+          else
+            expect(await readFile(join(root, "repo", "input.txt"), "utf8")).toBe(
+              i === 1 ? "beta" : "alpha",
+            );
+          const options = object(object(metadata.options, "options").options, "options.options");
+          expect(object(options.config, "config").model).toBe(`case-${i}`);
+        }
+        expect(new Set(paths).size).toBe(4);
+        await writeFile(join(paths[0], "repo", "input.txt"), "edited alpha");
+        expect(await readFile(join(paths[3], "repo", "input.txt"), "utf8")).toBe("alpha");
+        expect(await readFile(join(path, "alpha", "input.txt"), "utf8")).toBe("alpha");
+        await removeTree(join(path, "alpha"));
+        const replay = await provider.callApi("success", { vars: { environment: "alpha" } });
+        expect(replay.error).toBeUndefined();
+        const replayWorkspace = object(object(replay.metadata, "metadata").workspace, "workspace");
+        const replayPath = String(replayWorkspace.path);
+        paths.push(replayPath);
+        expect(await readFile(join(replayPath, "repo", "input.txt"), "utf8")).toBe("alpha");
+        const betaMetadata = object(results[1].metadata, "metadata");
+        expect(object(betaMetadata.workspace, "workspace").sources).toEqual([
+          expect.objectContaining({ permissions: "read-only" }),
+        ]);
+        const tamper = await provider.callApi("tamper-protected", {
+          vars: { environment: "beta" },
+        });
+        expect(tamper.error).toMatch(/Protected source checkout mutated/);
+      } finally {
+        await provider.cleanup();
+      }
+      for (const root of paths) await expect(access(root)).rejects.toThrow();
+    },
+  );
+  localTest(
+    "rejects escaping, symlink and missing local roots before remote acquisition",
+    async () => {
+      const path = await project("promptfoo", native);
+      await symlink(tmpdir(), join(path, "link"));
+      for (const sourcePath of ["../escape", "link", "missing"]) {
+        const provider = new Agent({
+          config: {
+            basePath: path,
+            delegate: { id: "openai:codex-sdk" },
+            workspace: {
+              fromVar: "environment",
+              variants: {
+                invalid: {
+                  sources: [
+                    {
+                      type: "git",
+                      repository: "https://example.invalid/must-not-acquire.git",
+                      ref: "HEAD",
+                      destination: "repo",
+                    },
+                    { type: "local", path: sourcePath, destination: "fixture" },
+                  ],
+                },
+              },
+            },
+          },
+          env: {
+            ALLAGENTS_CACHE_ROOT: join(path, "cache"),
+            ALLAGENTS_WORKSPACE_ROOT: join(path, "runtime"),
+          },
+        });
+        const phases: string[] = [];
+        const listener = (event: unknown) => {
+          if (event && typeof event === "object" && "phase" in event)
+            phases.push(String(event.phase));
+        };
+        subscribe("allagents.workspace.progress", listener);
+        try {
+          const result = await provider.callApi("success", { vars: { environment: "invalid" } });
+          expect(result.error).toBeDefined();
+          expect(result.error).not.toMatch(/Git|HTTPS|fetch|clone/);
+          expect(phases).not.toContain("agent-start");
+          expect(phases).not.toContain("source-start");
+        } finally {
+          unsubscribe("allagents.workspace.progress", listener);
+          await provider.cleanup();
+        }
+      }
+    },
+  );
+});
+
 describe("provider configuration", () => {
   test("providers export from ./providers alone, without a Provider suffix", () => {
     expect(Object.keys(providerEntry).sort()).toEqual([
@@ -779,6 +1012,80 @@ describe("workspace provider publication and lifetime", () => {
         outcome: "ok",
       },
     ];
+    const alternativeUrl = "https://invalid.example.test/alternative.git";
+    const alternativeKey = createHash("sha256")
+      .update(JSON.stringify([alternativeUrl, commit, "repo"]))
+      .digest("hex");
+    await cp(join(prepared, "sources", key), join(prepared, "sources", alternativeKey), {
+      recursive: true,
+    });
+    const declaredEntries = [
+      { repository: repositoryUrl, commit, destination: "repo" },
+      { repository: alternativeUrl, commit, destination: "repo" },
+    ];
+    await atomicJson(join(prepared, "manifest.json"), {
+      schemaVersion: 1,
+      sources: declaredEntries,
+    });
+    const selected = new Agent({
+      ...options,
+      config: {
+        ...options.config,
+        workspace: {
+          fromVar: "environment",
+          variants: {
+            present: options.config.workspace,
+            repeated: options.config.workspace,
+            alternative: { sources: [{ ...source, repository: alternativeUrl }] },
+            missing: { sources: [] },
+          },
+        },
+      },
+    });
+    try {
+      const [present, missing, alternative] = await Promise.all(
+        ["present", "missing", "alternative"].map((environment) =>
+          selected.callApi("clean", { vars: { environment } }),
+        ),
+      );
+      expect(present.error).toBeUndefined();
+      expect(missing.error).toBeUndefined();
+      const presentWorkspace = object(object(present.metadata, "metadata").workspace, "workspace");
+      const missingWorkspace = object(object(missing.metadata, "metadata").workspace, "workspace");
+      expect(await readlink(join(String(presentWorkspace.path), "repo"))).toBe(protectedPath);
+      await expect(access(join(String(missingWorkspace.path), "repo"))).rejects.toThrow();
+      expect(missingWorkspace.sources).toEqual([]);
+      expect(alternative.error).toBeUndefined();
+      const alternativeWorkspace = object(
+        object(alternative.metadata, "metadata").workspace,
+        "workspace",
+      );
+      expect(alternativeWorkspace.sources).toEqual([
+        expect.objectContaining({ repository: alternativeUrl }),
+      ]);
+      expect(await readlink(join(String(alternativeWorkspace.path), "repo"))).toBe(
+        join(prepared, "sources", alternativeKey, "protected"),
+      );
+      await atomicJson(join(prepared, "manifest.json"), {
+        schemaVersion: 1,
+        sources: [
+          ...declaredEntries,
+          {
+            repository: "https://invalid.example.test/undeclared.git",
+            commit,
+            destination: "undeclared",
+          },
+        ],
+      });
+      const unauthorized = await selected.callApi("clean", { vars: { environment: "missing" } });
+      expect(unauthorized.error).toMatch(/Prepared source manifest does not match/);
+    } finally {
+      await selected.cleanup();
+      await atomicJson(join(prepared, "manifest.json"), {
+        schemaVersion: 1,
+        sources: [{ repository: repositoryUrl, commit, destination: "repo" }],
+      });
+    }
     subscribe("allagents.workspace.progress", listener);
     try {
       const first = await provider.callApi("clean");

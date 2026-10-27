@@ -78,6 +78,15 @@ async function rootHandle(path: string, channels: RuntimeChannels): Promise<File
   }
 }
 
+/** Check the selected host directory before any remote sources are acquired. */
+export async function validateLocalSourcePath(
+  source: LocalSource,
+  channels: RuntimeChannels,
+): Promise<void> {
+  const handle = await rootHandle(sourceRoot(source, channels), channels);
+  await handle.close();
+}
+
 async function readFileHash(
   file: FileHandle,
   signal: AbortSignal,

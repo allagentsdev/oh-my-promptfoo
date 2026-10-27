@@ -4,6 +4,7 @@
 
 ### Features
 
+* **workspace:** select an authored workspace variant per test with `workspace: { fromVar, variants }`, while keeping the existing single-spec form. Validate every variant before acquisition and require an exact string selection without defaults; preserve per-call isolation, provenance, assertions and cleanup ([#173](https://github.com/allagentsdev/oh-my-promptfoo/issues/173)).
 * Add `pi-sdk` workspace and read-only agent-grader delegates using the maintained optional `@earendil-works/pi-coding-agent@1.3.0` peer, explicit model/credentials and local endpoint support. Isolated in-memory sessions report successful skill-file reads to stock `skill-used` without changing skill authoring.
 * Add adapter-owned schema-version-1 tool inventories with bounded/redacted arguments, explicit completeness and SDK skill-loading names. Copilot includes subagent streams and certifies only clean matched bounded execution; native/Pi retain observations without claiming unsupported completeness.
 * Publish stock Promptfoo JavaScript package assertions `tool-called`, `tool-not-called` and `skill-not-loaded`, with exact/regex names, MCP identity, argument paths and invocation chronology. Missing, malformed or incomplete evidence is a grader error, never a successful absence assertion.
@@ -11,6 +12,7 @@
 
 ### Bug Fixes
 
+* **workspace:** release cancelled calls' unpublished workspaces even when a delegate returns an aborted response instead of throwing; preserve partial Copilot accounting without publishing a workspace path.
 * **workspace:** canonicalize declared protected source link targets in the workspace reader so Windows 8.3 short temp paths (`RUNNER~1`) are accepted; undeclared, mismatched and non-symlink sources are still refused.
 * **workspace:** handle Windows `EPERM` while racing to publish an owned root; only a completed ownership marker can establish the concurrent winner, and mismatched root kinds remain rejected.
 * **copilot:** capture bounded final session nano-AIU metrics with versioned units and completeness; export USD usage value only for complete reported totals instead of treating premium-request multipliers as money. Preserve partial/error accounting and distinguish measured zero from unavailable telemetry.

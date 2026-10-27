@@ -1,7 +1,7 @@
 import { spawn, spawnSync } from "node:child_process";
 import { once } from "node:events";
 import { realpathSync } from "node:fs";
-import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { access, copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join, relative, resolve } from "node:path";
@@ -895,6 +895,301 @@ try {
       );
     relativeRuns[name] = localSources ? exported.stats.successes : exported.stats.errors;
   }
+  const selectorSources = join(cwd, "selector-sources");
+  const selectorBarrier = join(cwd, "selector-barrier");
+  await mkdir(selectorBarrier);
+  for (const name of ["alpha", "beta"]) {
+    await mkdir(join(selectorSources, name), { recursive: true });
+    await writeFile(join(selectorSources, name, "input.txt"), `${name} fixture\n`);
+  }
+  const selectorProvider = {
+    id: "package:oh-my-promptfoo/providers:Agent",
+    label: "case-workspace",
+    config: {
+      delegate: {
+        id: "copilot-sdk",
+        env: { E2E_SELECTOR_BARRIER: selectorBarrier },
+        config: { permissions: { filesystem: "write", shell: "deny" } },
+      },
+      workspace: {
+        fromVar: "workspaceName",
+        variants: {
+          alpha: {
+            sources: [
+              {
+                type: "git",
+                repository: pathToFileURL(source).href,
+                ref: commit,
+                destination: "repo",
+                permissions: "read-only",
+              },
+              {
+                type: "local",
+                path: "./selector-sources/alpha",
+                destination: "project",
+                permissions: "read-only",
+              },
+            ],
+          },
+          beta: {
+            sources: [
+              {
+                type: "git",
+                repository: pathToFileURL(source).href,
+                ref: commit,
+                destination: "repo",
+                permissions: "all",
+              },
+              {
+                type: "local",
+                path: "./selector-sources/beta",
+                destination: "project",
+                permissions: "all",
+              },
+            ],
+          },
+          "missing-repo": { sources: [] },
+        },
+      },
+      fileChanges: true,
+    },
+  };
+  const selectorCases = [
+    { id: "readonly", workspaceName: "alpha", input: "alpha fixture\n", editSource: false },
+    { id: "writable-first", workspaceName: "beta", input: "beta fixture\n", editSource: true },
+    { id: "writable-second", workspaceName: "beta", input: "beta fixture\n", editSource: true },
+    { id: "missing", workspaceName: "missing-repo", input: null, editSource: false },
+  ];
+  const selectorExpectations = Object.fromEntries(
+    selectorCases.map((row) => [
+      row.id,
+      {
+        ...row,
+        sourcePath: row.input === null ? null : join(selectorSources, row.workspaceName),
+        permissions: row.workspaceName === "alpha" ? "read-only" : "all",
+        gitCommit: row.input === null ? null : commit,
+        gitRepository: row.input === null ? null : pathToFileURL(source).href,
+      },
+    ]),
+  );
+  const selectorResults = await evaluateFixture(
+    "workspace-selector",
+    {
+      tracing: { enabled: false },
+      prompts: ["{{task}}"],
+      providers: [selectorProvider],
+      tests: selectorCases.map(({ id, workspaceName, editSource }) => ({
+        vars: {
+          caseId: id,
+          workspaceName,
+          task: `workspace-selector:${JSON.stringify({
+            id,
+            editSource,
+            participants: localSources ? selectorCases.length : 1,
+          })}`,
+        },
+        assert: [
+          {
+            type: "javascript",
+            // Promptfoo evaluates assertion bodies as functions, so imports must be expressions.
+            value: `
+return import('node:fs').then(fs => {
+  const expected = ${JSON.stringify(selectorExpectations)}[context.vars.caseId];
+  const response = context.providerResponse;
+  const w = response.metadata.workspace;
+  const actual = JSON.parse(output);
+  const finalInput = expected.editSource ? expected.id : expected.input;
+  if (actual.id !== expected.id || actual.initialInput !== expected.input ||
+      actual.finalInput !== finalInput || actual.gitCommit !== expected.gitCommit || !actual.ok ||
+      w.cleanup !== 'best-effort-evaluation' ||
+      !/^sha256:[a-f0-9]{64}$/.test(w.manifestDigest) ||
+      fs.readFileSync(w.path + '/result.txt', 'utf8') !== output ||
+      fs.readFileSync(w.path + '/case-' + expected.id + '.txt', 'utf8') !== expected.id ||
+      fs.readdirSync(w.path).filter(name => name.startsWith('case-')).length !== 1)
+    return false;
+  if (expected.input === null) {
+    if (w.sources.length !== 0 || fs.existsSync(w.path + '/project') ||
+        fs.existsSync(w.path + '/repo') || actual.inputMode !== null)
+      return false;
+  } else {
+    const git = w.sources.find(source => source.type === 'git' && source.destination === 'repo');
+    const source = w.sources.find(source => source.type === 'local' && source.destination === 'project');
+    if (w.sources.length !== 2 || git.type !== 'git' ||
+        git.repository !== expected.gitRepository || git.commit !== expected.gitCommit ||
+        git.destination !== 'repo' || git.permissions !== expected.permissions ||
+        !fs.existsSync(w.path + '/repo/.git') ||
+        fs.readFileSync(w.path + '/repo/input.txt', 'utf8') !== 'immutable input\\n' ||
+        source.type !== 'local' ||
+        source.path !== expected.sourcePath || source.destination !== 'project' ||
+        source.permissions !== expected.permissions ||
+        !/^sha256:[a-f0-9]{64}$/.test(source.digest) ||
+        fs.readFileSync(w.path + '/project/input.txt', 'utf8') !== finalInput ||
+        fs.readFileSync(source.path + '/input.txt', 'utf8') !== expected.input)
+      return false;
+    const mode = fs.statSync(w.path + '/project/input.txt').mode & 0o777;
+    if (expected.permissions === 'read-only' ? (mode & 0o222) !== 0 : (mode & 0o200) === 0)
+      return false;
+  }
+  const changes = response.metadata.fileChanges;
+  return changes.status === 'complete' && changes.schemaVersion === 2 &&
+    Buffer.from(changes.changedFiles['result.txt'].content, 'base64').toString() === output;
+});`,
+          },
+        ],
+      })),
+    },
+    localSources ? [0] : [100],
+    testEnvironment,
+    ["--max-concurrency", String(selectorCases.length)],
+  );
+  const selectorRows = selectorResults.results;
+  if (
+    selectorRows.length !== selectorCases.length ||
+    selectorResults.stats.successes !== (localSources ? selectorCases.length : 1) ||
+    selectorResults.stats.failures !== 0 ||
+    selectorResults.stats.errors !== (localSources ? 0 : selectorCases.length - 1)
+  )
+    throw Error(`Per-case workspace selection failed: ${JSON.stringify(selectorResults.stats)}`);
+  const selectorWorkspaces = new Map<string, { path: string; manifestDigest: string }>();
+  for (const row of selectorRows) {
+    const response = row.providerResponse ?? row.response;
+    if (response.error) {
+      if (
+        localSources ||
+        !response.error.includes(
+          "Local source acquisition requires Linux descriptor-anchored traversal",
+        )
+      )
+        throw Error(`Unexpected workspace selector error: ${response.error}`);
+      continue;
+    }
+    const workspace = response.metadata.workspace;
+    if (
+      !workspace ||
+      typeof workspace.path !== "string" ||
+      typeof workspace.manifestDigest !== "string"
+    )
+      throw Error("Selected workspace export lost its path or provenance");
+    selectorWorkspaces.set(row.testCase.vars.caseId, workspace);
+    try {
+      await access(workspace.path);
+      throw Error("Stock CLI retained a selected workspace after evaluation");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+  }
+  if (
+    selectorWorkspaces.size !== (localSources ? selectorCases.length : 1) ||
+    new Set([...selectorWorkspaces.values()].map((workspace) => workspace.path)).size !==
+      selectorWorkspaces.size
+  )
+    throw Error("Concurrent selector cases shared a workspace");
+  if (
+    localSources &&
+    (selectorWorkspaces.get("writable-first")?.manifestDigest !==
+      selectorWorkspaces.get("writable-second")?.manifestDigest ||
+      new Set(
+        ["readonly", "writable-first", "missing"].map(
+          (id) => selectorWorkspaces.get(id)?.manifestDigest,
+        ),
+      ).size !== 3)
+  )
+    throw Error("Selector provenance did not distinguish authored variants and reuse their seeds");
+  const selectionErrors = await evaluateFixture(
+    "workspace-selector-errors",
+    {
+      prompts: ["must-not-run"],
+      providers: [selectorProvider],
+      tests: [{ vars: { caseId: "missing" } }, { vars: { workspaceName: "unknown" } }],
+    },
+    [1, 100],
+  );
+  if (
+    selectionErrors.stats.errors !== 2 ||
+    selectionErrors.results.length !== 2 ||
+    selectionErrors.results.some(
+      (row: {
+        providerResponse?: { error?: string; metadata?: { workspace?: unknown } };
+        response: { error?: string; metadata?: { workspace?: unknown } };
+      }) => {
+        const response = row.providerResponse ?? row.response;
+        return !response.error?.includes("workspaceName") || response.metadata?.workspace;
+      },
+    )
+  )
+    throw Error(
+      "Missing or unknown workspace selection did not fail before publishing a workspace",
+    );
+  const lifecycleBarrier = join(cwd, "selector-lifecycle-barrier");
+  await mkdir(lifecycleBarrier);
+  const lifecycleConfig = {
+    ...selectorProvider.config,
+    basePath: cwd,
+    delegate: {
+      ...selectorProvider.config.delegate,
+      env: { E2E_SELECTOR_BARRIER: lifecycleBarrier },
+    },
+  };
+  await writeFile(
+    join(cwd, "selector-lifecycle.mjs"),
+    `
+import assert from 'node:assert/strict';
+import { access, readFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
+import { Agent } from 'oh-my-promptfoo/providers';
+const provider = new Agent(${JSON.stringify({ config: lifecycleConfig })});
+const barrier = ${JSON.stringify(lifecycleBarrier)};
+const context = workspaceName => ({ vars: { workspaceName } });
+const prompt = request => 'workspace-selector:' + JSON.stringify(request);
+const absent = path => assert.rejects(access(path), { code: 'ENOENT' });
+async function started(id) {
+  const deadline = Date.now() + 15_000;
+  for (;;) {
+    try { return JSON.parse(await readFile(join(barrier, id + '.json'), 'utf8')).path; }
+    catch (error) {
+      if (error.code !== 'ENOENT' || Date.now() >= deadline) throw error;
+      await delay(10);
+    }
+  }
+}
+try {
+  const retained = await provider.callApi(
+    prompt({ id: 'retained', editSource: ${localSources} }),
+    context(${JSON.stringify(localSources ? "beta" : "missing-repo")}),
+  );
+  assert.equal(retained.error, undefined);
+  const retainedPath = retained.metadata.workspace.path;
+  await access(retainedPath);
+  const controller = new AbortController();
+  const cancelled = provider.callApi(
+    prompt({ id: 'cancelled', waitForAbort: true }),
+    context(${JSON.stringify(localSources ? "alpha" : "missing-repo")}),
+    { abortSignal: controller.signal },
+  );
+  const cancelledPath = await started('cancelled');
+  controller.abort();
+  const cancelledResponse = await cancelled;
+  assert.match(cancelledResponse.error, /aborted/i);
+  assert.equal(cancelledResponse.metadata?.workspace, undefined);
+  await absent(cancelledPath);
+  await access(retainedPath);
+  const pending = provider.callApi(
+    prompt({ id: 'cleanup', waitForAbort: true }),
+    context('missing-repo'),
+  );
+  const pendingPath = await started('cleanup');
+  await provider.cleanup();
+  assert.match((await pending).error, /aborted|closed|cleanup/i);
+  await Promise.all([absent(pendingPath), absent(retainedPath), absent(cancelledPath)]);
+  await provider.cleanup();
+} finally {
+  await provider.cleanup();
+}
+console.log('Selector cancellation and cross-variant cleanup passed');
+`,
+  );
+  run("node", ["selector-lifecycle.mjs"]);
   const judgeRequests: {
     url: string | undefined;
     body: { model: string; messages: { role: string; content: string }[] };
@@ -1333,6 +1628,12 @@ try {
           piSdk: piGates,
           toolInventory: inventoryGates.stats,
           mixedSkillInventory: mixedSkillInventory.stats,
+          workspaceSelector: {
+            localSources: localSources ? "staged" : "refused",
+            concurrentCases: selectorResults.stats,
+            invalidSelections: selectionErrors.stats.errors,
+            cancellationAndCrossVariantCleanup: true,
+          },
           normalCleanup: true,
           skippedCleanupRecovery: true,
           storageOutsideConsumer: true,
@@ -1345,6 +1646,10 @@ try {
           "async workspace assertion",
           "exact durable file bytes",
           "labeled source policy selection",
+          "one Agent selects authored per-case workspaces under concurrent stock Promptfoo eval",
+          "selected local-source bytes, permissions, digests and per-call mutation isolation",
+          "empty missing-repo variant and missing/unknown selection errors",
+          "selected workspace cancellation and cross-variant cleanup",
           "llm-rubric with live workspace",
           "skill-used",
           "trajectory:tool-used",

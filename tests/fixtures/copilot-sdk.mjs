@@ -1,5 +1,7 @@
-import { chmod, readFile, writeFile } from "node:fs/promises";
+import { spawnSync } from "node:child_process";
+import { chmod, readdir, readFile, rename, stat, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 export class CopilotClient {
   constructor(options) {
     this.options = options;
@@ -160,6 +162,60 @@ export class CopilotClient {
           settled = true;
           if (scenario.executionError)
             throw Error(scenario.executionError === "empty" ? "" : "fixture execution failed");
+          callback({ type: "session.idle", data: {} });
+          return { data: { content } };
+        }
+        if (prompt.startsWith("workspace-selector:")) {
+          const request = JSON.parse(prompt.slice("workspace-selector:".length));
+          const root = config.workingDirectory;
+          const inputPath = join(root, "project/input.txt");
+          const readInput = async () => {
+            try {
+              return await readFile(inputPath, "utf8");
+            } catch (error) {
+              if (error.code !== "ENOENT") throw error;
+              return null;
+            }
+          };
+          const initialInput = await readInput();
+          const inputMode = initialInput === null ? null : (await stat(inputPath)).mode & 0o777;
+          await writeFile(join(root, `case-${request.id}.txt`), request.id);
+          if (request.editSource) await writeFile(inputPath, request.id);
+          const barrier = client.options.env.E2E_SELECTOR_BARRIER;
+          if (!barrier) throw Error("Workspace selector fixture requires its barrier directory");
+          const ready = async () => {
+            const pending = join(barrier, `${request.id}.pending`);
+            await writeFile(pending, JSON.stringify({ path: root }));
+            await rename(pending, join(barrier, `${request.id}.json`));
+          };
+          if (request.waitForAbort) {
+            const { promise, reject } = Promise.withResolvers();
+            rejectSend = reject;
+            void ready().catch(reject);
+            await promise;
+          }
+          await ready();
+          const deadline = Date.now() + 15_000;
+          while (
+            (await readdir(barrier)).filter((name) => name.endsWith(".json")).length <
+            (request.participants ?? 1)
+          ) {
+            if (Date.now() >= deadline) throw Error("Workspace selector cases did not overlap");
+            await delay(10);
+          }
+          const git = spawnSync("git", ["-C", join(root, "repo"), "rev-parse", "HEAD"], {
+            encoding: "utf8",
+          });
+          const content = JSON.stringify({
+            ok: true,
+            id: request.id,
+            initialInput,
+            finalInput: await readInput(),
+            inputMode,
+            gitCommit: git.status === 0 ? git.stdout.trim() : null,
+          });
+          await writeFile(join(root, "result.txt"), content);
+          callback({ type: "assistant.message", data: { content } });
           callback({ type: "session.idle", data: {} });
           return { data: { content } };
         }

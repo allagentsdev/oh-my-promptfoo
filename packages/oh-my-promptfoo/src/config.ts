@@ -46,7 +46,7 @@ export interface PiDelegate {
 export type Delegate = CodexDelegate | ClaudeDelegate | CopilotDelegate | PiDelegate;
 export interface AgentConfig {
   delegate: Delegate;
-  workspace: WorkspaceSpec;
+  workspace: WorkspaceSpec | { fromVar: string; variants: Record<string, WorkspaceSpec> };
   workspaceTimeoutMs?: number;
   workingDir?: string;
   fileChanges?: boolean;
@@ -504,7 +504,24 @@ export function validateAgentConfig(value: unknown): AgentConfig {
       (c.timeoutMs as number) > 2_147_483_647)
   )
     throw new Error("config.timeoutMs must be a positive integer");
-  object(c.workspace, "workspace");
+  const workspace = object(c.workspace, "workspace");
+  if (Object.hasOwn(workspace, "fromVar") || Object.hasOwn(workspace, "variants")) {
+    closed(workspace, ["fromVar", "variants"], "workspace");
+    if (
+      typeof workspace.fromVar !== "string" ||
+      !/^[A-Za-z_][A-Za-z0-9_]*$/.test(workspace.fromVar)
+    )
+      throw new Error("workspace.fromVar must name a single test variable");
+    const variants = object(workspace.variants, "workspace.variants");
+    if (!Object.keys(variants).length) throw new Error("workspace.variants must not be empty");
+    for (const [name, spec] of Object.entries(variants)) {
+      if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(name))
+        throw new Error(
+          "Workspace variant names must use 1–64 letters, numbers, underscores or hyphens",
+        );
+      object(spec, `workspace.variants.${name}`);
+    }
+  }
   return { ...c, delegate: validateDelegate(c.delegate) } as unknown as AgentConfig;
 }
 export function validateCopilotConfig(value: unknown): CopilotSdkConfig {

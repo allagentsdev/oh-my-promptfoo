@@ -29,6 +29,7 @@ const agent: Providers.Agent = new Providers.Agent();
 const copilot: Providers.CopilotSdk = new Providers.CopilotSdk();
 const options: Providers.CallOptions = {abortSignal: new AbortController().signal};
 const agentConfig: Providers.AgentConfig = {delegate: {id: 'copilot-sdk'}, workspace: {sources: []}};
+const selectedConfig: Providers.AgentConfig = {delegate: {id: 'copilot-sdk'}, workspace: {fromVar: 'fixture', variants: {empty: {sources: []}}}};
 const copilotConfig: Providers.CopilotSdkConfig = {working_dir: '.'};
 const agentId: string = agent.id();
 const reply: Promise<unknown> = agent.callApi('prompt', undefined, options);

@@ -272,16 +272,92 @@ and `delegate.config.timeoutMs` remains constructor-only.
 | `delegate.id` | Yes | Selects one of the four supported agents |
 | `delegate.config` | Pi only | Passes native candidate options to Promptfoo for Codex/Claude, except provider-owned keys above; Copilot/Pi use closed lists, and Pi requires nonempty `provider` and `model` |
 | `delegate.env` | No | Passes only the named environment values to the agent |
-| `workspace.sources` | Yes | Lists Git, OCI, or host-local inputs; `[]` starts with an empty workspace |
-| `workspace.limits` | No | Narrows source count and download/extraction byte budgets |
+| `workspace` | Yes | A single workspace spec (unchanged), or `{ fromVar, variants }` to select an authored spec per test |
+| `workspace.sources` | Yes, per spec | Lists Git, OCI, or host-local inputs; `[]` starts with an empty workspace |
+| `workspace.limits` | No, per spec | Narrows source count and download/extraction byte budgets |
 | `workspaceTimeoutMs` | No | Bounds workspace preparation; provider value overrides `ALLAGENTS_WORKSPACE_TIMEOUT_MS`, then the 120,000 ms package default |
-| `workspace.viewMode` | No | `auto` (default) tries reflinks then disk-admitted physical copies; `copy-only` skips reflinks and uses disk-admitted physical copies for writable views and protected read-only checkouts |
+| `workspace.viewMode` | No, per spec | `auto` (default) tries reflinks then disk-admitted physical copies; `copy-only` skips reflinks and uses disk-admitted physical copies for writable views and protected read-only checkouts |
 | `workingDir` | No | Starts the agent in an existing directory relative to the prepared workspace root, such as `project`; defaults to the root. The path must be normalized and contained. A protected read-only source can be selected. |
 | `fileChanges` | No | Captures bounded after-bytes and a diff; defaults to `false` |
 | `timeoutMs` | No | Limits the agent call |
 
 `workspaceTimeoutMs` accepts an integer from 1 to 3,600,000 ms. The separate
 `timeoutMs` limits the agent call and defaults to 900,000 ms.
+
+### Select a workspace per test
+
+Existing `workspace: { sources, limits?, viewMode? }` configs keep the same
+behavior. To use different inputs with one shared provider, replace that spec
+with `workspace: { fromVar: workspaceName, variants: { ... } }`. Each variant is
+a complete workspace spec with its own sources, source permissions, limits and
+view mode.
+
+For example, on Linux, create `fixtures/checkout` and `fixtures/catalog` next
+to this config and put the files to inspect in each directory:
+
+```yaml
+prompts: ["{{task}}"]
+providers:
+  - id: package:oh-my-promptfoo/providers:Agent
+    config:
+      delegate:
+        id: copilot-sdk
+        env:
+          GH_TOKEN: "{{env.GH_TOKEN}}"
+      workingDir: project
+      workspaceTimeoutMs: 120000
+      timeoutMs: 900000
+      workspace:
+        fromVar: workspaceName
+        variants:
+          checkout:
+            sources:
+              - type: local
+                path: ./fixtures/checkout
+                destination: project
+                permissions: all
+          catalog:
+            sources:
+              - type: local
+                path: ./fixtures/catalog
+                destination: project
+                permissions: read-only
+tests:
+  - vars:
+      workspaceName: checkout
+      task: Inspect the checkout code and explain how it handles an empty price.
+  - vars:
+      workspaceName: catalog
+      task: Inspect the catalog code and explain how it handles an unknown item.
+```
+
+`context.vars` must have its own `workspaceName` property whose value is a
+string exactly matching an own key in `variants`. Selection is case-sensitive:
+there is no coercion, default or fallback. A missing, non-string or unknown
+selection fails before source acquisition. All variant specs, including unused
+ones, are validated before any source acquisition.
+
+`fromVar` names one variable, not a dotted path: use letters, numbers and
+underscores, starting with a letter or underscore. Variant names use 1–64
+letters, numbers, underscores or hyphens, starting with a letter or number.
+
+Variants are literal, authored configuration. Test vars select a name only;
+they cannot supply specs, repository URLs, refs or host paths, and workspace
+fields are not templates. Local paths and `file://` Git repositories in every
+variant use the loader's `basePath`, just like a single workspace spec. Literal
+repository URLs remain visible under `workspace.variants` so runners can inspect
+every possible source when scoping acquisition credentials.
+
+`delegate`, `workingDir`, `workspaceTimeoutMs`, `timeoutMs` and `fileChanges`
+remain common provider settings, not variant fields. In this example, both
+variants therefore stage a `project` directory. Existing prompt-level
+`delegate.config` overrides are unchanged; they do not override workspace
+selection.
+
+Every call still gets a distinct private workspace, even when calls select
+the same variant. Selected sources retain the existing provenance metadata,
+source-permission rules, assertions and cleanup lifecycle. Workspaces remain
+live through assertions; selecting a variant does not extend their lifetime.
 
 ## Workspace sources and permissions
 
@@ -306,7 +382,7 @@ Destinations must be relative, normalized, nonempty paths, and they may not nest
 
 Several `type: local` sources may repeat one destination exactly and merge into a single tree, which is how N plugins stage their skills into one `.agents/skills`. The merged tree still produces exactly one view, one seed subtree and one protected checkout, and the checkout key covers every contributing source, so a different set of sources never reuses another set's checkout. Three rules keep the result independent of acquisition order and are enforced rather than documented as a convention. Every source sharing a destination must declare the same `permissions`, because one tree cannot be both protected and writable. No two of them may contribute the same relative path; a collision fails and names both source paths rather than letting the last source win. A directory path may repeat only when the sources agree on its mode. Git and OCI sources keep exclusive destinations: a Git destination carries the `.git` that governs that subtree and that `git status` reads for file changes, a prepared checkout is stamped as a whole external tree, and an OCI artifact tree is published as a unit. Nested destinations such as `a` and `a/b` stay rejected; only exact repetition merges. See [ADR 0005](adr/0005-merge-shared-source-destinations.md).
 
-Select source policy with labeled providers and `defaultTest.providers` / `tests[].providers`; without a filter, a test runs against every configured provider. There is no workspace-wide permissions setting. Native sandbox settings apply to the whole workspace.
+Select source policy with per-test workspace variants above, or with labeled providers and `defaultTest.providers` / `tests[].providers`; without a provider filter, a test runs against every configured provider. There is no workspace-wide permissions setting. Native sandbox settings apply to the whole workspace.
 
 ### Optional sibling agent workspace
 
@@ -340,7 +416,9 @@ This opt-in path requires a trusted, single-job runner with no concurrent untrus
 
 For a trusted single-job runner, `ALLAGENTS_PREBUILT_ROOT` can point to an existing absolute, owned private `0700` directory, outside the seed-cache and workspace roots. It is a provider runtime channel (via loader `options.env` or the runner's process environment), not authored workspace configuration or delegate environment. The provider never creates or deletes this root. It rejects symlink ancestors, unowned or group-writable prepared directories, and a missing or malformed ownership marker (`.allagents-owner.json` containing `{"schemaVersion":1,"package":"@allagents/promptfoo-integration","kind":"prebuilt-sources"}`). The old package name remains the on-disk owner identifier for compatibility with existing prepared workspaces.
 
-The runner atomically publishes `manifest.json` only after preparing its sources: `{"schemaVersion":1,"sources":[{"repository":"https://…","commit":"<40 lowercase hex>","destination":"project"}]}`. Each record must match **exactly** one pinned, credential-free HTTPS, `read-only` Git source from `workspace.sources` (including the repository URL spelling, commit in `ref`, and normalized destination). Order is immaterial; missing, duplicate and unexpected records fail closed. For each record, compute `key = SHA256(UTF8(JSON.stringify([repository, commit, destination])))` in lowercase hexadecimal and prepare a physically independent checkout at `<root>/sources/<key>/protected`; its `.git` directory must be local, HEAD pinned and working tree clean. The runner also prepares a clean original at `<root>/sources/<key>/seed` and a Git object mirror at `<root>/sources/<key>/mirror`; these are runner-owned, not provider cache entries. Publish the root and manifest privately only after verifying the checkout and any asset hashes.
+The runner atomically publishes `manifest.json` only after preparing its sources: `{"schemaVersion":1,"sources":[{"repository":"https://…","commit":"<40 lowercase hex>","destination":"project"}]}`. Its records must exactly match the pinned, credential-free HTTPS, `read-only` Git sources authored in `workspace.sources`. With workspace variants, use the union across every variant instead; repeated identical identities need one record. Missing, duplicate and undeclared identities fail closed. Identity includes the repository URL spelling, commit in `ref`, and normalized destination, so different variants may use different repositories at the same destination. Each case links only its selected sources, including none for an empty variant.
+
+For each record, compute `key = SHA256(UTF8(JSON.stringify([repository, commit, destination])))` in lowercase hexadecimal and prepare a physically independent checkout at `<root>/sources/<key>/protected`; its `.git` directory must be local, HEAD pinned and working tree clean. The runner also prepares a clean original at `<root>/sources/<key>/seed` and a Git object mirror at `<root>/sources/<key>/mirror`; these are runner-owned, not provider cache entries. Publish the root and manifest privately only after verifying the checkout and any asset hashes.
 
 With this channel set, the provider links each matching prepared checkout directly into each private row; it neither fetches that source nor copies it through the seed cache. Writable HTTPS Git and OCI sources are refused rather than fetched; local Git sources still follow ordinary acquisition and private-copy rules, with separate cache identity. Before delegate execution it checks Git HEAD, cleanliness and a full metadata tree stamp (including no writable files or directories on POSIX); after execution it checks again against that row's baseline. A failed check rejects the row and invalidates reuse in that manager, even if the delegate returns successfully. The root remains external and untouched by workspace cleanup and abandoned-record recovery. Without the channel, the normal bounded acquisition and protected-checkout behavior is unchanged. Read-only modes are cooperative against the same UID, not an isolation boundary: restrict the runner to a trusted job and dispose of the external root after its lifetime.
 
@@ -394,6 +472,12 @@ source identities; subscribing does not add copies or verification passes.
 ## Workspace lifetime
 
 Workspaces remain live through synchronous/asynchronous assertions. `Agent.cleanup()` closes calls, stops active process groups, removes private views, then releases leases. Promptfoo 0.122 does not guarantee cleanup on every CLI/Node path. Paths are transient and may survive until later dead-owner recovery or runner disposal. There is no cleanup timer. Call `cleanup()` explicitly when using providers directly. Dead-owner recovery uses process start identity and never removes live or unmarked roots; an unknown mount or legacy OverlayFS recovery record fails closed and retains leases for manual cleanup.
+
+Cancelled calls do not publish a workspace path, even when a delegate returns
+an aborted response with partial accounting. Their unpublished workspace is
+released before the call returns; Copilot accounting remains available on the
+error response. A teardown failure retains its recovery record rather than
+pretending cleanup succeeded.
 
 ## Seed cache and resource limits
 

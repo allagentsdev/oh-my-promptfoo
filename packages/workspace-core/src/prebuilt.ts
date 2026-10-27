@@ -68,6 +68,7 @@ export class PreparedSources {
     channels: RuntimeChannels,
     cache: string,
     runtime: string,
+    declaredSpecs: readonly WorkspaceSpec[] = [spec],
   ): Promise<PreparedSources> {
     if (!root || !isAbsolute(root) || resolve(root) !== root)
       throw new Error("Prepared source root must be an absolute normalized path");
@@ -132,8 +133,9 @@ export class PreparedSources {
         destination(source.destination) !== source.destination
       )
         throw new Error("Invalid prepared source identity");
-      if (prepared.entries.has(source.destination)) throw new Error("Duplicate prepared source");
-      prepared.entries.set(source.destination, source);
+      const key = preparedKey(source);
+      if (prepared.entries.has(key)) throw new Error("Duplicate prepared source");
+      prepared.entries.set(key, source);
     }
     if (spec.sources.some((source) => source.type === "oci"))
       throw new Error("Prepared source root refuses remote OCI acquisition");
@@ -146,22 +148,41 @@ export class PreparedSources {
       )
     )
       throw new Error("Prepared source root refuses writable remote Git acquisition");
-    const required = spec.sources.filter(
-      (source): source is GitSource =>
-        source.type === "git" && source.permissions === "read-only" && validUrl(source.repository),
-    );
-    if (required.length !== prepared.entries.size)
+    // Authorize the complete authored set, but expose only sources from the selected spec.
+    const required = new Set<string>();
+    for (const declared of declaredSpecs) {
+      for (const source of declared.sources) {
+        if (
+          source.type === "git" &&
+          source.permissions === "read-only" &&
+          validUrl(source.repository)
+        )
+          required.add(
+            preparedKey({
+              repository: source.repository,
+              commit: source.ref,
+              destination: source.destination,
+            }),
+          );
+      }
+    }
+    if (required.size !== prepared.entries.size)
       throw new Error("Prepared source manifest does not match workspace sources");
-    for (const source of required) {
-      const listed = prepared.entries.get(source.destination);
-      if (!listed || listed.repository !== source.repository || source.ref !== listed.commit)
+    for (const key of required) {
+      if (!prepared.entries.has(key))
         throw new Error("Prepared source manifest does not match pinned Git source");
     }
     return prepared;
   }
 
   resolves(source: GitSource): ResolvedSource | undefined {
-    const entry = this.entries.get(source.destination);
+    const entry = this.entries.get(
+      preparedKey({
+        repository: source.repository,
+        commit: source.ref,
+        destination: source.destination,
+      }),
+    );
     if (!entry) return undefined;
     return { ...source, commit: entry.commit, materializerVersion: 1 };
   }

@@ -87,6 +87,10 @@ pinned Git and OCI sources, and larger runs.
   pinned commit), OCI artifacts or local folders a test needs. The agent works
   on copies, so your checkout stays untouched and one test's edits never reach
   the next.
+- **Reuse one provider with different case inputs.** Declare named workspace
+  variants with `workspace: { fromVar, variants }`, then select one in test vars.
+  Sources stay literal and each call stays isolated. See the
+  [per-test workspace guide](https://github.com/allagentsdev/oh-my-promptfoo/blob/main/docs/provider-guide.md#select-a-workspace-per-test).
 - **Swap the agent without rewriting tests.** Codex, Claude Code, Copilot and
   Pi run behind the same provider. Give each one a label to compare them side
   by side in one run.

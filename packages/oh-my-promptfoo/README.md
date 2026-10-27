@@ -87,6 +87,10 @@ pinned Git and OCI sources, and larger runs.
   pinned commit), OCI artifacts or local folders a test needs. The agent works
   on copies, so your checkout stays untouched and one test's edits never reach
   the next.
+- **Reuse one provider with different case inputs.** Declare named workspace
+  variants with `workspace: { fromVar, variants }`, then select one in test vars.
+  Sources stay literal and each call stays isolated. See the
+  [per-test workspace guide](https://github.com/allagentsdev/oh-my-promptfoo/blob/main/docs/provider-guide.md#select-a-workspace-per-test).
 - **Swap the agent without rewriting tests.** Codex, Claude Code, Copilot and
   Pi run behind the same provider. Give each one a label to compare them side
   by side in one run.
@@ -149,12 +153,18 @@ Only normalized workspace-relative files are accepted; symlink escapes and host
 executables are rejected. The server receives **only** its literal `env`, never
 host/delegate credentials, `HOME`, or `PATH`. Tools default to all; `[]` permits
 none. Timeouts terminate the server, and abort/completion tears down its Node
-child and private configuration. General MCP config discovery stays off; graders
-cannot configure servers. This is not an OS or network sandbox: the trusted Node
-fixture itself can access the host and network.
+child and private configuration. Contained MCP tools use explicit server config;
+graders cannot configure servers. Claude candidates can opt into native settings
+and plugin discovery through `delegate.config`. This is not an OS or network
+sandbox: the trusted Node fixture itself can access the host and network.
 
 See the [runnable two-delegate example](examples/mcp/promptfooconfig.yaml) and
 [configuration details](docs/provider-guide.md#local-mcp-servers).
+
+Codex and Claude candidate `delegate.config` options pass through to Promptfoo,
+except workspace, session-reuse and CLI-environment keys owned by this provider.
+Copilot, Pi and read-only graders keep closed option lists. See the
+[native config rules](docs/provider-guide.md#workspace-provider-configuration).
 
 ## Copilot models without an agent
 
