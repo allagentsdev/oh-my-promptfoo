@@ -123,21 +123,36 @@ no longer resolve (see the
 
 ## Copilot conversations
 
-Use Promptfoo's ordinary chat templates with either `CopilotSdk` or `Agent`
-delegating to `copilot-sdk`: `{{ messages | dump }}` supplies fixed history,
-and a template loop over `_conversation` replays generated turns.
-`metadata.conversationId` groups turns; normal assertions grade each new reply.
-The provider reads only the rendered prompt, never appending history itself.
+Use [Promptfoo's ordinary chat templates](https://www.promptfoo.dev/docs/configuration/chat/)
+with either `CopilotSdk` or `Agent` delegating to `copilot-sdk`. JSON and YAML
+prompt files, simplified chat markup expanded by Nunjucks, shared fixed history,
+`_conversation` replay, `metadata.conversationId`, `storeOutputAs` and output
+transforms belong to Promptfoo, not a JavaScript conversation adapter.
+Normal assertions grade each new reply; the provider reads only the rendered prompt.
 
-One optional leading system message is appended to Copilot's core system
-instructions through the public SDK. Other messages retain their labels,
-order and strings in a delimited **user-channel JSON transcript**, not native
-assistant/tool roles; the delimiters are not a security boundary. Each row
-uses a fresh session and, with `Agent`, a fresh workspace. History is supplied
-input, not tool-use evidence or persistent filesystem state.
+Copilot's optional `inputFormat` is `auto` (default), `chat` or `text`. Set it in
+direct provider config or the Agent's `delegate.config`; per-test
+`options.delegate.config.inputFormat` overrides either. `auto` recognizes only
+complete chat-shaped JSON arrays; business records with other roles or incomplete
+records remain literal. Chat-shaped business data is inherently ambiguous: use
+`text` to bypass provider parsing and preserve the supplied/rendered string exactly.
+It does not bypass Promptfoo's earlier Nunjucks rendering or variable expansion.
+YAML **file** loading is Promptfoo's job; raw YAML text is not provider chat input.
 
-See the [two-provider example](examples/copilot-conversations/promptfooconfig.yaml)
-and [supported messages and limitations](docs/provider-guide.md#promptfoo-conversations-with-copilot).
+All system messages, even later ones, are consolidated in original system order
+and appended to Copilot's core instructions through the public SDK. Other
+messages preserve string names, tool IDs, order and content in a delimited
+**user-channel JSON transcript**, not native assistant/tool roles. Delimiters
+are not a security boundary. Each row uses a fresh session and, with `Agent`, a
+fresh workspace. History is supplied input, not tool evidence or filesystem state.
+Returned errors, including settled aborts, retain published workspaces until
+cleanup; thrown failures release unpublished workspaces.
+
+The [two-provider examples](examples/copilot-conversations/promptfooconfig.yaml)
+include three generated turns, interleaved IDs, JSON/YAML and simplified fixed
+history, embedded/literal JSON, full-prompt replay and transformed-output storage.
+See the [feature/provenance and compatibility matrices](docs/provider-guide.md#feature-and-verification-provenance)
+for engine-owned behavior, SDK limits and verification status.
 
 ## Local MCP fixtures
 

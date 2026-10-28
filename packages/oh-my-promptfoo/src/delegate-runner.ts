@@ -8,7 +8,14 @@ import { W3CTraceContextPropagator } from "@opentelemetry/core";
 import { NodeTracerProvider } from "@opentelemetry/sdk-trace-node";
 import { resolve as resolveImport } from "import-meta-resolve";
 import { destination } from "../../workspace-core/src/config.js";
-import { closed, type JsonObject, object, validateDelegateConfig, validateEnv } from "./config.js";
+import {
+  type CopilotSdkConfig,
+  closed,
+  type JsonObject,
+  object,
+  validateDelegateConfig,
+  validateEnv,
+} from "./config.js";
 import {
   type CopilotAccounting,
   copilotUsageValue,
@@ -482,7 +489,10 @@ function verifiedSkillLoaderRecord(entry: unknown, workingDir: string): SkillCal
   }
 }
 async function runCopilot(frame: CallFrame, signal: AbortSignal): Promise<JsonObject> {
-  const input = copilotInput(frame.prompt);
+  const input = copilotInput(
+    frame.prompt,
+    frame.config.inputFormat as CopilotSdkConfig["inputFormat"],
+  );
   const sdk = await import(pathToFileURL(resolvePeer(frame.basePath, "@github/copilot-sdk")).href);
   if (typeof sdk.CopilotClient !== "function")
     throw new Error("Install the supported @github/copilot-sdk@1.0.22 peer");

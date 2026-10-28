@@ -1,0 +1,16 @@
+# npx promptfoo eval -c examples/copilot-conversations/promptfooconfig-native.yaml --no-cache
+# JSON and YAML author the same fixed history; each prompt gets independent history.
+prompts:
+  - file://native.json
+  - file://native.yaml
+providers: file://providers.yaml
+tests:
+  - vars:
+      question: What is my codename?
+    options:
+      delegate:
+        config:
+          inputFormat: chat
+    assert:
+      - type: equals
+        value: amber

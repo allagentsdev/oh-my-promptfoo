@@ -54,6 +54,7 @@ export interface AgentConfig {
 }
 export interface CopilotSdkConfig {
   working_dir: string;
+  inputFormat?: "auto" | "text" | "chat";
   model?: string;
   reasoning_effort?: "low" | "medium" | "high";
   timeoutMs?: number;
@@ -128,6 +129,7 @@ const graderClaude: Record<string, Rule> = {
   mcpServers: "object",
 };
 const copilot: Record<string, Rule> = {
+  inputFormat: ["auto", "text", "chat"],
   model: "string",
   reasoning_effort: ["low", "medium", "high"],
   timeoutMs: "number",
@@ -512,6 +514,7 @@ export function validateCopilotConfig(value: unknown): CopilotSdkConfig {
     value,
     [
       "working_dir",
+      "inputFormat",
       "model",
       "reasoning_effort",
       "timeoutMs",
@@ -536,12 +539,20 @@ export function validateCopilotConfig(value: unknown): CopilotSdkConfig {
 export function promptConfig(context: unknown, id: DelegateId, original: JsonObject): JsonObject {
   const ctx = context as { prompt?: { config?: unknown } } | undefined;
   if (ctx?.prompt?.config === undefined) return original;
-  // Promptfoo forwards grading metadata alongside generation overrides.
+  // Promptfoo forwards engine-owned execution/grading options alongside delegate overrides.
   const supplied = object(ctx.prompt.config, "prompt.config");
   const p = closed(
     Object.fromEntries(
       Object.entries(supplied).filter(
-        ([key, value]) => key !== "provider" && key !== "rubricPrompt" && value !== undefined,
+        ([key, value]) =>
+          ![
+            "provider",
+            "rubricPrompt",
+            "disableVarExpansion",
+            "runSerially",
+            "storeOutputAs",
+            "transform",
+          ].includes(key) && value !== undefined,
       ),
     ),
     ["delegate"],

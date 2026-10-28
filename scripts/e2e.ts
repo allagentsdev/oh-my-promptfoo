@@ -825,6 +825,14 @@ try {
     join(repo, "examples/copilot-conversations/prompt.txt"),
     join(cwd, "conversation-prompt.txt"),
   );
+  for (const name of [
+    "native.json",
+    "native.yaml",
+    "simplified.txt",
+    "prompt-history.txt",
+    "embedded.txt",
+  ])
+    await copyFile(join(repo, "examples/copilot-conversations", name), join(cwd, name));
   const conversationSystem = "CONVERSATION_SYSTEM_E2E";
   const fixedHistory = [
     { role: "user", content: 'Remember "amber".\nThis is fixed input.' },
@@ -862,6 +870,11 @@ try {
       id: "isolated-second",
       group: "isolated",
       question: "Continue only the separate conversation.",
+    },
+    {
+      id: "third",
+      group: "generated",
+      question: "Replay both earlier generated turns exactly once.",
     },
   ];
   const transcriptPrompt = (messages: unknown[]) =>
@@ -918,7 +931,10 @@ try {
     const native = await evaluateFixture(`native-conversations-${provider.label}`, {
       prompts: ["file://conversation-prompt.txt"],
       providers: [provider],
-      defaultTest: { vars: { system_message: conversationSystem, messages: [] } },
+      defaultTest: {
+        options: { disableVarExpansion: true },
+        vars: { system_message: conversationSystem, messages: [] },
+      },
       tests: conversationCases.map(({ id, group, question, messages }) => ({
         metadata: { conversationId: group },
         vars: { conversationCase: id, question, ...(messages ? { messages } : {}) },
@@ -963,12 +979,17 @@ try {
       let expected = question;
       if (id === "fixed")
         expected = transcriptPrompt([...fixedHistory, { role: "user", content: question }]);
-      if (id === "second" || id === "isolated-second") {
-        const previousId = id === "second" ? "first" : "isolated-first";
-        const previous = conversationCases.find((test) => test.id === previousId)!;
+      if (id === "second" || id === "isolated-second" || id === "third") {
+        const previousIds =
+          id === "third" ? ["first", "second"] : [id === "second" ? "first" : "isolated-first"];
         expected = transcriptPrompt([
-          { role: "user", content: previous.question },
-          { role: "assistant", content: generatedOutputs[previousId] },
+          ...previousIds.flatMap((previousId) => [
+            {
+              role: "user",
+              content: conversationCases.find((test) => test.id === previousId)!.question,
+            },
+            { role: "assistant", content: generatedOutputs[previousId] },
+          ]),
           { role: "user", content: question },
         ]);
       }
@@ -989,6 +1010,7 @@ try {
     const plain = await evaluateFixture(`native-conversations-plain-${provider.label}`, {
       prompts: ["{{question}}"],
       providers: [provider],
+      defaultTest: { options: { disableVarExpansion: true } },
       tests: plainQuestions.map((question, index) => ({
         vars: {
           question,
@@ -1020,11 +1042,279 @@ try {
         throw Error(`Plain ${provider.label} prompt or system configuration changed`);
       return receipt;
     });
+    const namedHistory = [
+      { role: "user", name: "customer", content: "My codename is amber." },
+      { role: "assistant", name: "helper", content: "amber" },
+      {
+        role: "tool",
+        name: "lookup",
+        tool_call_id: "authored-lookup",
+        content: "This is supplied history, not a live tool call.",
+      },
+      { role: "user", name: "customer", content: "What is my codename?" },
+    ];
+    const systemMessages = [
+      { role: "system", name: "format", content: "Answer with the codename only." },
+      { role: "system", content: "Keep the original lowercase spelling." },
+    ];
+    const combinedSystem = `BEGIN PROMPTFOO SYSTEM MESSAGES JSON\n${JSON.stringify(systemMessages)}\nEND PROMPTFOO SYSTEM MESSAGES JSON`;
+    const authoredPatterns: Record<string, unknown> = {};
+    for (const file of ["native.json", "native.yaml", "simplified.txt"]) {
+      const simplified = file === "simplified.txt";
+      const question = "What is my codename?";
+      const authored = await evaluateFixture(`native-authoring-${provider.label}-${file}`, {
+        prompts: [`file://${file}`],
+        providers: [provider],
+        tests: [
+          {
+            vars: {
+              question,
+              system_message: conversationSystem,
+              messages: [{ user: 'Remember "amber".\nKeep quotes.' }, { assistant: "amber" }],
+            },
+            options: {
+              disableVarExpansion: true,
+              delegate: { config: { inputFormat: "chat" } },
+            },
+            assert: [receivedTurnAssertion, noHistoricalToolsAssertion],
+          },
+        ],
+      });
+      const receipt: ConversationReceipt = JSON.parse(
+        (authored.results[0]?.providerResponse ?? authored.results[0]?.response)?.output,
+      );
+      const expectedMessages = simplified
+        ? [
+            { role: "user", content: 'Remember "amber".\nKeep quotes.' },
+            { role: "assistant", content: "amber" },
+            { role: "user", content: question },
+          ]
+        : namedHistory;
+      if (
+        authored.stats.successes !== 1 ||
+        receipt.receivedPrompt !== transcriptPrompt(expectedMessages) ||
+        JSON.stringify(receipt.systemMessage) !==
+          JSON.stringify({
+            mode: "append",
+            content: simplified ? conversationSystem : combinedSystem,
+          })
+      )
+        throw Error(`Native authoring mapping changed: ${provider.label}/${file}`);
+      authoredPatterns[file] = { stats: authored.stats, received: receipt };
+    }
+    const replayPatterns: Record<string, unknown> = {};
+    for (const file of ["prompt-history.txt", "embedded.txt"]) {
+      const cases = conversationCases.filter(({ id }) => id !== "fixed");
+      const replay = await evaluateFixture(`native-replay-${provider.label}-${file}`, {
+        prompts: [`file://${file}`],
+        providers: [provider],
+        tests: cases.map(({ id, group, question }) => ({
+          metadata: { conversationId: group },
+          vars: { conversationCase: id, question },
+          assert: [{ type: "is-json" }, noHistoricalToolsAssertion],
+        })),
+      });
+      if (replay.stats.successes !== cases.length || replay.stats.errors !== 0)
+        throw Error(`Native replay authoring failed: ${provider.label}/${file}`);
+      const priorByGroup = new Map<string, { question: string; output: string }[]>();
+      for (const { id, group, question } of cases) {
+        const row = replay.results.find(
+          (candidate: ConversationRow) => candidate.testCase.vars.conversationCase === id,
+        );
+        const output = (row?.providerResponse ?? row?.response)?.output;
+        const receipt: ConversationReceipt = JSON.parse(output);
+        const prior = priorByGroup.get(group) ?? [];
+        if (file === "prompt-history.txt") {
+          const expected = prior.length
+            ? transcriptPrompt([
+                ...prior.flatMap((turn) => [
+                  { role: "user", content: turn.question },
+                  { role: "assistant", content: turn.output },
+                ]),
+                { role: "user", content: question },
+              ])
+            : question;
+          if (
+            receipt.receivedPrompt !== expected ||
+            receipt.systemMessage?.content !== "Answer with the requested codename only."
+          )
+            throw Error(`Full-prompt replay duplicated or lost history: ${provider.label}/${id}`);
+        } else {
+          const payload = JSON.parse(receipt.receivedPrompt);
+          if (
+            payload.query !== question ||
+            JSON.stringify(payload.history) !==
+              JSON.stringify(prior.map((turn) => ({ reply: turn.output }))) ||
+            receipt.systemMessage?.content !==
+              "Read the query in the supplied JSON and answer with the requested codename only."
+          )
+            throw Error(`Embedded JSON replay changed string content: ${provider.label}/${id}`);
+        }
+        prior.push({ question, output });
+        priorByGroup.set(group, prior);
+      }
+      replayPatterns[file] = { stats: replay.stats, groups: [...priorByGroup.keys()] };
+    }
+    const mappingCases = [
+      {
+        question: JSON.stringify([
+          { role: "user", name: "named-user", content: "Preserve my name." },
+          { role: "system", name: "later-system", content: "Keep the trailing system." },
+        ]),
+        format: "chat",
+        expected: transcriptPrompt([
+          { role: "user", name: "named-user", content: "Preserve my name." },
+        ]),
+        system: {
+          mode: "append",
+          content:
+            'BEGIN PROMPTFOO SYSTEM MESSAGES JSON\n[{"role":"system","name":"later-system","content":"Keep the trailing system."}]\nEND PROMPTFOO SYSTEM MESSAGES JSON',
+        },
+      },
+      ...[
+        '[{"role":"user","content":"Literal chat-shaped business data."}]',
+        '[{"role":"developer","content":"Literal unsupported-role business data."}]',
+        'Analyze this JSON: {"role":"user","content":"embedded, not a top-level chat array"}',
+      ].map((question) => ({ question, format: "text", expected: question, system: null })),
+      ...[
+        '[{"role":"admin","content":"business record"}]',
+        '[{"role":"user"}]',
+        '[{"role":"user","content":"partial"},{"id":7}]',
+        "- role: user\n  content: raw YAML text is not a loaded YAML prompt file",
+        "[]",
+      ].map((question) => ({ question, format: "auto", expected: question, system: null })),
+    ];
+    const mapped = await evaluateFixture(`native-input-format-${provider.label}`, {
+      prompts: ["{{question}}"],
+      providers: [provider],
+      tests: mappingCases.map(({ question, format }, index) => ({
+        vars: { question, mappingIndex: index },
+        options: { delegate: { config: { inputFormat: format } } },
+        assert: [{ type: "is-json" }, noHistoricalToolsAssertion],
+      })),
+    });
+    if (mapped.stats.successes !== mappingCases.length || mapped.stats.errors !== 0)
+      throw Error(`Input-format rows failed: ${provider.label}`);
+    for (const row of mapped.results) {
+      const test = mappingCases[row.testCase.vars.mappingIndex];
+      const receipt: ConversationReceipt = JSON.parse(
+        (row.providerResponse ?? row.response).output,
+      );
+      if (
+        receipt.receivedPrompt !== test.expected ||
+        JSON.stringify(receipt.systemMessage) !== JSON.stringify(test.system) ||
+        receipt.sendCount !== 1
+      )
+        throw Error(
+          `Input-format exact mapping changed: ${provider.label}/${row.testCase.vars.mappingIndex}`,
+        );
+    }
+    const withInputFormat = (inputFormat: string, model = "fixture-conversations") =>
+      provider.label === "direct"
+        ? { ...provider, config: { ...provider.config, inputFormat, model } }
+        : {
+            ...provider,
+            config: {
+              ...provider.config,
+              delegate: { id: "copilot-sdk", config: { inputFormat, model } },
+            },
+          };
+    const constructorText = '[{"role":"user","content":"constructor text mode"}]';
+    const constructorMode = await evaluateFixture(
+      `native-input-format-constructor-${provider.label}`,
+      {
+        prompts: ["{{question}}"],
+        providers: [withInputFormat("text")],
+        tests: [
+          { vars: { question: constructorText }, assert: [{ type: "is-json" }] },
+          {
+            vars: { question: constructorText },
+            options: { delegate: { config: { inputFormat: "chat" } } },
+            assert: [{ type: "is-json" }],
+          },
+        ],
+      },
+    );
+    const constructorReceipts = constructorMode.results.map((row: ConversationRow) =>
+      JSON.parse((row.providerResponse ?? row.response).output),
+    );
+    if (
+      constructorMode.stats.successes !== 2 ||
+      constructorReceipts[0]?.receivedPrompt !== constructorText ||
+      constructorReceipts[1]?.receivedPrompt !== "constructor text mode"
+    )
+      throw Error(`Constructor/override inputFormat changed: ${provider.label}`);
+    const invalidInputs = [
+      { question: '[{"role":"developer","content":"unsupported"}]', inputFormat: "auto" },
+      { question: '[{"role":"function","content":"unsupported"}]', inputFormat: "auto" },
+      {
+        question: '[{"role":"user","content":[{"type":"text","text":"unsupported"}]}]',
+        inputFormat: "auto",
+      },
+      { question: '[{"role":"user"}]', inputFormat: "chat" },
+      {
+        question: "- role: user\n  content: raw YAML text is not rendered JSON",
+        inputFormat: "chat",
+      },
+    ];
+    const invalid = await evaluateFixture(
+      `native-input-format-invalid-${provider.label}`,
+      {
+        prompts: ["{{question}}"],
+        providers: [provider],
+        tests: invalidInputs.map(({ question, inputFormat }) => ({
+          vars: { question },
+          options: { delegate: { config: { inputFormat } } },
+        })),
+      },
+      [1, 100],
+    );
+    if (invalid.stats.errors !== invalidInputs.length || invalid.stats.successes !== 0)
+      throw Error(`Invalid chat intent stopped failing: ${provider.label}`);
+    const storage = await evaluateFixture(`native-output-storage-${provider.label}`, {
+      prompts: ["{{question}}"],
+      providers: [withInputFormat("text", "fixture-conversations-storage")],
+      tests: [
+        {
+          vars: { question: "STORE_TRANSFORM_FIRST" },
+          options: { transform: "output.split(' ')[0].toUpperCase()", storeOutputAs: "savedWord" },
+          assert: [{ type: "equals", value: "ORCHID" }],
+        },
+        {
+          vars: { question: "Stored transformed value: {{savedWord}}" },
+          options: { storeOutputAs: "savedReceipt" },
+          assert: [receivedTurnAssertion],
+        },
+        {
+          vars: { question: "Stored values: {{savedWord}} / {{savedReceipt}}" },
+          assert: [receivedTurnAssertion],
+        },
+      ],
+    });
+    const secondStored: ConversationReceipt = JSON.parse(
+      (storage.results[1]?.providerResponse ?? storage.results[1]?.response)?.output,
+    );
+    const thirdStored: ConversationReceipt = JSON.parse(
+      (storage.results[2]?.providerResponse ?? storage.results[2]?.response)?.output,
+    );
+    if (
+      storage.stats.successes !== 3 ||
+      secondStored.receivedPrompt !== "Stored transformed value: ORCHID" ||
+      thirdStored.receivedPrompt !==
+        `Stored values: ORCHID / ${(storage.results[1]?.providerResponse ?? storage.results[1]?.response)?.output}`
+    )
+      throw Error(`Transform-before-storage or register substitution changed: ${provider.label}`);
     nativeConversationGates[provider.label] = JSON.parse(
       JSON.stringify({
         sdk: "deterministic receipt fixture, not real Copilot runtime/model proof",
         nativeStats: native.stats,
         plainStats: plain.stats,
+        authoredPatterns,
+        replayPatterns,
+        inputFormatStats: mapped.stats,
+        constructorInputFormatStats: constructorMode.stats,
+        rejectedChatStats: invalid.stats,
+        storageStats: storage.stats,
         received: receipts,
         plainReceived: plainReceipts,
       })

@@ -7,12 +7,14 @@ import { basename, dirname, join, resolve } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { removeTree } from "../packages/workspace-core/src/fs.ts";
+import { runCopilotAuthoringMatrix } from "./copilot-authoring-matrix.mjs";
 
 // Run after the parent verification build refreshes the process entries:
 // node --import tsx scripts/smoke-copilot-conversations.mjs
 // Optional native evaluator gate (already-installed consumer; never installs):
 // node --import tsx scripts/smoke-copilot-conversations.mjs --promptfoo-consumer /path/to/project
 // The public Promptfoo peer lines 0.122.x, 0.124.x, and 0.125.x can be checked.
+// Isolate a failing native core case with OH_MY_PROMPTFOO_TEST_AUTHORING_CASE=<case>.
 const repository = fileURLToPath(new URL("../", import.meta.url));
 const args = process.argv.slice(2);
 if (args.length && (args.length !== 2 || args[0] !== "--promptfoo-consumer"))
@@ -20,6 +22,7 @@ if (args.length && (args.length !== 2 || args[0] !== "--promptfoo-consumer"))
     "Usage: node --import tsx scripts/smoke-copilot-conversations.mjs [--promptfoo-consumer <installed project>]",
   );
 const consumer = args.length ? resolve(args[1]) : undefined;
+const authoringCase = process.env.OH_MY_PROMPTFOO_TEST_AUTHORING_CASE;
 const entries = resolve(
   process.env.OH_MY_PROMPTFOO_TEST_ENTRIES ??
     join(repository, "node_modules/.cache/oh-my-promptfoo/entries"),
@@ -201,7 +204,7 @@ function assertChatBoundary(requests, system, messages, ignored) {
 }
 
 test("source CopilotSdk and Agent use the installed runtime with credential-free local BYOK", {
-  timeout: consumer ? 300_000 : 180_000,
+  timeout: consumer ? 900_000 : 180_000,
 }, async (t) => {
   const sdkEntry = fileURLToPath(import.meta.resolve("@github/copilot-sdk"));
   const sdk = JSON.parse(await readFile(join(dirname(sdkEntry), "../package.json"), "utf8"));
@@ -457,8 +460,8 @@ test("source CopilotSdk and Agent use the installed runtime with credential-free
 
   if (consumer) {
     await t.test(
-      "installed Promptfoo renders native conversation replay before the real Copilot path",
-      async () => {
+      "installed Promptfoo text-chat authoring matrix through both real Copilot providers",
+      async (native) => {
         const { resolve: resolveImport } = await import("import-meta-resolve");
         const entry = resolveImport(
           "promptfoo",
@@ -472,83 +475,20 @@ test("source CopilotSdk and Agent use the installed runtime with credential-free
           /^0\.(122|124|125)\.\d+$/,
           `unsupported Promptfoo contract version ${metadata.version}`,
         );
-        const { evaluate } = await import(entry);
-        const calls = [];
-        // The wrapper observes native render/context values, then invokes the actual
-        // source provider and installed SDK. It does not emulate Promptfoo replay.
-        const nativeProvider = {
-          id: () => "real-copilot-conversation-smoke",
-          async callApi(prompt, context, options) {
-            calls.push({ prompt, history: structuredClone(context.vars._conversation) });
-            const answer = `NATIVE_GENERATED_${calls.length}`;
-            service.setAnswer(answer);
-            const response = await lower.callApi(prompt, context, options);
-            assertEvidence(response, answer);
-            return response;
-          },
-        };
-        const template = `[{"role":"system","content":"NATIVE_SYSTEM_SENTINEL"},{% for turn in _conversation %}{"role":"user","content":{{ turn.input | dump }}},{"role":"assistant","content":{{ turn.output | dump }}},{% endfor %}{"role":"user","content":{{ question | dump }}}]`;
-        const start = service.requests.length;
-        const evaluation = await evaluate(
-          {
-            prompts: [template],
-            providers: [nativeProvider],
-            writeLatestResults: false,
-            tests: [
-              {
-                vars: { question: "NATIVE_FIRST_USER_SENTINEL" },
-                metadata: { conversationId: "shared" },
-                assert: [{ type: "equals", value: "NATIVE_GENERATED_1" }],
-              },
-              {
-                vars: { question: "NATIVE_SECOND_USER_SENTINEL" },
-                metadata: { conversationId: "shared" },
-                assert: [{ type: "equals", value: "NATIVE_GENERATED_2" }],
-              },
-            ],
-          },
-          { cache: false, maxConcurrency: 1, showProgressBar: false },
-        );
-        const table = await evaluation.getTable();
-        assert.equal(table.body.length, 2);
-        for (const row of table.body)
-          for (const output of row.outputs)
-            assert.equal(output.pass, true, output.error ?? output.gradingResult?.reason);
-        assert.equal(calls.length, 2);
-        assert.deepEqual(calls[0].history, []);
-        assert.equal(
-          calls[1].history?.length,
-          1,
-          `Promptfoo ${metadata.version} must provide native _conversation replay for the same conversationId; no compatibility shim is used`,
-        );
-        assert.equal(calls[1].history[0].input, "NATIVE_FIRST_USER_SENTINEL");
-        assert.equal(calls[1].history[0].output, "NATIVE_GENERATED_1");
-        const replay = JSON.parse(calls[1].prompt);
-        assert.deepEqual(
-          replay.slice(1).map((message) => message.role),
-          ["user", "assistant", "user"],
-        );
-        const replayRequests = service.requests
-          .slice(start)
-          .filter((request) => JSON.stringify(request).includes("NATIVE_SECOND_USER_SENTINEL"));
-        assert.equal(
-          service.requests.length - start,
-          2,
-          "two native rows must generate exactly two model turns",
-        );
-        assert.equal(
-          replayRequests.length,
-          1,
-          "native replay must reach the actual local model once",
-        );
-        assertChatBoundary(
-          replayRequests,
-          "NATIVE_SYSTEM_SENTINEL",
-          replay.slice(1),
-          "NEVER_PRESENT_NATIVE_SENTINEL",
-        );
-        assert.deepEqual(service.failures, []);
-        console.log(`Native installed Promptfoo ${metadata.version} conversation rendering passed`);
+        const { evaluate, loadApiProvider } = await import(entry);
+        await runCopilotAuthoringMatrix({
+          t: native,
+          evaluate,
+          loadApiProvider,
+          version: metadata.version,
+          root,
+          repository,
+          config,
+          input,
+          service,
+          assertEvidence,
+          onlyCase: authoringCase,
+        });
       },
     );
   }

@@ -4,25 +4,10 @@
 # Promptfoo owns grouping/history; Copilot receives replay in a fresh session per row.
 prompts:
   - file://prompt.txt
-providers:
-  - id: package:oh-my-promptfoo/providers:CopilotSdk
-    label: direct-copilot
-    config:
-      working_dir: "{{env.COPILOT_WORKING_DIR}}"
-      permissions: { filesystem: read, shell: deny, network: deny }
-      env:
-        COPILOT_GITHUB_TOKEN: "{{env.COPILOT_GITHUB_TOKEN}}"
-  - id: package:oh-my-promptfoo/providers:Agent
-    label: workspace-copilot
-    config:
-      delegate:
-        id: copilot-sdk
-        config:
-          permissions: { filesystem: read, shell: deny, network: deny }
-        env:
-          COPILOT_GITHUB_TOKEN: "{{env.COPILOT_GITHUB_TOKEN}}"
-      workspace: { sources: [] }
+providers: file://providers.yaml
 defaultTest:
+  # Keep message arrays as one fixture value, not a cartesian test dimension.
+  options: { disableVarExpansion: true }
   vars:
     system_message: Answer the final user message concisely. Follow the requested output format.
     messages: []
@@ -62,3 +47,10 @@ tests:
     assert:
       - type: equals
         value: ORCHID
+  - description: Replay both generated orchid turns, without duplicating earlier prompts
+    metadata: { conversationId: orchid }
+    vars:
+      question: What was the original lowercase codename? Reply with the codename only.
+    assert:
+      - type: equals
+        value: orchid

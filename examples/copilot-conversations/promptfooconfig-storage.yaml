@@ -1,0 +1,21 @@
+# npx promptfoo eval -c examples/copilot-conversations/promptfooconfig-storage.yaml --no-cache
+# Promptfoo transforms BEFORE grading/storage; subsequent questions use engine registers.
+# storeOutputAs is not keyed by conversationId: use distinct variable names for separate flows.
+prompts:
+  - '{{ question }}'
+providers: file://providers.yaml
+tests:
+  - vars:
+      question: Reply with orchid in lowercase only.
+    options:
+      transform: output.trim().toUpperCase()
+      storeOutputAs: uppercaseCodename
+    assert: [{ type: equals, value: ORCHID }]
+  - vars:
+      question: 'Repeat this saved value exactly: {{ uppercaseCodename }}'
+    options:
+      storeOutputAs: echoedCodename
+    assert: [{ type: equals, value: ORCHID }]
+  - vars:
+      question: 'If these two saved values agree, reply with that value only: {{ uppercaseCodename }} and {{ echoedCodename }}'
+    assert: [{ type: equals, value: ORCHID }]

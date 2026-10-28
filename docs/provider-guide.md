@@ -561,68 +561,191 @@ translation, real Node stdio, literal env, denied tools and private-file cleanup
 ## Promptfoo conversations with Copilot
 
 Both `CopilotSdk` and `Agent` with `delegate.id: copilot-sdk` accept
-[Promptfoo's chat authoring](https://www.promptfoo.dev/docs/configuration/chat/):
-a rendered JSON array of `{ role, content }` messages. Use
-`{{ messages | dump }}` for fixed history, or a prompt template that loops over
-`_conversation` to replay generated turns. The
-[runnable example](../examples/copilot-conversations/promptfooconfig.yaml)
-combines both patterns, groups rows with `metadata.conversationId`, and grades
-each newly generated answer with ordinary per-test assertions.
+[Promptfoo's native chat authoring](https://www.promptfoo.dev/docs/configuration/chat/).
+The provider consumes the **rendered JSON array**, not the prompt's source file.
+Promptfoo loads JSON and YAML prompt files, renders Nunjucks, groups conversations
+and manages outputs. There is no JavaScript conversation adapter.
 
-Promptfoo owns history, row ordering and conversation grouping. The provider
-reads **only the rendered prompt**: `vars.messages` and `vars._conversation`
-are not automatically appended. Include history exactly once in the template.
-Different `conversationId` values isolate Promptfoo's history, and histories
-are also separate per provider and prompt. Plain text and non-chat JSON remain
-unchanged even when context variables contain conversation data.
+Run the examples after installing the package and `@github/copilot-sdk@1.0.22`,
+exporting `COPILOT_GITHUB_TOKEN` and setting `COPILOT_WORKING_DIR` to an existing
+directory. Every config uses both public providers through shared `providers.yaml`:
 
-There may be one leading `system` message. It becomes the public SDK
-`systemMessage: { mode: "append", content: ... }`, retaining Copilot's core
-system instructions. A lone remaining `user` message is sent as its raw string.
-When there is history, the remaining messages are serialized between
-`BEGIN PROMPTFOO CONVERSATION JSON` and `END PROMPTFOO CONVERSATION JSON`, followed
-by an instruction to respond to the final user message. This preserves role
-labels, order and exact content strings **as user-channel conversation data**;
-it does not hydrate native SDK assistant/tool roles or import observed activity.
-The delimiters are not an injection defense or a security boundary.
+| Config in [`examples/copilot-conversations`](../examples/copilot-conversations) | Pattern |
+| --- | --- |
+| `promptfooconfig.yaml` | Fixed role/content history plus **three generated turns**, with an interleaved `conversationId`; loops over `completion.input` and `completion.output` |
+| `promptfooconfig-native.yaml` | Equivalent native JSON and YAML prompt files, string names, tool IDs and later/multiple system messages |
+| `promptfooconfig-simplified.yaml` | Upstream `{ user: ... }` / `{ assistant: ... }` shorthand expanded by a Nunjucks template; shared `defaultTest.vars.messages` fixture across follow-ups |
+| `promptfooconfig-prompt-history.yaml` | Alternative three-turn replay using only the **last** `completion.prompt`, then its `completion.output` |
+| `promptfooconfig-embedded.yaml` | JSON embedded inside string `content`, escaped with `dump`, including previous replies |
+| `promptfooconfig-text.yaml` | Literal chat-shaped business JSON with `inputFormat: text` |
+| `promptfooconfig-storage.yaml` | `storeOutputAs`, transform-before-storage, and two subsequent questions using stored variables |
 
-Supported roles are `system`, `user`, `assistant` and `tool`, with string
-`content` only. A tool message may additionally carry string `name` and
-`tool_call_id`. Every other message field is rejected, including `tool_calls`.
-Later/multiple system messages, `developer`, multimodal content and a final
-message that is not `user` fail before SDK execution. A nonempty top-level
-array containing any role-bearing object is treated as chat intent, so malformed
-messages in that array fail rather than silently becoming ordinary text.
+For example:
 
-Every generated row still starts a fresh Copilot session. `Agent` also creates
-a fresh private workspace per row: conversation replay does **not** preserve
-filesystem edits or a native session. Direct `CopilotSdk` keeps using the
-configured existing directory, which is not an isolated workspace. Usage,
-skills, tools and trajectory evidence describe only the newly executed turn;
-authored assistant/tool history is never tool-use evidence.
+```sh
+npx promptfoo eval -c examples/copilot-conversations/promptfooconfig-native.yaml --no-cache
+```
 
-Maintainer coverage in `corepack pnpm e2e` uses independently installed stock
-Promptfoo and a deterministic SDK receipt fixture to check fixed/generated
-replay, `conversationId` isolation, per-turn grading, exact received transcript
-and appended system options for both providers. Those receipts prove the
-adapter boundary, not real Copilot runtime or model behavior.
+### Engine-owned history and output variables
 
-For real SDK/runtime verification without credentials, refresh the source process
-entries with `pnpm exec vitest run tests/copilot-input.test.ts --maxWorkers=2`, then
-run `node --import tsx scripts/smoke-copilot-conversations.mjs --promptfoo-consumer .`.
-The smoke captures actual bundled-runtime requests to a loopback OpenAI-compatible
-model fixture, checks system/transcript separation and generated replies, and
-exercises Agent workspace isolation, validation-error release, abort-response
-retention and cleanup of every published workspace.
-`--promptfoo-consumer` may name another already-installed consumer to verify its
-native replay contract; the script never installs packages or uses paid models.
-The CI matrix exercises native rendering, grouping and per-turn assertions on
-Promptfoo `0.122.1`, `0.124.1` and `0.125.1` through the real SDK/runtime path.
-The public Promptfoo peer range and the SDK/CLI version pins are unchanged.
+`_conversation` entries expose `completion.prompt` (the previous full rendered
+prompt, parsed as an object for JSON chat), `completion.input` (its last message's
+content for these user-ending templates), and `completion.output` (the generated
+answer). Choose **one** replay strategy: loop over each input/output pair, or
+reuse only the last full prompt and append its answer. Replaying every full
+`completion.prompt` duplicates accumulated history by the third turn.
+
+The provider reads **only the rendered prompt**. It does not append
+`vars.messages` or `vars._conversation`; include fixed/generated history exactly
+once. `metadata.conversationId` isolates histories, also separated by provider
+and prompt. Promptfoo serializes conversation-dependent evaluation; normal
+per-test assertions grade each newly generated answer, not fixed assistant input.
+The fixed-array examples use `options.disableVarExpansion: true` so a `messages`
+array stays one row value instead of a cartesian test dimension. That option
+does **not** disable recursive Nunjucks string interpolation or make source
+template text byte-preserving.
+
+The embedded-template matrix also retains a separate stock-core limitation:
+on Promptfoo `0.122.1`, `0.124.1` and `0.125.1`, a query variable containing literal `{% inert %}` is
+recursively rendered as Nunjucks and rejected before either provider sees that
+row. `disableVarExpansion` does not prevent this, wrapping the variable value in
+`{% raw %}` does not unescape it, and `inputFormat: text` acts only after native
+rendering. The supported embedded-JSON case still checks quotes, newlines,
+literal `{{ inert }}` and generated replies exactly; no provider rewrites or
+escapes the failing variable. After building, opt into the unchanged failing
+reproduction with `OH_MY_PROMPTFOO_TEST_AUTHORING_CASE=core-template-tag-limit`
+when running the real-runtime smoke below.
+
+`options.storeOutputAs` stores the engine's output in a variable available to
+subsequent templates. `options.transform` runs before grading and storage, so
+later references see the transformed value. Registers are not isolated by
+`conversationId`; use distinct names for independent storage flows. These are
+engine primitives, not provider-side history or filesystem persistence.
+
+### Input format and conservative detection
+
+`inputFormat` is optional and accepts `auto` (default), `chat` or `text`.
+Configure direct `CopilotSdk.config.inputFormat`, or the workspace provider's
+`config.delegate.config.inputFormat`. Existing per-test
+`options.delegate.config.inputFormat` becomes
+`context.prompt.config.delegate.config.inputFormat` and overrides either
+constructor setting. Do not add `inputFormat` at the Agent config root or the
+prompt-config root.
+
+```yaml
+# Agent constructor configuration
+config:
+  delegate:
+    id: copilot-sdk
+    config:
+      inputFormat: auto
+  workspace: { sources: [] }
+# A test override (same shape for direct CopilotSdk)
+tests:
+  - options:
+      delegate:
+        config:
+          inputFormat: text
+    vars:
+      payload: '[{"role":"user","content":"business record"}]'
+```
+
+* `text` bypasses **provider** chat parsing and forwards the supplied/rendered
+  string exactly, including chat-looking JSON. It does not disable stock
+  Promptfoo's earlier Nunjucks rendering, variable expansion or source-file
+  loading/serialization; it cannot promise original source bytes.
+* `chat` requires a nonempty JSON message array and validates every message.
+  YAML **prompt files** work because Promptfoo loads them into rendered JSON;
+  the provider does not parse arbitrary raw YAML strings.
+* `auto` recognizes complete intent only: a nonempty JSON array whose **every**
+  entry is an object with its own `content` and a recognized chat-vocabulary
+  role (`system`, `user`, `assistant`, `tool`, `developer`, `function`).
+  Once detected, unsupported roles or content fail validation, rather than
+  silently changing meaning. Empty arrays, `admin` business roles, role-only
+  objects and mixed/incomplete arrays remain literal text.
+
+A business array that exactly matches chat shape is inherently ambiguous.
+Use `text` as the explicit escape hatch. JSON within a string `content` is just
+text; use Nunjucks `dump` to escape quotes/newlines rather than double-encoding
+the whole message array.
+
+### Mapping to the public SDK
+
+Supported roles are `system`, `user`, `assistant` and `tool`, with string-only
+`content`. All supported roles may carry a string `name`; `tool` may also carry
+a string `tool_call_id`. Other fields, including `tool_calls`, are rejected.
+`developer`, `function`, multimodal content and a final **non-system** message
+that is not `user` fail before SDK execution. Trailing systems are allowed.
+
+Every system message is removed from the remaining turns and consolidated in
+**original system-message order**, even when authored after a user/assistant.
+A single unnamed system keeps its raw content unchanged. Otherwise the append
+content is exactly:
+
+```text
+BEGIN PROMPTFOO SYSTEM MESSAGES JSON
+<JSON.stringify(systemMessages)>
+END PROMPTFOO SYSTEM MESSAGES JSON
+```
+
+It becomes `systemMessage: { mode: "append", content: ... }`, retaining Copilot's
+core instructions. Non-system messages preserve their original objects and
+order. One unnamed user is sent as its raw content; one **named** user is kept
+in the transcript so its name survives. Other remaining turns are serialized
+between `BEGIN PROMPTFOO CONVERSATION JSON` and
+`END PROMPTFOO CONVERSATION JSON`, followed by the existing instruction to
+respond to the final user message. Roles, names, tool IDs and exact strings
+are preserved **as user-channel conversation data**. This is not native SDK
+role hydration, session import, session pooling or multimodal parity; authored
+assistant/tool history is never observed tool-use evidence. Neither set of
+delimiters is an injection defense or security boundary.
+
+Every generated row starts a fresh Copilot session. `Agent` also creates a fresh
+private workspace per row; replay does **not** preserve filesystem edits.
+Direct `CopilotSdk` uses its existing directory, which is not an isolated
+workspace. Usage, skills, tools and trajectory describe only the new turn.
+Returned error responses, including settled aborts, retain published private
+workspaces until `Agent.cleanup()` just like success. Thrown failures release
+unpublished workspaces. Do not call cleanup while assertions are using them.
+
+### Feature and verification provenance
+
+| Feature | Owner / proof boundary | Coverage status for this follow-up |
+| --- | --- | --- |
+| JSON/YAML **file** loading, Nunjucks, simplified/shared fixtures | Stock Promptfoo engine; provider receives rendered JSON | Verified through both public source providers and the real SDK/CLI loopback matrix |
+| `_conversation` prompt/input/output, three turns, interleaved IDs, grading | Stock Promptfoo engine, separate history per prompt/provider/ID | Verified exact-once replay, provider/prompt/ID separation and fresh-evaluation isolation in the real-runtime matrix |
+| `storeOutputAs`, transform-before-storage, later variable substitution | Stock Promptfoo engine registers, not SDK session state | Verified native three-row dependency chains independently per provider |
+| `inputFormat`, complete-intent detection, ordered system/name/tool-ID mapping | This provider's rendered-input mapping and public SDK options | Focused regressions and real model-request receipts verify literal, strict-chat and per-row override routes |
+| Native assistant/tool hydration, imported/persistent sessions, multimodal parity | Not implemented by this SDK mapping | Unsupported; no parity claim |
+| Current-turn tools/usage, fresh Agent workspace, returned-error retention and cleanup | Provider/runner lifecycle, not conversation history | Focused provider regressions plus real SDK zero-tool usage/lifecycle checks; no generated-tool/skill claim from the local model fixture |
+
+| Promptfoo version | Both public source providers + real SDK/CLI + local model fixture |
+| --- | --- |
+| `0.122.1` | All nine authoring scenarios passed; 66 generated model turns |
+| `0.124.1` | All nine authoring scenarios passed; 66 generated model turns |
+| `0.125.1` | All nine authoring scenarios passed; 66 generated model turns |
+
+Maintainer `corepack pnpm e2e` covers installed stock Promptfoo with a
+**deterministic SDK receipt fixture**. It captures actual `sendAndWait` input and
+`createSession.systemMessage`; that is adapter-boundary proof, not real Copilot
+runtime or model proof. The real SDK/CLI matrix uses
+`scripts/smoke-copilot-conversations.mjs` with a loopback OpenAI-compatible model
+fixture with SDK `1.0.22` and its bundled CLI `1.0.98`. No paid model credentials
+are needed. Run after building, inside the required verification resource limits:
+
+```sh
+corepack pnpm build
+OH_MY_PROMPTFOO_TEST_ENTRIES=packages/oh-my-promptfoo/dist \
+  node --import tsx scripts/smoke-copilot-conversations.mjs --promptfoo-consumer .
+```
+
+`--promptfoo-consumer` can instead name an already-installed consumer of one of
+the verified versions. Neither the public Promptfoo peer range nor the SDK/CLI
+pins change.
 
 ## Direct Copilot configuration
 
-Direct Copilot uses `package:oh-my-promptfoo/providers:CopilotSdk` with an existing `working_dir`. An absolute path is used as is; a relative path resolves against the eval config's directory, like other Promptfoo file references. Optional fields are `model`, `reasoning_effort`, `timeoutMs`, `permissions`, and explicit `env`. Its optional BYOK `provider` is an endpoint object with required `baseUrl` and supported SDK fields (`type`, `wireApi`, `apiKey`, `wireModel`, `azure.apiVersion`); strings and embedded URL credentials are rejected. Defaults deny writes, shell, and network. Copilot tool events produce tool spans; skill inference from assistant text is disabled.
+Direct Copilot uses `package:oh-my-promptfoo/providers:CopilotSdk` with an existing `working_dir`. An absolute path is used as is; a relative path resolves against the eval config's directory, like other Promptfoo file references. Optional fields are `model`, `reasoning_effort`, `inputFormat`, `timeoutMs`, `permissions`, and explicit `env`. Its optional BYOK `provider` is an endpoint object with required `baseUrl` and supported SDK fields (`type`, `wireApi`, `apiKey`, `wireModel`, `azure.apiVersion`); strings and embedded URL credentials are rejected. Defaults deny writes, shell, and network. Copilot tool events produce tool spans; skill inference from assistant text is disabled.
 
 Both direct and workspace-backed Copilot responses report `metadata.skillCalls`
 and `metadata.copilot.skillSupport: true`. A successful local `read`,
@@ -679,6 +802,7 @@ without a local skills directory keep skill loading disabled.
 | `working_dir` | Yes | Existing directory where Copilot runs; absolute, or relative to the eval config's directory |
 | `env` | No | Explicit values, including `COPILOT_GITHUB_TOKEN`, passed to Copilot |
 | `model`, `reasoning_effort` | No | Select the model and its supported reasoning effort |
+| `inputFormat` | No | `auto` (default), `chat` or `text`; same setting in Copilot `delegate.config` and per-test `options.delegate.config` |
 | `permissions` | No | Allow filesystem writes, shell, or network requests when needed |
 | `provider` | No | Configure a BYOK endpoint with `baseUrl` and supported SDK fields |
 | `mcpServers` | No | Contained local Node MCP fixtures with the shape above |

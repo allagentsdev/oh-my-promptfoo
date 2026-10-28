@@ -44,21 +44,63 @@ describe("Copilot rendered input", () => {
     [{ role: "user", content: [{ type: "text", text: "unsupported" }] }],
     [{ role: "assistant", content: "no new user" }],
     [
-      { role: "user", content: "before" },
-      { role: "system", content: "late" },
-      { role: "user", content: "after" },
-    ],
-    [
-      { role: "system", content: "one" },
-      { role: "system", content: "two" },
-      { role: "user", content: "new" },
-    ],
-    [
       { role: "assistant", content: "call", tool_calls: [] },
       { role: "user", content: "new" },
     ],
     [{ role: "user", content: "valid" }, "invalid"],
   ])("rejects unsupported chat without dropping fields: %j", (...messages) => {
-    expect(() => copilotInput(JSON.stringify(messages))).toThrow(/Copilot chat/);
+    expect(() => copilotInput(JSON.stringify(messages), "chat")).toThrow(/Copilot chat/);
+  });
+  test.each([
+    '[{"role":"admin","permissions":["read"]}]',
+    '[{"role":"user"}]',
+    '[{"role":"user","content":"complete"},{"role":"assistant"}]',
+  ])("keeps incomplete or business role data literal in auto: %s", (prompt) => {
+    expect(copilotInput(prompt)).toEqual({ prompt });
+    expect(() => copilotInput(prompt, "chat")).toThrow(/Copilot chat/);
+  });
+  test("text bypasses even valid chat and malformed YAML exactly", () => {
+    for (const prompt of [
+      ' [{"role":"system","content":"data"},{"role":"user","content":"literal"}]\n',
+      "- role: user\n  content: [",
+    ])
+      expect(copilotInput(prompt, "text")).toEqual({ prompt });
+  });
+  test.each([
+    "ordinary text",
+    "[]",
+    '{"role":"user","content":"not an array"}',
+    "- role: user\n  content: [",
+  ])("chat requires supported input: %s", (prompt) => {
+    expect(() => copilotInput(prompt, "chat")).toThrow(/Copilot chat/);
+  });
+  test("preserves names and consolidates every system message in encounter order", () => {
+    const messages = [
+      { role: "system", content: 'first\n"instruction"', name: "policy" },
+      { role: "user", content: "old", name: "alice" },
+      { role: "assistant", content: "reply", name: "helper" },
+      { role: "system", content: "later {{ literal }}" },
+      { role: "tool", content: "supplied", name: "read", tool_call_id: "old-id" },
+      { role: "user", content: "new", name: "bob" },
+      { role: "system", content: "last" },
+    ];
+    const result = copilotInput(JSON.stringify(messages), "chat");
+    expect(JSON.parse(result.systemMessage!.content.split("\n")[1]!)).toEqual(
+      messages.filter((m) => m.role === "system"),
+    );
+    expect(JSON.parse(result.prompt.split("\n")[1]!)).toEqual(
+      messages.filter((m) => m.role !== "system"),
+    );
+  });
+  test("raw YAML is literal; Promptfoo owns YAML-file rendering before this boundary", () => {
+    const prompt = "- role: user\n  content: question\n";
+    expect(copilotInput(prompt)).toEqual({ prompt });
+    expect(() => copilotInput(prompt, "chat")).toThrow(/rendered JSON message array/);
+  });
+  test("a named single user is not flattened and stripped of its name", () => {
+    const messages = [{ role: "user", name: "alice", content: "question" }];
+    expect(JSON.parse(copilotInput(JSON.stringify(messages)).prompt.split("\n")[1]!)).toEqual(
+      messages,
+    );
   });
 });

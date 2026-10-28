@@ -1,0 +1,20 @@
+# Shared by every config here; no JavaScript conversation adapter is needed.
+- id: package:oh-my-promptfoo/providers:CopilotSdk
+  label: direct-copilot
+  config:
+    working_dir: "{{env.COPILOT_WORKING_DIR}}"
+    inputFormat: auto
+    permissions: { filesystem: read, shell: deny, network: deny }
+    env:
+      COPILOT_GITHUB_TOKEN: "{{env.COPILOT_GITHUB_TOKEN}}"
+- id: package:oh-my-promptfoo/providers:Agent
+  label: workspace-copilot
+  config:
+    delegate:
+      id: copilot-sdk
+      config:
+        inputFormat: auto
+        permissions: { filesystem: read, shell: deny, network: deny }
+      env:
+        COPILOT_GITHUB_TOKEN: "{{env.COPILOT_GITHUB_TOKEN}}"
+    workspace: { sources: [] }

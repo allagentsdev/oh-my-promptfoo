@@ -28,8 +28,8 @@ async function compileDeclarations(cwd: string) {
 const agent: Providers.Agent = new Providers.Agent();
 const copilot: Providers.CopilotSdk = new Providers.CopilotSdk();
 const options: Providers.CallOptions = {abortSignal: new AbortController().signal};
-const agentConfig: Providers.AgentConfig = {delegate: {id: 'copilot-sdk'}, workspace: {sources: []}};
-const copilotConfig: Providers.CopilotSdkConfig = {working_dir: '.'};
+const agentConfig: Providers.AgentConfig = {delegate: {id: 'copilot-sdk', config: {inputFormat: 'chat'}}, workspace: {sources: []}};
+const copilotConfig: Providers.CopilotSdkConfig = {working_dir: '.', inputFormat: 'text'};
 const agentId: string = agent.id();
 const reply: Promise<unknown> = agent.callApi('prompt', undefined, options);
 const copilotReply: Promise<unknown> = copilot.callApi('prompt', undefined, options);
@@ -56,6 +56,10 @@ const rootAgent = Root.Agent;
 const invalidResponses: Providers.CopilotModelConfig = {model: 'gpt-6-sol', reasoning_effort: 'extreme'};
 // @ts-expect-error An AbortSignal, not a string, is required.
 const invalidOptions: Providers.CallOptions = {abortSignal: 'invalid'};
+// @ts-expect-error inputFormat is auto, text or chat.
+const invalidChatFormat: Providers.CopilotSdkConfig = {working_dir: '.', inputFormat: 'json'};
+// @ts-expect-error Copilot Agent delegates share the same inputFormat enum.
+const invalidDelegateFormat: Providers.AgentConfig = {delegate: {id: 'copilot-sdk', config: {inputFormat: 'yaml'}}, workspace: {sources: []}};
 // @ts-expect-error A rubric metric must be named with a string.
 const invalidComponent: Assertions.RubricComponent = {metric: 42, value: 'Check answer'};
 // @ts-expect-error The fallback chain must be a list.

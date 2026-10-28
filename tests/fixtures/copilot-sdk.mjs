@@ -56,15 +56,22 @@ export class CopilotClient {
         };
       },
       async sendAndWait({ prompt }) {
-        if (config.model === "fixture-conversations") {
+        if (
+          config.model === "fixture-conversations" ||
+          config.model === "fixture-conversations-storage"
+        ) {
           // Receipt of the actual public SDK boundary, not simulated model reasoning.
-          const content = JSON.stringify({
-            generated: "new-turn",
-            receivedPrompt: prompt,
-            systemMessage: config.systemMessage ?? null,
-            workingDirectory: config.workingDirectory,
-            sendCount: ++sendCount,
-          });
+          // A raw first answer lets the installed engine prove transform-before-storage.
+          const content =
+            config.model === "fixture-conversations-storage" && prompt === "STORE_TRANSFORM_FIRST"
+              ? "orchid raw response"
+              : JSON.stringify({
+                  generated: "new-turn",
+                  receivedPrompt: prompt,
+                  systemMessage: config.systemMessage ?? null,
+                  workingDirectory: config.workingDirectory,
+                  sendCount: ++sendCount,
+                });
           callback({ type: "assistant.usage", data: { inputTokens: 3, outputTokens: 2 } });
           callback({ type: "assistant.message", data: { content } });
           callback({ type: "session.idle", data: {} });
