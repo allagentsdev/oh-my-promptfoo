@@ -1756,6 +1756,56 @@ describe("direct Copilot provider", () => {
   }
   const accountingPrompt = (scenario: Record<string, unknown>) =>
     `accounting:${JSON.stringify(scenario)}`;
+  for (const mode of ["direct", "workspace"] as const) {
+    test(`${mode} chat rejects unsupported roles and never replays context history twice`, async () => {
+      const fixture = await readFile(
+        new URL("./fixtures/copilot-sdk.mjs", import.meta.url),
+        "utf8",
+      );
+      const path = await project("@github/copilot-sdk", fixture);
+      const provider =
+        mode === "direct"
+          ? new CopilotSdk({ config: { basePath: path, working_dir: "." } })
+          : new Agent({
+              config: {
+                basePath: path,
+                delegate: { id: "copilot-sdk" },
+                workspace: { sources: [] },
+              },
+              env: {
+                ALLAGENTS_CACHE_ROOT: join(path, "cache"),
+                ALLAGENTS_WORKSPACE_ROOT: join(path, "runtime"),
+              },
+            });
+      try {
+        const messages = [
+          { role: "user", content: "previous" },
+          { role: "assistant", content: "fixture-only" },
+          { role: "user", content: "current" },
+        ];
+        const context = {
+          vars: { _conversation: [{ input: "previous", output: "fixture-only" }] },
+          test: { metadata: { conversationId: "same" } },
+        };
+        const response = await provider.callApi(JSON.stringify(messages), context);
+        expect(response.error).toBeUndefined();
+        const sent = JSON.parse(response.output as string).task as string;
+        expect(JSON.parse(sent.split("\n")[1]!)).toEqual(messages);
+        expect((response.metadata as any).toolInventory.calls).toHaveLength(1);
+        expect((response.metadata as any).skillCalls).toEqual([]);
+        expect(response.tokenUsage).toMatchObject({ prompt: 11, completion: 7 });
+        const literal = await provider.callApi('{"task":"literal"}', context);
+        expect(JSON.parse(literal.output as string).task).toBe('{"task":"literal"}');
+        const invalid = await provider.callApi(
+          JSON.stringify([{ role: "developer", content: "not system" }]),
+        );
+        expect(invalid.error).toContain("Copilot chat");
+        expect(invalid.output).toBeUndefined();
+      } finally {
+        await provider.cleanup();
+      }
+    });
+  }
   test("session creation failure retains unavailable accounting and stops its client", async () => {
     const { path, provider } = await accountingProvider(5000, "fixture-create-error");
     try {

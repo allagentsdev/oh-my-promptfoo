@@ -13,7 +13,7 @@ The package also ships a judge provider, `package:oh-my-promptfoo/providers:Fall
 
 ## Provider response and assertions
 
-Each workspace-provider call returns a distinct absolute `metadata.workspace.path`, an immutable manifest digest, resolved source commits/digests, and `cleanup: best-effort-evaluation`. Native output, raw response, usage, cost, and metadata (including `skillCalls`) keep their original locations. Codex's root Git check is bypassed internally because workspace roots may contain nested repositories. A native top-level `error` remains an execution error; Promptfoo skips assertions for that row.
+Each workspace-provider response returns a distinct absolute `metadata.workspace.path`, an immutable manifest digest, resolved source commits/digests, and `cleanup: best-effort-evaluation`. Native output, raw response, usage, cost, and metadata (including `skillCalls`) keep their original locations. Codex's root Git check is bypassed internally because workspace roots may contain nested repositories. A native top-level `error` remains an execution error; Promptfoo skips assertions for that row. Returned error responses, including settled aborts, retain their private workspaces until `Agent.cleanup()` alongside successful responses. Failures that throw before publication release their unpublished workspaces immediately.
 
 For `type: local`, `metadata.workspace.sources[].digest` identifies the complete
 staged directory, including scripts and untracked files. It hashes sorted
@@ -557,6 +557,68 @@ For model-free packed verification, install the built tarball and Promptfoo in a
 consumer directory, then run `node scripts/smoke-mcp.mjs /absolute/consumer` from
 this repository. It exercises packed ESM/CJS providers, stock Promptfoo's Claude
 translation, real Node stdio, literal env, denied tools and private-file cleanup.
+
+## Promptfoo conversations with Copilot
+
+Both `CopilotSdk` and `Agent` with `delegate.id: copilot-sdk` accept
+[Promptfoo's chat authoring](https://www.promptfoo.dev/docs/configuration/chat/):
+a rendered JSON array of `{ role, content }` messages. Use
+`{{ messages | dump }}` for fixed history, or a prompt template that loops over
+`_conversation` to replay generated turns. The
+[runnable example](../examples/copilot-conversations/promptfooconfig.yaml)
+combines both patterns, groups rows with `metadata.conversationId`, and grades
+each newly generated answer with ordinary per-test assertions.
+
+Promptfoo owns history, row ordering and conversation grouping. The provider
+reads **only the rendered prompt**: `vars.messages` and `vars._conversation`
+are not automatically appended. Include history exactly once in the template.
+Different `conversationId` values isolate Promptfoo's history, and histories
+are also separate per provider and prompt. Plain text and non-chat JSON remain
+unchanged even when context variables contain conversation data.
+
+There may be one leading `system` message. It becomes the public SDK
+`systemMessage: { mode: "append", content: ... }`, retaining Copilot's core
+system instructions. A lone remaining `user` message is sent as its raw string.
+When there is history, the remaining messages are serialized between
+`BEGIN PROMPTFOO CONVERSATION JSON` and `END PROMPTFOO CONVERSATION JSON`, followed
+by an instruction to respond to the final user message. This preserves role
+labels, order and exact content strings **as user-channel conversation data**;
+it does not hydrate native SDK assistant/tool roles or import observed activity.
+The delimiters are not an injection defense or a security boundary.
+
+Supported roles are `system`, `user`, `assistant` and `tool`, with string
+`content` only. A tool message may additionally carry string `name` and
+`tool_call_id`. Every other message field is rejected, including `tool_calls`.
+Later/multiple system messages, `developer`, multimodal content and a final
+message that is not `user` fail before SDK execution. A nonempty top-level
+array containing any role-bearing object is treated as chat intent, so malformed
+messages in that array fail rather than silently becoming ordinary text.
+
+Every generated row still starts a fresh Copilot session. `Agent` also creates
+a fresh private workspace per row: conversation replay does **not** preserve
+filesystem edits or a native session. Direct `CopilotSdk` keeps using the
+configured existing directory, which is not an isolated workspace. Usage,
+skills, tools and trajectory evidence describe only the newly executed turn;
+authored assistant/tool history is never tool-use evidence.
+
+Maintainer coverage in `corepack pnpm e2e` uses independently installed stock
+Promptfoo and a deterministic SDK receipt fixture to check fixed/generated
+replay, `conversationId` isolation, per-turn grading, exact received transcript
+and appended system options for both providers. Those receipts prove the
+adapter boundary, not real Copilot runtime or model behavior.
+
+For real SDK/runtime verification without credentials, refresh the source process
+entries with `pnpm exec vitest run tests/copilot-input.test.ts --maxWorkers=2`, then
+run `node --import tsx scripts/smoke-copilot-conversations.mjs --promptfoo-consumer .`.
+The smoke captures actual bundled-runtime requests to a loopback OpenAI-compatible
+model fixture, checks system/transcript separation and generated replies, and
+exercises Agent workspace isolation, validation-error release, abort-response
+retention and cleanup of every published workspace.
+`--promptfoo-consumer` may name another already-installed consumer to verify its
+native replay contract; the script never installs packages or uses paid models.
+The CI matrix exercises native rendering, grouping and per-turn assertions on
+Promptfoo `0.122.1`, `0.124.1` and `0.125.1` through the real SDK/runtime path.
+The public Promptfoo peer range and the SDK/CLI version pins are unchanged.
 
 ## Direct Copilot configuration
 

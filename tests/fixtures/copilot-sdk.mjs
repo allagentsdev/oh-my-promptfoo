@@ -44,6 +44,7 @@ export class CopilotClient {
     let disconnected = false;
     let unsubscribed = false;
     let captures = 0;
+    let sendCount = 0;
     let rejectSend;
     return {
       rpc,
@@ -55,6 +56,20 @@ export class CopilotClient {
         };
       },
       async sendAndWait({ prompt }) {
+        if (config.model === "fixture-conversations") {
+          // Receipt of the actual public SDK boundary, not simulated model reasoning.
+          const content = JSON.stringify({
+            generated: "new-turn",
+            receivedPrompt: prompt,
+            systemMessage: config.systemMessage ?? null,
+            workingDirectory: config.workingDirectory,
+            sendCount: ++sendCount,
+          });
+          callback({ type: "assistant.usage", data: { inputTokens: 3, outputTokens: 2 } });
+          callback({ type: "assistant.message", data: { content } });
+          callback({ type: "session.idle", data: {} });
+          return { data: { content } };
+        }
         if (prompt.startsWith("inventory:")) {
           scenario = JSON.parse(prompt.slice("inventory:".length));
           client.inventoryStopErrors = scenario.stopErrors;

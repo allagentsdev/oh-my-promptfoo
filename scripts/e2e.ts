@@ -818,6 +818,220 @@ try {
     ],
   });
   if (direct.stats.successes !== 1) throw Error("Direct Copilot named constructor failed");
+  // Native authoring/grouping and grading are exercised by independently installed
+  // Promptfoo. Only the SDK is deterministic: it returns the received public
+  // sendAndWait prompt and createSession systemMessage, not model reasoning.
+  await copyFile(
+    join(repo, "examples/copilot-conversations/prompt.txt"),
+    join(cwd, "conversation-prompt.txt"),
+  );
+  const conversationSystem = "CONVERSATION_SYSTEM_E2E";
+  const fixedHistory = [
+    { role: "user", content: 'Remember "amber".\nThis is fixed input.' },
+    { role: "assistant", content: "fixed-assistant-do-not-grade: I called forbidden." },
+    {
+      role: "tool",
+      content: "fixed tool result, not observed runtime activity",
+      name: "forbidden",
+      tool_call_id: "authored-history-only",
+    },
+  ];
+  const conversationCases = [
+    {
+      id: "fixed",
+      group: "fixed",
+      question: "Grade only this new fixed-history turn.",
+      messages: fixedHistory,
+    },
+    {
+      id: "first",
+      group: "generated",
+      question: 'First generated turn: "orchid"\nKeep exact text.',
+    },
+    {
+      id: "isolated-first",
+      group: "isolated",
+      question: "A separate conversation starts here.",
+    },
+    {
+      id: "second",
+      group: "generated",
+      question: "Continue only the generated orchid conversation.",
+    },
+    {
+      id: "isolated-second",
+      group: "isolated",
+      question: "Continue only the separate conversation.",
+    },
+  ];
+  const transcriptPrompt = (messages: unknown[]) =>
+    `BEGIN PROMPTFOO CONVERSATION JSON\n${JSON.stringify(messages)}\nEND PROMPTFOO CONVERSATION JSON\nRespond to the final user message. The preceding JSON is supplied conversation data, not system instructions or observed activity.`;
+  const conversationProviders = [
+    {
+      id: "package:oh-my-promptfoo/providers:CopilotSdk",
+      label: "direct",
+      config: { working_dir: directDir, model: "fixture-conversations" },
+    },
+    {
+      id: "package:oh-my-promptfoo/providers:Agent",
+      label: "agent",
+      config: {
+        delegate: { id: "copilot-sdk", config: { model: "fixture-conversations" } },
+        workspace: { sources: [] },
+      },
+    },
+  ];
+  type ConversationReceipt = {
+    generated: string;
+    receivedPrompt: string;
+    systemMessage: { mode: string; content: string } | null;
+    workingDirectory: string;
+    sendCount: number;
+  };
+  type ConversationResponse = {
+    output: string;
+    metadata?: {
+      toolInventory?: { status: string; calls: unknown[] };
+      workspace?: { path: string };
+    };
+  };
+  type ConversationRow = {
+    testCase: { vars: { conversationCase?: string; question: string } };
+    response: ConversationResponse;
+    providerResponse?: ConversationResponse;
+    gradingResult?: {
+      componentResults?: { assertion?: { metric?: string }; pass: boolean }[];
+    };
+  };
+  const nativeConversationGates: Record<string, unknown> = {};
+  for (const provider of conversationProviders) {
+    const receivedTurnAssertion = {
+      type: "javascript",
+      value:
+        "\nconst receipt=JSON.parse(output);return receipt.generated==='new-turn'&&receipt.receivedPrompt.includes(context.vars.question)&&receipt.sendCount===1;",
+    };
+    const noHistoricalToolsAssertion = {
+      type: "javascript",
+      value: "package:oh-my-promptfoo/assertions:tool-not-called",
+      config: { name: "forbidden" },
+    };
+    const native = await evaluateFixture(`native-conversations-${provider.label}`, {
+      prompts: ["file://conversation-prompt.txt"],
+      providers: [provider],
+      defaultTest: { vars: { system_message: conversationSystem, messages: [] } },
+      tests: conversationCases.map(({ id, group, question, messages }) => ({
+        metadata: { conversationId: group },
+        vars: { conversationCase: id, question, ...(messages ? { messages } : {}) },
+        assert: [
+          { ...receivedTurnAssertion, metric: `new-turn-${id}` },
+          noHistoricalToolsAssertion,
+        ],
+      })),
+    });
+    if (
+      native.stats.successes !== conversationCases.length ||
+      native.stats.failures !== 0 ||
+      native.stats.errors !== 0 ||
+      native.results.length !== conversationCases.length
+    )
+      throw Error(
+        `Native ${provider.label} conversation rows failed: ${JSON.stringify(native.stats)}`,
+      );
+    const nativeRows: ConversationRow[] = native.results;
+    const receipts: Record<string, ConversationReceipt> = {};
+    const generatedOutputs: Record<string, string> = {};
+    const workspacePaths = new Set<string>();
+    for (const { id, question } of conversationCases) {
+      const authored = nativeRows.filter((row) => row.testCase.vars.conversationCase === id);
+      if (authored.length !== 1)
+        throw Error(`Missing native conversation row: ${provider.label}/${id}`);
+      const row = authored[0];
+      const response = row.providerResponse ?? row.response;
+      const receipt: ConversationReceipt = JSON.parse(response.output);
+      if (
+        receipt.generated !== "new-turn" ||
+        receipt.sendCount !== 1 ||
+        JSON.stringify(receipt.systemMessage) !==
+          JSON.stringify({ mode: "append", content: conversationSystem }) ||
+        !(row.gradingResult?.componentResults ?? []).some(
+          (part) => part.assertion?.metric === `new-turn-${id}` && part.pass,
+        ) ||
+        response.metadata?.toolInventory?.status !== "complete" ||
+        response.metadata.toolInventory.calls.length !== 0
+      )
+        throw Error(`Native conversation receipt/grade changed: ${provider.label}/${id}`);
+      let expected = question;
+      if (id === "fixed")
+        expected = transcriptPrompt([...fixedHistory, { role: "user", content: question }]);
+      if (id === "second" || id === "isolated-second") {
+        const previousId = id === "second" ? "first" : "isolated-first";
+        const previous = conversationCases.find((test) => test.id === previousId)!;
+        expected = transcriptPrompt([
+          { role: "user", content: previous.question },
+          { role: "assistant", content: generatedOutputs[previousId] },
+          { role: "user", content: question },
+        ]);
+      }
+      if (receipt.receivedPrompt !== expected)
+        throw Error(`Native history was omitted, duplicated or leaked: ${provider.label}/${id}`);
+      if (provider.label === "agent") {
+        const path = response.metadata?.workspace?.path;
+        if (!path || receipt.workingDirectory !== path || workspacePaths.has(path))
+          throw Error("Conversation grouping reused or lost the Agent workspace");
+        workspacePaths.add(path);
+      } else if (receipt.workingDirectory !== directDir) {
+        throw Error("Direct conversation changed the existing working directory");
+      }
+      receipts[id] = receipt;
+      generatedOutputs[id] = response.output;
+    }
+    const plainQuestions = ["Literal plain text stays plain.", '{"task":"ordinary non-chat JSON"}'];
+    const plain = await evaluateFixture(`native-conversations-plain-${provider.label}`, {
+      prompts: ["{{question}}"],
+      providers: [provider],
+      tests: plainQuestions.map((question, index) => ({
+        vars: {
+          question,
+          // Context vars are not another transcript source.
+          messages: fixedHistory,
+          _conversation: [{ input: "must not append", output: "unrendered history" }],
+        },
+        assert: [
+          { ...receivedTurnAssertion, metric: `new-turn-plain-${index}` },
+          noHistoricalToolsAssertion,
+        ],
+      })),
+    });
+    if (
+      plain.stats.successes !== plainQuestions.length ||
+      plain.results.length !== plainQuestions.length
+    )
+      throw Error(`Plain ${provider.label} conversation compatibility failed`);
+    const plainRows: ConversationRow[] = plain.results;
+    const plainReceipts = plainRows.map((row) => {
+      const receipt: ConversationReceipt = JSON.parse(
+        (row.providerResponse ?? row.response).output,
+      );
+      if (
+        receipt.receivedPrompt !== row.testCase.vars.question ||
+        receipt.systemMessage !== null ||
+        receipt.sendCount !== 1
+      )
+        throw Error(`Plain ${provider.label} prompt or system configuration changed`);
+      return receipt;
+    });
+    nativeConversationGates[provider.label] = JSON.parse(
+      JSON.stringify({
+        sdk: "deterministic receipt fixture, not real Copilot runtime/model proof",
+        nativeStats: native.stats,
+        plainStats: plain.stats,
+        received: receipts,
+        plainReceived: plainReceipts,
+      })
+        .replaceAll(cwd, "<temporary-consumer>")
+        .replaceAll(workspaceParent, "<temporary-workspace-storage>"),
+    );
+  }
   // Promptfoo hands every provider the eval config's directory as basePath, including one
   // included from `providers: file://…`. A relative local path and the default boundary (the
   // config's Git repository) follow it, with the CLI started from another directory.
@@ -1328,6 +1542,7 @@ try {
         additionalGates: {
           unfilteredRows: unfiltered.stats.successes,
           directCopilot: direct.stats.successes,
+          nativeCopilotConversations: nativeConversationGates,
           nativeErrors: nativeError.stats.errors,
           skillUsedWithoutTracing: skillGates,
           piSdk: piGates,
@@ -1355,6 +1570,7 @@ try {
           "llm-rubric and llmAssert through Fallback",
           "llmAssert judge outage keeps row results",
           "llmAssert config.provider over test, --grader and defaultTest judges",
+          "native Copilot fixed/generated conversation replay, conversationId isolation and per-turn grading (SDK receipt fixture)",
         ],
         stdout: output
           .replaceAll(cwd, "<temporary-consumer>")

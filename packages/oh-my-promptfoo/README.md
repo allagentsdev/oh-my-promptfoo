@@ -121,6 +121,24 @@ providers here and dropped their `Provider` suffix; the ids of earlier versions
 no longer resolve (see the
 [changelog](https://github.com/allagentsdev/oh-my-promptfoo/blob/main/CHANGELOG.md)).
 
+## Copilot conversations
+
+Use Promptfoo's ordinary chat templates with either `CopilotSdk` or `Agent`
+delegating to `copilot-sdk`: `{{ messages | dump }}` supplies fixed history,
+and a template loop over `_conversation` replays generated turns.
+`metadata.conversationId` groups turns; normal assertions grade each new reply.
+The provider reads only the rendered prompt, never appending history itself.
+
+One optional leading system message is appended to Copilot's core system
+instructions through the public SDK. Other messages retain their labels,
+order and strings in a delimited **user-channel JSON transcript**, not native
+assistant/tool roles; the delimiters are not a security boundary. Each row
+uses a fresh session and, with `Agent`, a fresh workspace. History is supplied
+input, not tool-use evidence or persistent filesystem state.
+
+See the [two-provider example](examples/copilot-conversations/promptfooconfig.yaml)
+and [supported messages and limitations](docs/provider-guide.md#promptfoo-conversations-with-copilot).
+
 ## Local MCP fixtures
 
 Copilot and Claude candidates can call suite-authored Node MCP servers staged in
@@ -149,12 +167,18 @@ Only normalized workspace-relative files are accepted; symlink escapes and host
 executables are rejected. The server receives **only** its literal `env`, never
 host/delegate credentials, `HOME`, or `PATH`. Tools default to all; `[]` permits
 none. Timeouts terminate the server, and abort/completion tears down its Node
-child and private configuration. General MCP config discovery stays off; graders
-cannot configure servers. This is not an OS or network sandbox: the trusted Node
-fixture itself can access the host and network.
+child and private configuration. Contained MCP tools use explicit server config;
+graders cannot configure servers. Claude candidates can opt into native settings
+and plugin discovery through `delegate.config`. This is not an OS or network
+sandbox: the trusted Node fixture itself can access the host and network.
 
 See the [runnable two-delegate example](examples/mcp/promptfooconfig.yaml) and
 [configuration details](docs/provider-guide.md#local-mcp-servers).
+
+Codex and Claude candidate `delegate.config` options pass through to Promptfoo,
+except workspace, session-reuse and CLI-environment keys owned by this provider.
+Copilot, Pi and read-only graders keep closed option lists. See the
+[native config rules](docs/provider-guide.md#workspace-provider-configuration).
 
 ## Copilot models without an agent
 

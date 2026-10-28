@@ -121,6 +121,24 @@ providers here and dropped their `Provider` suffix; the ids of earlier versions
 no longer resolve (see the
 [changelog](https://github.com/allagentsdev/oh-my-promptfoo/blob/main/CHANGELOG.md)).
 
+## Copilot conversations
+
+Use Promptfoo's ordinary chat templates with either `CopilotSdk` or `Agent`
+delegating to `copilot-sdk`: `{{ messages | dump }}` supplies fixed history,
+and a template loop over `_conversation` replays generated turns.
+`metadata.conversationId` groups turns; normal assertions grade each new reply.
+The provider reads only the rendered prompt, never appending history itself.
+
+One optional leading system message is appended to Copilot's core system
+instructions through the public SDK. Other messages retain their labels,
+order and strings in a delimited **user-channel JSON transcript**, not native
+assistant/tool roles; the delimiters are not a security boundary. Each row
+uses a fresh session and, with `Agent`, a fresh workspace. History is supplied
+input, not tool-use evidence or persistent filesystem state.
+
+See the [two-provider example](examples/copilot-conversations/promptfooconfig.yaml)
+and [supported messages and limitations](docs/provider-guide.md#promptfoo-conversations-with-copilot).
+
 ## Local MCP fixtures
 
 Copilot and Claude candidates can call suite-authored Node MCP servers staged in

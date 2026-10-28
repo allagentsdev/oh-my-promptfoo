@@ -16,6 +16,7 @@ import {
   safeMultiplier,
   sessionAccounting,
 } from "./copilot-accounting.js";
+import { copilotInput } from "./copilot-input.js";
 import { claudeReadAllowed, graderConfig, graderReadScope } from "./grader-policy.js";
 import {
   claudeMcpOptions,
@@ -481,6 +482,7 @@ function verifiedSkillLoaderRecord(entry: unknown, workingDir: string): SkillCal
   }
 }
 async function runCopilot(frame: CallFrame, signal: AbortSignal): Promise<JsonObject> {
+  const input = copilotInput(frame.prompt);
   const sdk = await import(pathToFileURL(resolvePeer(frame.basePath, "@github/copilot-sdk")).href);
   if (typeof sdk.CopilotClient !== "function")
     throw new Error("Install the supported @github/copilot-sdk@1.0.22 peer");
@@ -587,6 +589,7 @@ async function runCopilot(frame: CallFrame, signal: AbortSignal): Promise<JsonOb
     if (signal.aborted) throw new Error("Copilot call aborted");
     session = await client.createSession({
       workingDirectory: frame.workingDir,
+      ...(input.systemMessage ? { systemMessage: input.systemMessage } : {}),
       ...(frame.config.model ? { model: frame.config.model } : {}),
       ...(frame.config.reasoning_effort ? { reasoningEffort: frame.config.reasoning_effort } : {}),
       ...(frame.config.provider ? { provider: frame.config.provider } : {}),
@@ -787,7 +790,7 @@ async function runCopilot(frame: CallFrame, signal: AbortSignal): Promise<JsonOb
       }
     });
     const final = await session.sendAndWait(
-      { prompt: frame.prompt },
+      { prompt: input.prompt },
       (frame.config.timeoutMs as number | undefined) ?? 900_000,
     );
     mainSettled = true;
