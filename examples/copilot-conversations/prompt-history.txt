@@ -1,0 +1,12 @@
+[
+  {% if _conversation | length %}
+  {% set previous = _conversation | last %}
+  {% for message in previous.prompt %}
+  {{ message | dump }},
+  {% endfor %}
+  { "role": "assistant", "content": {{ previous.output | dump }} },
+  {% else %}
+  { "role": "system", "content": "Answer with the requested codename only." },
+  {% endif %}
+  { "role": "user", "content": {{ question | dump }} }
+]

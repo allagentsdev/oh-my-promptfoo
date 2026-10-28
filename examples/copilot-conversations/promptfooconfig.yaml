@@ -1,0 +1,56 @@
+# Install promptfoo and oh-my-promptfoo plus @github/copilot-sdk@1.0.22.
+# Export COPILOT_GITHUB_TOKEN and COPILOT_WORKING_DIR (an existing folder).
+# npx promptfoo eval -c examples/copilot-conversations/promptfooconfig.yaml --no-cache
+# Promptfoo owns grouping/history; Copilot receives replay in a fresh session per row.
+prompts:
+  - file://prompt.txt
+providers: file://providers.yaml
+defaultTest:
+  # Keep message arrays as one fixture value, not a cartesian test dimension.
+  options: { disableVarExpansion: true }
+  vars:
+    system_message: Answer the final user message concisely. Follow the requested output format.
+    messages: []
+tests:
+  # Fixed assistant history is supplied input, not a generated/scored turn.
+  - description: Continue a fixed conversation and grade the new answer
+    metadata: { conversationId: fixed-history }
+    vars:
+      messages:
+        - role: user
+          content: My codename is amber.
+        - role: assistant
+          content: Your codename is amber.
+      question: What is my codename? Reply with the codename only.
+    assert:
+      - type: equals
+        value: amber
+  - description: Generate the first orchid turn
+    metadata: { conversationId: orchid }
+    vars:
+      question: My codename is orchid. Reply with the codename only.
+    assert:
+      - type: equals
+        value: orchid
+  # Interleave a different conversation to make isolation visible.
+  - description: A separate conversation starts without a codename
+    metadata: { conversationId: separate }
+    vars:
+      question: What is my codename? If none was supplied, reply UNKNOWN only.
+    assert:
+      - type: equals
+        value: UNKNOWN
+  - description: Replay the generated orchid turn exactly once
+    metadata: { conversationId: orchid }
+    vars:
+      question: Repeat my codename in uppercase only.
+    assert:
+      - type: equals
+        value: ORCHID
+  - description: Replay both generated orchid turns, without duplicating earlier prompts
+    metadata: { conversationId: orchid }
+    vars:
+      question: What was the original lowercase codename? Reply with the codename only.
+    assert:
+      - type: equals
+        value: orchid

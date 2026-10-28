@@ -191,6 +191,37 @@ describe("provider configuration", () => {
       expect(typeof Entity).toBe("function");
     expect(Object.keys(rootEntry)).toEqual([]);
   });
+  test("Copilot inputFormat validates consistently in constructor and prompt overrides", () => {
+    for (const inputFormat of ["auto", "text", "chat"]) {
+      expect(validateCopilotConfig({ working_dir: ".", inputFormat }).inputFormat).toBe(
+        inputFormat,
+      );
+      expect(
+        validateAgentConfig({
+          delegate: { id: "copilot-sdk", config: { inputFormat } },
+          workspace: { sources: [] },
+        }).delegate.config,
+      ).toMatchObject({ inputFormat });
+      expect(
+        promptConfig(
+          { prompt: { config: { delegate: { config: { inputFormat } } } } },
+          "copilot-sdk",
+          { inputFormat: "text" },
+        ),
+      ).toMatchObject({ inputFormat });
+    }
+    for (const inputFormat of ["json", "", false, null]) {
+      expect(() => validateCopilotConfig({ working_dir: ".", inputFormat })).toThrow(/inputFormat/);
+      expect(() => validateDelegateConfig("copilot-sdk", { inputFormat })).toThrow(/inputFormat/);
+      expect(() =>
+        promptConfig(
+          { prompt: { config: { delegate: { config: { inputFormat } } } } },
+          "copilot-sdk",
+          {},
+        ),
+      ).toThrow(/inputFormat/);
+    }
+  });
   test("rejects unknown, recursive and reserved fields at authored layers", () => {
     const workspace = {
       sources: [{ type: "git", repository: "file:///tmp/repo", ref: "HEAD", destination: "repo" }],
@@ -1756,6 +1787,95 @@ describe("direct Copilot provider", () => {
   }
   const accountingPrompt = (scenario: Record<string, unknown>) =>
     `accounting:${JSON.stringify(scenario)}`;
+  for (const mode of ["direct", "workspace"] as const) {
+    test(`${mode} text mode is literal and prompt-level chat overrides normalize`, async () => {
+      const fixture = await readFile(
+        new URL("./fixtures/copilot-sdk.mjs", import.meta.url),
+        "utf8",
+      );
+      const path = await project("@github/copilot-sdk", fixture);
+      const provider =
+        mode === "direct"
+          ? new CopilotSdk({ config: { basePath: path, working_dir: ".", inputFormat: "text" } })
+          : new Agent({
+              config: {
+                basePath: path,
+                delegate: { id: "copilot-sdk", config: { inputFormat: "text" } },
+                workspace: { sources: [] },
+              },
+              env: {
+                ALLAGENTS_CACHE_ROOT: join(path, "cache"),
+                ALLAGENTS_WORKSPACE_ROOT: join(path, "runtime"),
+              },
+            });
+      const prompt =
+        '[{"role":"system","content":"instructions"},{"role":"user","content":"question"}]';
+      try {
+        const literal = await provider.callApi(prompt);
+        expect(literal.error).toBeUndefined();
+        expect(JSON.parse(literal.output as string).task).toBe(prompt);
+        const override = { prompt: { config: { delegate: { config: { inputFormat: "chat" } } } } };
+        const normalized = await provider.callApi(prompt, override);
+        expect(normalized.error).toBeUndefined();
+        expect(JSON.parse(normalized.output as string).task).toBe("question");
+        const invalid = await provider.callApi("not chat", override);
+        expect(invalid.error).toContain("Copilot chat");
+        expect(invalid.output).toBeUndefined();
+        const unchanged = await provider.callApi(prompt);
+        expect(JSON.parse(unchanged.output as string).task).toBe(prompt);
+      } finally {
+        await provider.cleanup();
+      }
+    });
+    test(`${mode} chat rejects unsupported roles and never replays context history twice`, async () => {
+      const fixture = await readFile(
+        new URL("./fixtures/copilot-sdk.mjs", import.meta.url),
+        "utf8",
+      );
+      const path = await project("@github/copilot-sdk", fixture);
+      const provider =
+        mode === "direct"
+          ? new CopilotSdk({ config: { basePath: path, working_dir: "." } })
+          : new Agent({
+              config: {
+                basePath: path,
+                delegate: { id: "copilot-sdk" },
+                workspace: { sources: [] },
+              },
+              env: {
+                ALLAGENTS_CACHE_ROOT: join(path, "cache"),
+                ALLAGENTS_WORKSPACE_ROOT: join(path, "runtime"),
+              },
+            });
+      try {
+        const messages = [
+          { role: "user", content: "previous" },
+          { role: "assistant", content: "fixture-only" },
+          { role: "user", content: "current" },
+        ];
+        const context = {
+          vars: { _conversation: [{ input: "previous", output: "fixture-only" }] },
+          test: { metadata: { conversationId: "same" } },
+        };
+        const response = await provider.callApi(JSON.stringify(messages), context);
+        expect(response.error).toBeUndefined();
+        const sent = JSON.parse(response.output as string).task as string;
+        expect(JSON.parse(sent.split("\n")[1]!)).toEqual(messages);
+        expect((response.metadata as any).toolInventory.calls).toHaveLength(1);
+        expect((response.metadata as any).skillCalls).toEqual([]);
+        expect(response.tokenUsage).toMatchObject({ prompt: 11, completion: 7 });
+        const literal = await provider.callApi('{"task":"literal"}', context);
+        expect(JSON.parse(literal.output as string).task).toBe('{"task":"literal"}');
+        const invalid = await provider.callApi(
+          JSON.stringify([{ role: "developer", content: "not system" }]),
+        );
+        expect(invalid.error).toContain("Copilot chat");
+        expect(invalid.output).toBeUndefined();
+      } finally {
+        await provider.cleanup();
+      }
+    });
+  }
   test("session creation failure retains unavailable accounting and stops its client", async () => {
     const { path, provider } = await accountingProvider(5000, "fixture-create-error");
     try {

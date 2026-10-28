@@ -1,0 +1,14 @@
+{% set payload %}
+{
+  "query": {{ question | dump }},
+  "history": [
+    {% for completion in _conversation %}
+    { "reply": {{ completion.output | dump }} }{% if not loop.last %},{% endif %}
+    {% endfor %}
+  ]
+}
+{% endset %}
+[
+  { "role": "system", "content": "Read the query in the supplied JSON and answer with the requested codename only." },
+  { "role": "user", "content": {{ payload | trim | dump }} }
+]

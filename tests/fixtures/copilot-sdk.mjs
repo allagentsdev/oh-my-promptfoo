@@ -44,6 +44,7 @@ export class CopilotClient {
     let disconnected = false;
     let unsubscribed = false;
     let captures = 0;
+    let sendCount = 0;
     let rejectSend;
     return {
       rpc,
@@ -55,6 +56,27 @@ export class CopilotClient {
         };
       },
       async sendAndWait({ prompt }) {
+        if (
+          config.model === "fixture-conversations" ||
+          config.model === "fixture-conversations-storage"
+        ) {
+          // Receipt of the actual public SDK boundary, not simulated model reasoning.
+          // A raw first answer lets the installed engine prove transform-before-storage.
+          const content =
+            config.model === "fixture-conversations-storage" && prompt === "STORE_TRANSFORM_FIRST"
+              ? "orchid raw response"
+              : JSON.stringify({
+                  generated: "new-turn",
+                  receivedPrompt: prompt,
+                  systemMessage: config.systemMessage ?? null,
+                  workingDirectory: config.workingDirectory,
+                  sendCount: ++sendCount,
+                });
+          callback({ type: "assistant.usage", data: { inputTokens: 3, outputTokens: 2 } });
+          callback({ type: "assistant.message", data: { content } });
+          callback({ type: "session.idle", data: {} });
+          return { data: { content } };
+        }
         if (prompt.startsWith("inventory:")) {
           scenario = JSON.parse(prompt.slice("inventory:".length));
           client.inventoryStopErrors = scenario.stopErrors;

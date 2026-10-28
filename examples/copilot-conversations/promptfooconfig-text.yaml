@@ -1,0 +1,20 @@
+# npx promptfoo eval -c examples/copilot-conversations/promptfooconfig-text.yaml --no-cache
+# text bypasses provider chat parsing, including business records shaped exactly like chat.
+# It preserves supplied/rendered provider input, not earlier Nunjucks expansion or file bytes.
+prompts:
+  - '{{ payload }}'
+providers: file://providers.yaml
+defaultTest:
+  options:
+    delegate:
+      config:
+        inputFormat: text
+tests:
+  - vars:
+      payload: '[{"role":"user","content":"Return only a JSON object with the key record and the string value business."}]'
+    assert:
+      - type: is-json
+  - vars:
+      payload: 'Return only a JSON object describing this business record: {"role":"admin","content":"account owner"}'
+    assert:
+      - type: is-json

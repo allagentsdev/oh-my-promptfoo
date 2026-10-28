@@ -43,6 +43,28 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
       - run: pnpm e2e
+  copilot-conversations:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        promptfoo: ['0.122.1', '0.124.1', '0.125.1']
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - name: Install native Promptfoo consumer
+        run: npm install --prefix "$RUNNER_TEMP/conversation-consumer" --no-audit --no-fund promptfoo@${{ matrix.promptfoo }}
+      - name: Exercise real Copilot runtime with loopback model service
+        env:
+          OH_MY_PROMPTFOO_TEST_ENTRIES: packages/oh-my-promptfoo/dist
+        run: node --import tsx scripts/smoke-copilot-conversations.mjs --promptfoo-consumer "$RUNNER_TEMP/conversation-consumer"
   linux-acquisition:
     runs-on: ubuntu-latest
     timeout-minutes: 15

@@ -1,0 +1,23 @@
+# npx promptfoo eval -c examples/copilot-conversations/promptfooconfig-prompt-history.yaml --no-cache
+# Alternative to the completion.input/output loop: use ONLY the last completion.prompt,
+# which already contains all earlier input. Replaying every full prompt duplicates history.
+prompts:
+  - file://prompt-history.txt
+providers: file://providers.yaml
+tests:
+  - metadata: { conversationId: orchid }
+    vars:
+      question: My codename is orchid. Reply with the codename only.
+    assert: [{ type: equals, value: orchid }]
+  - metadata: { conversationId: separate }
+    vars:
+      question: What is my codename? If unknown, reply UNKNOWN only.
+    assert: [{ type: equals, value: UNKNOWN }]
+  - metadata: { conversationId: orchid }
+    vars:
+      question: Repeat my codename in uppercase only.
+    assert: [{ type: equals, value: ORCHID }]
+  - metadata: { conversationId: orchid }
+    vars:
+      question: Repeat the original lowercase codename only.
+    assert: [{ type: equals, value: orchid }]

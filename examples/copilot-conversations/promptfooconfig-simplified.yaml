@@ -1,0 +1,23 @@
+# npx promptfoo eval -c examples/copilot-conversations/promptfooconfig-simplified.yaml --no-cache
+# Upstream simplified markup is expanded by Nunjucks, not by the provider.
+prompts:
+  - file://simplified.txt
+providers: file://providers.yaml
+defaultTest:
+  options: { disableVarExpansion: true }
+  vars:
+    system_message: Answer with the requested word only.
+    messages:
+      - user: 'My codename is amber. My motto is "Keep going".'
+      - assistant: 'Recorded: amber and "Keep going".'
+tests:
+  - vars:
+      question: What is my codename?
+    assert:
+      - type: equals
+        value: amber
+  - vars:
+      question: What is the second word of my motto?
+    assert:
+      - type: equals
+        value: going

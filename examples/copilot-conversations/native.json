@@ -1,0 +1,13 @@
+[
+  { "role": "system", "name": "format", "content": "Answer with the codename only." },
+  { "role": "user", "name": "customer", "content": "My codename is amber." },
+  { "role": "assistant", "name": "helper", "content": "amber" },
+  { "role": "system", "content": "Keep the original lowercase spelling." },
+  {
+    "role": "tool",
+    "name": "lookup",
+    "tool_call_id": "authored-lookup",
+    "content": "This is supplied history, not a live tool call."
+  },
+  { "role": "user", "name": "customer", "content": "{{ question }}" }
+]

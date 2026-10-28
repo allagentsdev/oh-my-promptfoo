@@ -1,9 +1,9 @@
 {
   "schemaVersion": 1,
-  "date": "2026-10-24T20:09:37.135Z",
+  "date": "2026-10-28T14:25:49.238Z",
   "node": "v22.22.1",
-  "promptfoo": "0.124.1",
-  "package": "1.22.4",
+  "promptfoo": "0.125.1",
+  "package": "1.27.0",
   "surface": "npm-packed package loaded by stock promptfoo eval",
   "sdkMode": "deterministic Codex/Claude/Copilot SDK fixtures; real Pi SDK against a local model-service endpoint; independently npm-installed Promptfoo and real integration runtime",
   "stats": {
@@ -38,8 +38,8 @@
         }
       }
     },
-    "durationMs": 11018,
-    "evaluationDurationMs": 11018
+    "durationMs": 9676,
+    "evaluationDurationMs": 9676
   },
   "verifiedAssertions": [
     "contains",
@@ -56,6 +56,1032 @@
   "additionalGates": {
     "unfilteredRows": 3,
     "directCopilot": 1,
+    "nativeCopilotConversations": {
+      "direct": {
+        "sdk": "deterministic receipt fixture, not real Copilot runtime/model proof",
+        "nativeStats": {
+          "successes": 6,
+          "failures": 0,
+          "errors": 0,
+          "tokenUsage": {
+            "prompt": 18,
+            "completion": 12,
+            "cached": 0,
+            "total": 30,
+            "numRequests": 6,
+            "completionDetails": {
+              "reasoning": 0,
+              "acceptedPrediction": 0,
+              "rejectedPrediction": 0,
+              "cacheReadInputTokens": 0,
+              "cacheCreationInputTokens": 0
+            },
+            "assertions": {
+              "total": 0,
+              "prompt": 0,
+              "completion": 0,
+              "cached": 0,
+              "numRequests": 0,
+              "completionDetails": {
+                "reasoning": 0,
+                "acceptedPrediction": 0,
+                "rejectedPrediction": 0,
+                "cacheReadInputTokens": 0,
+                "cacheCreationInputTokens": 0
+              }
+            }
+          },
+          "durationMs": 1698,
+          "evaluationDurationMs": 1698
+        },
+        "plainStats": {
+          "successes": 2,
+          "failures": 0,
+          "errors": 0,
+          "tokenUsage": {
+            "prompt": 6,
+            "completion": 4,
+            "cached": 0,
+            "total": 10,
+            "numRequests": 2,
+            "completionDetails": {
+              "reasoning": 0,
+              "acceptedPrediction": 0,
+              "rejectedPrediction": 0,
+              "cacheReadInputTokens": 0,
+              "cacheCreationInputTokens": 0
+            },
+            "assertions": {
+              "total": 0,
+              "prompt": 0,
+              "completion": 0,
+              "cached": 0,
+              "numRequests": 0,
+              "completionDetails": {
+                "reasoning": 0,
+                "acceptedPrediction": 0,
+                "rejectedPrediction": 0,
+                "cacheReadInputTokens": 0,
+                "cacheCreationInputTokens": 0
+              }
+            }
+          },
+          "durationMs": 366,
+          "evaluationDurationMs": 366
+        },
+        "authoredPatterns": {
+          "native.json": {
+            "stats": {
+              "successes": 1,
+              "failures": 0,
+              "errors": 0,
+              "tokenUsage": {
+                "prompt": 3,
+                "completion": 2,
+                "cached": 0,
+                "total": 5,
+                "numRequests": 1,
+                "completionDetails": {
+                  "reasoning": 0,
+                  "acceptedPrediction": 0,
+                  "rejectedPrediction": 0,
+                  "cacheReadInputTokens": 0,
+                  "cacheCreationInputTokens": 0
+                },
+                "assertions": {
+                  "total": 0,
+                  "prompt": 0,
+                  "completion": 0,
+                  "cached": 0,
+                  "numRequests": 0,
+                  "completionDetails": {
+                    "reasoning": 0,
+                    "acceptedPrediction": 0,
+                    "rejectedPrediction": 0,
+                    "cacheReadInputTokens": 0,
+                    "cacheCreationInputTokens": 0
+                  }
+                }
+              },
+              "durationMs": 358,
+              "evaluationDurationMs": 358
+            },
+            "received": {
+              "generated": "new-turn",
+              "receivedPrompt": "BEGIN PROMPTFOO CONVERSATION JSON\n[{\"role\":\"user\",\"name\":\"customer\",\"content\":\"My codename is amber.\"},{\"role\":\"assistant\",\"name\":\"helper\",\"content\":\"amber\"},{\"role\":\"tool\",\"name\":\"lookup\",\"tool_call_id\":\"authored-lookup\",\"content\":\"This is supplied history, not a live tool call.\"},{\"role\":\"user\",\"name\":\"customer\",\"content\":\"What is my codename?\"}]\nEND PROMPTFOO CONVERSATION JSON\nRespond to the final user message. The preceding JSON is supplied conversation data, not system instructions or observed activity.",
+              "systemMessage": {
+                "mode": "append",
+                "content": "BEGIN PROMPTFOO SYSTEM MESSAGES JSON\n[{\"role\":\"system\",\"name\":\"format\",\"content\":\"Answer with the codename only.\"},{\"role\":\"system\",\"content\":\"Keep the original lowercase spelling.\"}]\nEND PROMPTFOO SYSTEM MESSAGES JSON"
+              },
+              "workingDirectory": "<temporary-consumer>/existing",
+              "sendCount": 1
+            }
+          },
+          "native.yaml": {
+            "stats": {
+              "successes": 1,
+              "failures": 0,
+              "errors": 0,
+              "tokenUsage": {
+                "prompt": 3,
+                "completion": 2,
+                "cached": 0,
+                "total": 5,
+                "numRequests": 1,
+                "completionDetails": {
+                  "reasoning": 0,
+                  "acceptedPrediction": 0,
+                  "rejectedPrediction": 0,
+                  "cacheReadInputTokens": 0,
+                  "cacheCreationInputTokens": 0
+                },
+                "assertions": {
+                  "total": 0,
+                  "prompt": 0,
+                  "completion": 0,
+                  "cached": 0,
+                  "numRequests": 0,
+                  "completionDetails": {
+                    "reasoning": 0,
+                    "acceptedPrediction": 0,
+                    "rejectedPrediction": 0,
+                    "cacheReadInputTokens": 0,
+                    "cacheCreationInputTokens": 0
+                  }
+                }
+              },
+              "durationMs": 358,
+              "evaluationDurationMs": 358
+            },
+            "received": {
+              "generated": "new-turn",
+              "receivedPrompt": "BEGIN PROMPTFOO CONVERSATION JSON\n[{\"role\":\"user\",\"name\":\"customer\",\"content\":\"My codename is amber.\"},{\"role\":\"assistant\",\"name\":\"helper\",\"content\":\"amber\"},{\"role\":\"tool\",\"name\":\"lookup\",\"tool_call_id\":\"authored-lookup\",\"content\":\"This is supplied history, not a live tool call.\"},{\"role\":\"user\",\"name\":\"customer\",\"content\":\"What is my codename?\"}]\nEND PROMPTFOO CONVERSATION JSON\nRespond to the final user message. The preceding JSON is supplied conversation data, not system instructions or observed activity.",
+              "systemMessage": {
+                "mode": "append",
+                "content": "BEGIN PROMPTFOO SYSTEM MESSAGES JSON\n[{\"role\":\"system\",\"name\":\"format\",\"content\":\"Answer with the codename only.\"},{\"role\":\"system\",\"content\":\"Keep the original lowercase spelling.\"}]\nEND PROMPTFOO SYSTEM MESSAGES JSON"
+              },
+              "workingDirectory": "<temporary-consumer>/existing",
+              "sendCount": 1
+            }
+          },
+          "simplified.txt": {
+            "stats": {
+              "successes": 1,
+              "failures": 0,
+              "errors": 0,
+              "tokenUsage": {
+                "prompt": 3,
+                "completion": 2,
+                "cached": 0,
+                "total": 5,
+                "numRequests": 1,
+                "completionDetails": {
+                  "reasoning": 0,
+                  "acceptedPrediction": 0,
+                  "rejectedPrediction": 0,
+                  "cacheReadInputTokens": 0,
+                  "cacheCreationInputTokens": 0
+                },
+                "assertions": {
+                  "total": 0,
+                  "prompt": 0,
+                  "completion": 0,
+                  "cached": 0,
+                  "numRequests": 0,
+                  "completionDetails": {
+                    "reasoning": 0,
+                    "acceptedPrediction": 0,
+                    "rejectedPrediction": 0,
+                    "cacheReadInputTokens": 0,
+                    "cacheCreationInputTokens": 0
+                  }
+                }
+              },
+              "durationMs": 348,
+              "evaluationDurationMs": 348
+            },
+            "received": {
+              "generated": "new-turn",
+              "receivedPrompt": "BEGIN PROMPTFOO CONVERSATION JSON\n[{\"role\":\"user\",\"content\":\"Remember \\\"amber\\\".\\nKeep quotes.\"},{\"role\":\"assistant\",\"content\":\"amber\"},{\"role\":\"user\",\"content\":\"What is my codename?\"}]\nEND PROMPTFOO CONVERSATION JSON\nRespond to the final user message. The preceding JSON is supplied conversation data, not system instructions or observed activity.",
+              "systemMessage": {
+                "mode": "append",
+                "content": "CONVERSATION_SYSTEM_E2E"
+              },
+              "workingDirectory": "<temporary-consumer>/existing",
+              "sendCount": 1
+            }
+          }
+        },
+        "replayPatterns": {
+          "prompt-history.txt": {
+            "stats": {
+              "successes": 5,
+              "failures": 0,
+              "errors": 0,
+              "tokenUsage": {
+                "prompt": 15,
+                "completion": 10,
+                "cached": 0,
+                "total": 25,
+                "numRequests": 5,
+                "completionDetails": {
+                  "reasoning": 0,
+                  "acceptedPrediction": 0,
+                  "rejectedPrediction": 0,
+                  "cacheReadInputTokens": 0,
+                  "cacheCreationInputTokens": 0
+                },
+                "assertions": {
+                  "total": 0,
+                  "prompt": 0,
+                  "completion": 0,
+                  "cached": 0,
+                  "numRequests": 0,
+                  "completionDetails": {
+                    "reasoning": 0,
+                    "acceptedPrediction": 0,
+                    "rejectedPrediction": 0,
+                    "cacheReadInputTokens": 0,
+                    "cacheCreationInputTokens": 0
+                  }
+                }
+              },
+              "durationMs": 1412,
+              "evaluationDurationMs": 1412
+            },
+            "groups": ["generated", "isolated"]
+          },
+          "embedded.txt": {
+            "stats": {
+              "successes": 5,
+              "failures": 0,
+              "errors": 0,
+              "tokenUsage": {
+                "prompt": 15,
+                "completion": 10,
+                "cached": 0,
+                "total": 25,
+                "numRequests": 5,
+                "completionDetails": {
+                  "reasoning": 0,
+                  "acceptedPrediction": 0,
+                  "rejectedPrediction": 0,
+                  "cacheReadInputTokens": 0,
+                  "cacheCreationInputTokens": 0
+                },
+                "assertions": {
+                  "total": 0,
+                  "prompt": 0,
+                  "completion": 0,
+                  "cached": 0,
+                  "numRequests": 0,
+                  "completionDetails": {
+                    "reasoning": 0,
+                    "acceptedPrediction": 0,
+                    "rejectedPrediction": 0,
+                    "cacheReadInputTokens": 0,
+                    "cacheCreationInputTokens": 0
+                  }
+                }
+              },
+              "durationMs": 1434,
+              "evaluationDurationMs": 1434
+            },
+            "groups": ["generated", "isolated"]
+          }
+        },
+        "inputFormatStats": {
+          "successes": 9,
+          "failures": 0,
+          "errors": 0,
+          "tokenUsage": {
+            "prompt": 27,
+            "completion": 18,
+            "cached": 0,
+            "total": 45,
+            "numRequests": 9,
+            "completionDetails": {
+              "reasoning": 0,
+              "acceptedPrediction": 0,
+              "rejectedPrediction": 0,
+              "cacheReadInputTokens": 0,
+              "cacheCreationInputTokens": 0
+            },
+            "assertions": {
+              "total": 0,
+              "prompt": 0,
+              "completion": 0,
+              "cached": 0,
+              "numRequests": 0,
+              "completionDetails": {
+                "reasoning": 0,
+                "acceptedPrediction": 0,
+                "rejectedPrediction": 0,
+                "cacheReadInputTokens": 0,
+                "cacheCreationInputTokens": 0
+              }
+            }
+          },
+          "durationMs": 973,
+          "evaluationDurationMs": 973
+        },
+        "constructorInputFormatStats": {
+          "successes": 2,
+          "failures": 0,
+          "errors": 0,
+          "tokenUsage": {
+            "prompt": 6,
+            "completion": 4,
+            "cached": 0,
+            "total": 10,
+            "numRequests": 2,
+            "completionDetails": {
+              "reasoning": 0,
+              "acceptedPrediction": 0,
+              "rejectedPrediction": 0,
+              "cacheReadInputTokens": 0,
+              "cacheCreationInputTokens": 0
+            },
+            "assertions": {
+              "total": 0,
+              "prompt": 0,
+              "completion": 0,
+              "cached": 0,
+              "numRequests": 0,
+              "completionDetails": {
+                "reasoning": 0,
+                "acceptedPrediction": 0,
+                "rejectedPrediction": 0,
+                "cacheReadInputTokens": 0,
+                "cacheCreationInputTokens": 0
+              }
+            }
+          },
+          "durationMs": 350,
+          "evaluationDurationMs": 350
+        },
+        "rejectedChatStats": {
+          "successes": 0,
+          "failures": 0,
+          "errors": 5,
+          "tokenUsage": {
+            "prompt": 0,
+            "completion": 0,
+            "cached": 0,
+            "total": 0,
+            "numRequests": 5,
+            "completionDetails": {
+              "reasoning": 0,
+              "acceptedPrediction": 0,
+              "rejectedPrediction": 0,
+              "cacheReadInputTokens": 0,
+              "cacheCreationInputTokens": 0
+            },
+            "assertions": {
+              "total": 0,
+              "prompt": 0,
+              "completion": 0,
+              "cached": 0,
+              "numRequests": 0,
+              "completionDetails": {
+                "reasoning": 0,
+                "acceptedPrediction": 0,
+                "rejectedPrediction": 0,
+                "cacheReadInputTokens": 0,
+                "cacheCreationInputTokens": 0
+              }
+            }
+          },
+          "durationMs": 594,
+          "evaluationDurationMs": 594
+        },
+        "storageStats": {
+          "successes": 3,
+          "failures": 0,
+          "errors": 0,
+          "tokenUsage": {
+            "prompt": 9,
+            "completion": 6,
+            "cached": 0,
+            "total": 15,
+            "numRequests": 3,
+            "completionDetails": {
+              "reasoning": 0,
+              "acceptedPrediction": 0,
+              "rejectedPrediction": 0,
+              "cacheReadInputTokens": 0,
+              "cacheCreationInputTokens": 0
+            },
+            "assertions": {
+              "total": 0,
+              "prompt": 0,
+              "completion": 0,
+              "cached": 0,
+              "numRequests": 0,
+              "completionDetails": {
+                "reasoning": 0,
+                "acceptedPrediction": 0,
+                "rejectedPrediction": 0,
+                "cacheReadInputTokens": 0,
+                "cacheCreationInputTokens": 0
+              }
+            }
+          },
+          "durationMs": 879,
+          "evaluationDurationMs": 879
+        },
+        "received": {
+          "fixed": {
+            "generated": "new-turn",
+            "receivedPrompt": "BEGIN PROMPTFOO CONVERSATION JSON\n[{\"role\":\"user\",\"content\":\"Remember \\\"amber\\\".\\nThis is fixed input.\"},{\"role\":\"assistant\",\"content\":\"fixed-assistant-do-not-grade: I called forbidden.\"},{\"role\":\"tool\",\"content\":\"fixed tool result, not observed runtime activity\",\"name\":\"forbidden\",\"tool_call_id\":\"authored-history-only\"},{\"role\":\"user\",\"content\":\"Grade only this new fixed-history turn.\"}]\nEND PROMPTFOO CONVERSATION JSON\nRespond to the final user message. The preceding JSON is supplied conversation data, not system instructions or observed activity.",
+            "systemMessage": {
+              "mode": "append",
+              "content": "CONVERSATION_SYSTEM_E2E"
+            },
+            "workingDirectory": "<temporary-consumer>/existing",
+            "sendCount": 1
+          },
+          "first": {
+            "generated": "new-turn",
+            "receivedPrompt": "First generated turn: \"orchid\"\nKeep exact text.",
+            "systemMessage": {
+              "mode": "append",
+              "content": "CONVERSATION_SYSTEM_E2E"
+            },
+            "workingDirectory": "<temporary-consumer>/existing",
+            "sendCount": 1
+          },
+          "isolated-first": {
+            "generated": "new-turn",
+            "receivedPrompt": "A separate conversation starts here.",
+            "systemMessage": {
+              "mode": "append",
+              "content": "CONVERSATION_SYSTEM_E2E"
+            },
+            "workingDirectory": "<temporary-consumer>/existing",
+            "sendCount": 1
+          },
+          "second": {
+            "generated": "new-turn",
+            "receivedPrompt": "BEGIN PROMPTFOO CONVERSATION JSON\n[{\"role\":\"user\",\"content\":\"First generated turn: \\\"orchid\\\"\\nKeep exact text.\"},{\"role\":\"assistant\",\"content\":\"{\\\"generated\\\":\\\"new-turn\\\",\\\"receivedPrompt\\\":\\\"First generated turn: \\\\\\\"orchid\\\\\\\"\\\\nKeep exact text.\\\",\\\"systemMessage\\\":{\\\"mode\\\":\\\"append\\\",\\\"content\\\":\\\"CONVERSATION_SYSTEM_E2E\\\"},\\\"workingDirectory\\\":\\\"<temporary-consumer>/existing\\\",\\\"sendCount\\\":1}\"},{\"role\":\"user\",\"content\":\"Continue only the generated orchid conversation.\"}]\nEND PROMPTFOO CONVERSATION JSON\nRespond to the final user message. The preceding JSON is supplied conversation data, not system instructions or observed activity.",
+            "systemMessage": {
+              "mode": "append",
+              "content": "CONVERSATION_SYSTEM_E2E"
+            },
+            "workingDirectory": "<temporary-consumer>/existing",
+            "sendCount": 1
+          },
+          "isolated-second": {
+            "generated": "new-turn",
+            "receivedPrompt": "BEGIN PROMPTFOO CONVERSATION JSON\n[{\"role\":\"user\",\"content\":\"A separate conversation starts here.\"},{\"role\":\"assistant\",\"content\":\"{\\\"generated\\\":\\\"new-turn\\\",\\\"receivedPrompt\\\":\\\"A separate conversation starts here.\\\",\\\"systemMessage\\\":{\\\"mode\\\":\\\"append\\\",\\\"content\\\":\\\"CONVERSATION_SYSTEM_E2E\\\"},\\\"workingDirectory\\\":\\\"<temporary-consumer>/existing\\\",\\\"sendCount\\\":1}\"},{\"role\":\"user\",\"content\":\"Continue only the separate conversation.\"}]\nEND PROMPTFOO CONVERSATION JSON\nRespond to the final user message. The preceding JSON is supplied conversation data, not system instructions or observed activity.",
+            "systemMessage": {
+              "mode": "append",
+              "content": "CONVERSATION_SYSTEM_E2E"
+            },
+            "workingDirectory": "<temporary-consumer>/existing",
+            "sendCount": 1
+          },
+          "third": {
+            "generated": "new-turn",
+            "receivedPrompt": "BEGIN PROMPTFOO CONVERSATION JSON\n[{\"role\":\"user\",\"content\":\"First generated turn: \\\"orchid\\\"\\nKeep exact text.\"},{\"role\":\"assistant\",\"content\":\"{\\\"generated\\\":\\\"new-turn\\\",\\\"receivedPrompt\\\":\\\"First generated turn: \\\\\\\"orchid\\\\\\\"\\\\nKeep exact text.\\\",\\\"systemMessage\\\":{\\\"mode\\\":\\\"append\\\",\\\"content\\\":\\\"CONVERSATION_SYSTEM_E2E\\\"},\\\"workingDirectory\\\":\\\"<temporary-consumer>/existing\\\",\\\"sendCount\\\":1}\"},{\"role\":\"user\",\"content\":\"Continue only the generated orchid conversation.\"},{\"role\":\"assistant\",\"content\":\"{\\\"generated\\\":\\\"new-turn\\\",\\\"receivedPrompt\\\":\\\"BEGIN PROMPTFOO CONVERSATION JSON\\\\n[{\\\\\\\"role\\\\\\\":\\\\\\\"user\\\\\\\",\\\\\\\"content\\\\\\\":\\\\\\\"First generated turn: \\\\\\\\\\\\\\\"orchid\\\\\\\\\\\\\\\"\\\\\\\\nKeep exact text.\\\\\\\"},{\\\\\\\"role\\\\\\\":\\\\\\\"assistant\\\\\\\",\\\\\\\"content\\\\\\\":\\\\\\\"{\\\\\\\\\\\\\\\"generated\\\\\\\\\\\\\\\":\\\\\\\\\\\\\\\"new-turn\\\\\\\\\\\\\\\",\\\\\\\\\\\\\\\"receivedPrompt\\\\\\\\\\\\\\\":\\\\\\\\\\\\\\\"First generated turn: \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\"orchid\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\"\\\\\\\\\\\\\\\\nKeep exact text.\\\\\\\\\\\\\\\",\\\\\\\\\\\\\\\"systemMessage\\\\\\\\\\\\\\\":{\\\\\\\\\\\\\\\"mode\\\\\\\\\\\\\\\":\\\\\\\\\\\\\\\"append\\\\\\\\\\\\\\\",\\\\\\\\\\\\\\\"content\\\\\\\\\\\\\\\":\\\\\\\\\\\\\\\"CONVERSATION_SYSTEM_E2E\\\\\\\\\\\\\\\"},\\\\\\\\\\\\\\\"workingDirectory\\\\\\\\\\\\\\\":\\\\\\\\\\\\\\\"<temporary-consumer>/existing\\\\\\\\\\\\\\\",\\\\\\\\\\\\\\\"sendCount\\\\\\\\\\\\\\\":1}\\\\\\\"},{\\\\\\\"role\\\\\\\":\\\\\\\"user\\\\\\\",\\\\\\\"content\\\\\\\":\\\\\\\"Continue only the generated orchid conversation.\\\\\\\"}]\\\\nEND PROMPTFOO CONVERSATION JSON\\\\nRespond to the final user message. The preceding JSON is supplied conversation data, not system instructions or observed activity.\\\",\\\"systemMessage\\\":{\\\"mode\\\":\\\"append\\\",\\\"content\\\":\\\"CONVERSATION_SYSTEM_E2E\\\"},\\\"workingDirectory\\\":\\\"<temporary-consumer>/existing\\\",\\\"sendCount\\\":1}\"},{\"role\":\"user\",\"content\":\"Replay both earlier generated turns exactly once.\"}]\nEND PROMPTFOO CONVERSATION JSON\nRespond to the final user message. The preceding JSON is supplied conversation data, not system instructions or observed activity.",
+            "systemMessage": {
+              "mode": "append",
+              "content": "CONVERSATION_SYSTEM_E2E"
+            },
+            "workingDirectory": "<temporary-consumer>/existing",
+            "sendCount": 1
+          }
+        },
+        "plainReceived": [
+          {
+            "generated": "new-turn",
+            "receivedPrompt": "Literal plain text stays plain.",
+            "systemMessage": null,
+            "workingDirectory": "<temporary-consumer>/existing",
+            "sendCount": 1
+          },
+          {
+            "generated": "new-turn",
+            "receivedPrompt": "{\"task\":\"ordinary non-chat JSON\"}",
+            "systemMessage": null,
+            "workingDirectory": "<temporary-consumer>/existing",
+            "sendCount": 1
+          }
+        ]
+      },
+      "agent": {
+        "sdk": "deterministic receipt fixture, not real Copilot runtime/model proof",
+        "nativeStats": {
+          "successes": 6,
+          "failures": 0,
+          "errors": 0,
+          "tokenUsage": {
+            "prompt": 18,
+            "completion": 12,
+            "cached": 0,
+            "total": 30,
+            "numRequests": 6,
+            "completionDetails": {
+              "reasoning": 0,
+              "acceptedPrediction": 0,
+              "rejectedPrediction": 0,
+              "cacheReadInputTokens": 0,
+              "cacheCreationInputTokens": 0
+            },
+            "assertions": {
+              "total": 0,
+              "prompt": 0,
+              "completion": 0,
+              "cached": 0,
+              "numRequests": 0,
+              "completionDetails": {
+                "reasoning": 0,
+                "acceptedPrediction": 0,
+                "rejectedPrediction": 0,
+                "cacheReadInputTokens": 0,
+                "cacheCreationInputTokens": 0
+              }
+            }
+          },
+          "durationMs": 2599,
+          "evaluationDurationMs": 2599
+        },
+        "plainStats": {
+          "successes": 2,
+          "failures": 0,
+          "errors": 0,
+          "tokenUsage": {
+            "prompt": 6,
+            "completion": 4,
+            "cached": 0,
+            "total": 10,
+            "numRequests": 2,
+            "completionDetails": {
+              "reasoning": 0,
+              "acceptedPrediction": 0,
+              "rejectedPrediction": 0,
+              "cacheReadInputTokens": 0,
+              "cacheCreationInputTokens": 0
+            },
+            "assertions": {
+              "total": 0,
+              "prompt": 0,
+              "completion": 0,
+              "cached": 0,
+              "numRequests": 0,
+              "completionDetails": {
+                "reasoning": 0,
+                "acceptedPrediction": 0,
+                "rejectedPrediction": 0,
+                "cacheReadInputTokens": 0,
+                "cacheCreationInputTokens": 0
+              }
+            }
+          },
+          "durationMs": 1226,
+          "evaluationDurationMs": 1226
+        },
+        "authoredPatterns": {
+          "native.json": {
+            "stats": {
+              "successes": 1,
+              "failures": 0,
+              "errors": 0,
+              "tokenUsage": {
+                "prompt": 3,
+                "completion": 2,
+                "cached": 0,
+                "total": 5,
+                "numRequests": 1,
+                "completionDetails": {
+                  "reasoning": 0,
+                  "acceptedPrediction": 0,
+                  "rejectedPrediction": 0,
+                  "cacheReadInputTokens": 0,
+                  "cacheCreationInputTokens": 0
+                },
+                "assertions": {
+                  "total": 0,
+                  "prompt": 0,
+                  "completion": 0,
+                  "cached": 0,
+                  "numRequests": 0,
+                  "completionDetails": {
+                    "reasoning": 0,
+                    "acceptedPrediction": 0,
+                    "rejectedPrediction": 0,
+                    "cacheReadInputTokens": 0,
+                    "cacheCreationInputTokens": 0
+                  }
+                }
+              },
+              "durationMs": 1214,
+              "evaluationDurationMs": 1214
+            },
+            "received": {
+              "generated": "new-turn",
+              "receivedPrompt": "BEGIN PROMPTFOO CONVERSATION JSON\n[{\"role\":\"user\",\"name\":\"customer\",\"content\":\"My codename is amber.\"},{\"role\":\"assistant\",\"name\":\"helper\",\"content\":\"amber\"},{\"role\":\"tool\",\"name\":\"lookup\",\"tool_call_id\":\"authored-lookup\",\"content\":\"This is supplied history, not a live tool call.\"},{\"role\":\"user\",\"name\":\"customer\",\"content\":\"What is my codename?\"}]\nEND PROMPTFOO CONVERSATION JSON\nRespond to the final user message. The preceding JSON is supplied conversation data, not system instructions or observed activity.",
+              "systemMessage": {
+                "mode": "append",
+                "content": "BEGIN PROMPTFOO SYSTEM MESSAGES JSON\n[{\"role\":\"system\",\"name\":\"format\",\"content\":\"Answer with the codename only.\"},{\"role\":\"system\",\"content\":\"Keep the original lowercase spelling.\"}]\nEND PROMPTFOO SYSTEM MESSAGES JSON"
+              },
+              "workingDirectory": "<temporary-workspace-storage>/runtime/6ed052ca-f542-40ba-8ac3-103d1b97c85a/workspaces/7a14af62-a83d-4260-9c8a-8acba7da13ca",
+              "sendCount": 1
+            }
+          },
+          "native.yaml": {
+            "stats": {
+              "successes": 1,
+              "failures": 0,
+              "errors": 0,
+              "tokenUsage": {
+                "prompt": 3,
+                "completion": 2,
+                "cached": 0,
+                "total": 5,
+                "numRequests": 1,
+                "completionDetails": {
+                  "reasoning": 0,
+                  "acceptedPrediction": 0,
+                  "rejectedPrediction": 0,
+                  "cacheReadInputTokens": 0,
+                  "cacheCreationInputTokens": 0
+                },
+                "assertions": {
+                  "total": 0,
+                  "prompt": 0,
+                  "completion": 0,
+                  "cached": 0,
+                  "numRequests": 0,
+                  "completionDetails": {
+                    "reasoning": 0,
+                    "acceptedPrediction": 0,
+                    "rejectedPrediction": 0,
+                    "cacheReadInputTokens": 0,
+                    "cacheCreationInputTokens": 0
+                  }
+                }
+              },
+              "durationMs": 1215,
+              "evaluationDurationMs": 1215
+            },
+            "received": {
+              "generated": "new-turn",
+              "receivedPrompt": "BEGIN PROMPTFOO CONVERSATION JSON\n[{\"role\":\"user\",\"name\":\"customer\",\"content\":\"My codename is amber.\"},{\"role\":\"assistant\",\"name\":\"helper\",\"content\":\"amber\"},{\"role\":\"tool\",\"name\":\"lookup\",\"tool_call_id\":\"authored-lookup\",\"content\":\"This is supplied history, not a live tool call.\"},{\"role\":\"user\",\"name\":\"customer\",\"content\":\"What is my codename?\"}]\nEND PROMPTFOO CONVERSATION JSON\nRespond to the final user message. The preceding JSON is supplied conversation data, not system instructions or observed activity.",
+              "systemMessage": {
+                "mode": "append",
+                "content": "BEGIN PROMPTFOO SYSTEM MESSAGES JSON\n[{\"role\":\"system\",\"name\":\"format\",\"content\":\"Answer with the codename only.\"},{\"role\":\"system\",\"content\":\"Keep the original lowercase spelling.\"}]\nEND PROMPTFOO SYSTEM MESSAGES JSON"
+              },
+              "workingDirectory": "<temporary-workspace-storage>/runtime/e16c2903-5e06-4367-ba04-8d5e7d358fcd/workspaces/e5f69501-9d61-4aee-98a9-4b30a9c0a346",
+              "sendCount": 1
+            }
+          },
+          "simplified.txt": {
+            "stats": {
+              "successes": 1,
+              "failures": 0,
+              "errors": 0,
+              "tokenUsage": {
+                "prompt": 3,
+                "completion": 2,
+                "cached": 0,
+                "total": 5,
+                "numRequests": 1,
+                "completionDetails": {
+                  "reasoning": 0,
+                  "acceptedPrediction": 0,
+                  "rejectedPrediction": 0,
+                  "cacheReadInputTokens": 0,
+                  "cacheCreationInputTokens": 0
+                },
+                "assertions": {
+                  "total": 0,
+                  "prompt": 0,
+                  "completion": 0,
+                  "cached": 0,
+                  "numRequests": 0,
+                  "completionDetails": {
+                    "reasoning": 0,
+                    "acceptedPrediction": 0,
+                    "rejectedPrediction": 0,
+                    "cacheReadInputTokens": 0,
+                    "cacheCreationInputTokens": 0
+                  }
+                }
+              },
+              "durationMs": 1204,
+              "evaluationDurationMs": 1204
+            },
+            "received": {
+              "generated": "new-turn",
+              "receivedPrompt": "BEGIN PROMPTFOO CONVERSATION JSON\n[{\"role\":\"user\",\"content\":\"Remember \\\"amber\\\".\\nKeep quotes.\"},{\"role\":\"assistant\",\"content\":\"amber\"},{\"role\":\"user\",\"content\":\"What is my codename?\"}]\nEND PROMPTFOO CONVERSATION JSON\nRespond to the final user message. The preceding JSON is supplied conversation data, not system instructions or observed activity.",
+              "systemMessage": {
+                "mode": "append",
+                "content": "CONVERSATION_SYSTEM_E2E"
+              },
+              "workingDirectory": "<temporary-workspace-storage>/runtime/16be2a70-ea75-4bca-b27b-c0a9a43acec9/workspaces/a469c8e6-e55e-4c50-900d-d0ab4a9f50e0",
+              "sendCount": 1
+            }
+          }
+        },
+        "replayPatterns": {
+          "prompt-history.txt": {
+            "stats": {
+              "successes": 5,
+              "failures": 0,
+              "errors": 0,
+              "tokenUsage": {
+                "prompt": 15,
+                "completion": 10,
+                "cached": 0,
+                "total": 25,
+                "numRequests": 5,
+                "completionDetails": {
+                  "reasoning": 0,
+                  "acceptedPrediction": 0,
+                  "rejectedPrediction": 0,
+                  "cacheReadInputTokens": 0,
+                  "cacheCreationInputTokens": 0
+                },
+                "assertions": {
+                  "total": 0,
+                  "prompt": 0,
+                  "completion": 0,
+                  "cached": 0,
+                  "numRequests": 0,
+                  "completionDetails": {
+                    "reasoning": 0,
+                    "acceptedPrediction": 0,
+                    "rejectedPrediction": 0,
+                    "cacheReadInputTokens": 0,
+                    "cacheCreationInputTokens": 0
+                  }
+                }
+              },
+              "durationMs": 2249,
+              "evaluationDurationMs": 2249
+            },
+            "groups": ["generated", "isolated"]
+          },
+          "embedded.txt": {
+            "stats": {
+              "successes": 5,
+              "failures": 0,
+              "errors": 0,
+              "tokenUsage": {
+                "prompt": 15,
+                "completion": 10,
+                "cached": 0,
+                "total": 25,
+                "numRequests": 5,
+                "completionDetails": {
+                  "reasoning": 0,
+                  "acceptedPrediction": 0,
+                  "rejectedPrediction": 0,
+                  "cacheReadInputTokens": 0,
+                  "cacheCreationInputTokens": 0
+                },
+                "assertions": {
+                  "total": 0,
+                  "prompt": 0,
+                  "completion": 0,
+                  "cached": 0,
+                  "numRequests": 0,
+                  "completionDetails": {
+                    "reasoning": 0,
+                    "acceptedPrediction": 0,
+                    "rejectedPrediction": 0,
+                    "cacheReadInputTokens": 0,
+                    "cacheCreationInputTokens": 0
+                  }
+                }
+              },
+              "durationMs": 2280,
+              "evaluationDurationMs": 2280
+            },
+            "groups": ["generated", "isolated"]
+          }
+        },
+        "inputFormatStats": {
+          "successes": 9,
+          "failures": 0,
+          "errors": 0,
+          "tokenUsage": {
+            "prompt": 27,
+            "completion": 18,
+            "cached": 0,
+            "total": 45,
+            "numRequests": 9,
+            "completionDetails": {
+              "reasoning": 0,
+              "acceptedPrediction": 0,
+              "rejectedPrediction": 0,
+              "cacheReadInputTokens": 0,
+              "cacheCreationInputTokens": 0
+            },
+            "assertions": {
+              "total": 0,
+              "prompt": 0,
+              "completion": 0,
+              "cached": 0,
+              "numRequests": 0,
+              "completionDetails": {
+                "reasoning": 0,
+                "acceptedPrediction": 0,
+                "rejectedPrediction": 0,
+                "cacheReadInputTokens": 0,
+                "cacheCreationInputTokens": 0
+              }
+            }
+          },
+          "durationMs": 1868,
+          "evaluationDurationMs": 1868
+        },
+        "constructorInputFormatStats": {
+          "successes": 2,
+          "failures": 0,
+          "errors": 0,
+          "tokenUsage": {
+            "prompt": 6,
+            "completion": 4,
+            "cached": 0,
+            "total": 10,
+            "numRequests": 2,
+            "completionDetails": {
+              "reasoning": 0,
+              "acceptedPrediction": 0,
+              "rejectedPrediction": 0,
+              "cacheReadInputTokens": 0,
+              "cacheCreationInputTokens": 0
+            },
+            "assertions": {
+              "total": 0,
+              "prompt": 0,
+              "completion": 0,
+              "cached": 0,
+              "numRequests": 0,
+              "completionDetails": {
+                "reasoning": 0,
+                "acceptedPrediction": 0,
+                "rejectedPrediction": 0,
+                "cacheReadInputTokens": 0,
+                "cacheCreationInputTokens": 0
+              }
+            }
+          },
+          "durationMs": 1218,
+          "evaluationDurationMs": 1218
+        },
+        "rejectedChatStats": {
+          "successes": 0,
+          "failures": 0,
+          "errors": 5,
+          "tokenUsage": {
+            "prompt": 0,
+            "completion": 0,
+            "cached": 0,
+            "total": 0,
+            "numRequests": 5,
+            "completionDetails": {
+              "reasoning": 0,
+              "acceptedPrediction": 0,
+              "rejectedPrediction": 0,
+              "cacheReadInputTokens": 0,
+              "cacheCreationInputTokens": 0
+            },
+            "assertions": {
+              "total": 0,
+              "prompt": 0,
+              "completion": 0,
+              "cached": 0,
+              "numRequests": 0,
+              "completionDetails": {
+                "reasoning": 0,
+                "acceptedPrediction": 0,
+                "rejectedPrediction": 0,
+                "cacheReadInputTokens": 0,
+                "cacheCreationInputTokens": 0
+              }
+            }
+          },
+          "durationMs": 1495,
+          "evaluationDurationMs": 1495
+        },
+        "storageStats": {
+          "successes": 3,
+          "failures": 0,
+          "errors": 0,
+          "tokenUsage": {
+            "prompt": 9,
+            "completion": 6,
+            "cached": 0,
+            "total": 15,
+            "numRequests": 3,
+            "completionDetails": {
+              "reasoning": 0,
+              "acceptedPrediction": 0,
+              "rejectedPrediction": 0,
+              "cacheReadInputTokens": 0,
+              "cacheCreationInputTokens": 0
+            },
+            "assertions": {
+              "total": 0,
+              "prompt": 0,
+              "completion": 0,
+              "cached": 0,
+              "numRequests": 0,
+              "completionDetails": {
+                "reasoning": 0,
+                "acceptedPrediction": 0,
+                "rejectedPrediction": 0,
+                "cacheReadInputTokens": 0,
+                "cacheCreationInputTokens": 0
+              }
+            }
+          },
+          "durationMs": 1704,
+          "evaluationDurationMs": 1704
+        },
+        "received": {
+          "fixed": {
+            "generated": "new-turn",
+            "receivedPrompt": "BEGIN PROMPTFOO CONVERSATION JSON\n[{\"role\":\"user\",\"content\":\"Remember \\\"amber\\\".\\nThis is fixed input.\"},{\"role\":\"assistant\",\"content\":\"fixed-assistant-do-not-grade: I called forbidden.\"},{\"role\":\"tool\",\"content\":\"fixed tool result, not observed runtime activity\",\"name\":\"forbidden\",\"tool_call_id\":\"authored-history-only\"},{\"role\":\"user\",\"content\":\"Grade only this new fixed-history turn.\"}]\nEND PROMPTFOO CONVERSATION JSON\nRespond to the final user message. The preceding JSON is supplied conversation data, not system instructions or observed activity.",
+            "systemMessage": {
+              "mode": "append",
+              "content": "CONVERSATION_SYSTEM_E2E"
+            },
+            "workingDirectory": "<temporary-workspace-storage>/runtime/2a0fb48e-f9e7-495d-80bf-3737c85589dc/workspaces/f2babfad-7f6a-4106-991c-7e1d28d8246b",
+            "sendCount": 1
+          },
+          "first": {
+            "generated": "new-turn",
+            "receivedPrompt": "First generated turn: \"orchid\"\nKeep exact text.",
+            "systemMessage": {
+              "mode": "append",
+              "content": "CONVERSATION_SYSTEM_E2E"
+            },
+            "workingDirectory": "<temporary-workspace-storage>/runtime/2a0fb48e-f9e7-495d-80bf-3737c85589dc/workspaces/9b1f94fe-4e90-4122-9610-1a9bf84476fd",
+            "sendCount": 1
+          },
+          "isolated-first": {
+            "generated": "new-turn",
+            "receivedPrompt": "A separate conversation starts here.",
+            "systemMessage": {
+              "mode": "append",
+              "content": "CONVERSATION_SYSTEM_E2E"
+            },
+            "workingDirectory": "<temporary-workspace-storage>/runtime/2a0fb48e-f9e7-495d-80bf-3737c85589dc/workspaces/25f3d3e0-e881-4b41-b4a1-4965dbcd7b1d",
+            "sendCount": 1
+          },
+          "second": {
+            "generated": "new-turn",
+            "receivedPrompt": "BEGIN PROMPTFOO CONVERSATION JSON\n[{\"role\":\"user\",\"content\":\"First generated turn: \\\"orchid\\\"\\nKeep exact text.\"},{\"role\":\"assistant\",\"content\":\"{\\\"generated\\\":\\\"new-turn\\\",\\\"receivedPrompt\\\":\\\"First generated turn: \\\\\\\"orchid\\\\\\\"\\\\nKeep exact text.\\\",\\\"systemMessage\\\":{\\\"mode\\\":\\\"append\\\",\\\"content\\\":\\\"CONVERSATION_SYSTEM_E2E\\\"},\\\"workingDirectory\\\":\\\"<temporary-workspace-storage>/runtime/2a0fb48e-f9e7-495d-80bf-3737c85589dc/workspaces/9b1f94fe-4e90-4122-9610-1a9bf84476fd\\\",\\\"sendCount\\\":1}\"},{\"role\":\"user\",\"content\":\"Continue only the generated orchid conversation.\"}]\nEND PROMPTFOO CONVERSATION JSON\nRespond to the final user message. The preceding JSON is supplied conversation data, not system instructions or observed activity.",
+            "systemMessage": {
+              "mode": "append",
+              "content": "CONVERSATION_SYSTEM_E2E"
+            },
+            "workingDirectory": "<temporary-workspace-storage>/runtime/2a0fb48e-f9e7-495d-80bf-3737c85589dc/workspaces/b24975b4-b03f-4fbc-b8b9-665336c768b5",
+            "sendCount": 1
+          },
+          "isolated-second": {
+            "generated": "new-turn",
+            "receivedPrompt": "BEGIN PROMPTFOO CONVERSATION JSON\n[{\"role\":\"user\",\"content\":\"A separate conversation starts here.\"},{\"role\":\"assistant\",\"content\":\"{\\\"generated\\\":\\\"new-turn\\\",\\\"receivedPrompt\\\":\\\"A separate conversation starts here.\\\",\\\"systemMessage\\\":{\\\"mode\\\":\\\"append\\\",\\\"content\\\":\\\"CONVERSATION_SYSTEM_E2E\\\"},\\\"workingDirectory\\\":\\\"<temporary-workspace-storage>/runtime/2a0fb48e-f9e7-495d-80bf-3737c85589dc/workspaces/25f3d3e0-e881-4b41-b4a1-4965dbcd7b1d\\\",\\\"sendCount\\\":1}\"},{\"role\":\"user\",\"content\":\"Continue only the separate conversation.\"}]\nEND PROMPTFOO CONVERSATION JSON\nRespond to the final user message. The preceding JSON is supplied conversation data, not system instructions or observed activity.",
+            "systemMessage": {
+              "mode": "append",
+              "content": "CONVERSATION_SYSTEM_E2E"
+            },
+            "workingDirectory": "<temporary-workspace-storage>/runtime/2a0fb48e-f9e7-495d-80bf-3737c85589dc/workspaces/21f4ef8b-6c3b-4c21-8e23-99e8a45e48e3",
+            "sendCount": 1
+          },
+          "third": {
+            "generated": "new-turn",
+            "receivedPrompt": "BEGIN PROMPTFOO CONVERSATION JSON\n[{\"role\":\"user\",\"content\":\"First generated turn: \\\"orchid\\\"\\nKeep exact text.\"},{\"role\":\"assistant\",\"content\":\"{\\\"generated\\\":\\\"new-turn\\\",\\\"receivedPrompt\\\":\\\"First generated turn: \\\\\\\"orchid\\\\\\\"\\\\nKeep exact text.\\\",\\\"systemMessage\\\":{\\\"mode\\\":\\\"append\\\",\\\"content\\\":\\\"CONVERSATION_SYSTEM_E2E\\\"},\\\"workingDirectory\\\":\\\"<temporary-workspace-storage>/runtime/2a0fb48e-f9e7-495d-80bf-3737c85589dc/workspaces/9b1f94fe-4e90-4122-9610-1a9bf84476fd\\\",\\\"sendCount\\\":1}\"},{\"role\":\"user\",\"content\":\"Continue only the generated orchid conversation.\"},{\"role\":\"assistant\",\"content\":\"{\\\"generated\\\":\\\"new-turn\\\",\\\"receivedPrompt\\\":\\\"BEGIN PROMPTFOO CONVERSATION JSON\\\\n[{\\\\\\\"role\\\\\\\":\\\\\\\"user\\\\\\\",\\\\\\\"content\\\\\\\":\\\\\\\"First generated turn: \\\\\\\\\\\\\\\"orchid\\\\\\\\\\\\\\\"\\\\\\\\nKeep exact text.\\\\\\\"},{\\\\\\\"role\\\\\\\":\\\\\\\"assistant\\\\\\\",\\\\\\\"content\\\\\\\":\\\\\\\"{\\\\\\\\\\\\\\\"generated\\\\\\\\\\\\\\\":\\\\\\\\\\\\\\\"new-turn\\\\\\\\\\\\\\\",\\\\\\\\\\\\\\\"receivedPrompt\\\\\\\\\\\\\\\":\\\\\\\\\\\\\\\"First generated turn: \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\"orchid\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\"\\\\\\\\\\\\\\\\nKeep exact text.\\\\\\\\\\\\\\\",\\\\\\\\\\\\\\\"systemMessage\\\\\\\\\\\\\\\":{\\\\\\\\\\\\\\\"mode\\\\\\\\\\\\\\\":\\\\\\\\\\\\\\\"append\\\\\\\\\\\\\\\",\\\\\\\\\\\\\\\"content\\\\\\\\\\\\\\\":\\\\\\\\\\\\\\\"CONVERSATION_SYSTEM_E2E\\\\\\\\\\\\\\\"},\\\\\\\\\\\\\\\"workingDirectory\\\\\\\\\\\\\\\":\\\\\\\\\\\\\\\"<temporary-workspace-storage>/runtime/2a0fb48e-f9e7-495d-80bf-3737c85589dc/workspaces/9b1f94fe-4e90-4122-9610-1a9bf84476fd\\\\\\\\\\\\\\\",\\\\\\\\\\\\\\\"sendCount\\\\\\\\\\\\\\\":1}\\\\\\\"},{\\\\\\\"role\\\\\\\":\\\\\\\"user\\\\\\\",\\\\\\\"content\\\\\\\":\\\\\\\"Continue only the generated orchid conversation.\\\\\\\"}]\\\\nEND PROMPTFOO CONVERSATION JSON\\\\nRespond to the final user message. The preceding JSON is supplied conversation data, not system instructions or observed activity.\\\",\\\"systemMessage\\\":{\\\"mode\\\":\\\"append\\\",\\\"content\\\":\\\"CONVERSATION_SYSTEM_E2E\\\"},\\\"workingDirectory\\\":\\\"<temporary-workspace-storage>/runtime/2a0fb48e-f9e7-495d-80bf-3737c85589dc/workspaces/b24975b4-b03f-4fbc-b8b9-665336c768b5\\\",\\\"sendCount\\\":1}\"},{\"role\":\"user\",\"content\":\"Replay both earlier generated turns exactly once.\"}]\nEND PROMPTFOO CONVERSATION JSON\nRespond to the final user message. The preceding JSON is supplied conversation data, not system instructions or observed activity.",
+            "systemMessage": {
+              "mode": "append",
+              "content": "CONVERSATION_SYSTEM_E2E"
+            },
+            "workingDirectory": "<temporary-workspace-storage>/runtime/2a0fb48e-f9e7-495d-80bf-3737c85589dc/workspaces/80530525-4a70-4750-8074-7ae811d6bf18",
+            "sendCount": 1
+          }
+        },
+        "plainReceived": [
+          {
+            "generated": "new-turn",
+            "receivedPrompt": "Literal plain text stays plain.",
+            "systemMessage": null,
+            "workingDirectory": "<temporary-workspace-storage>/runtime/9117d921-c5d6-4449-9fd5-34a674cc750f/workspaces/83c0077b-c4ab-4e35-9a9a-7c8838565866",
+            "sendCount": 1
+          },
+          {
+            "generated": "new-turn",
+            "receivedPrompt": "{\"task\":\"ordinary non-chat JSON\"}",
+            "systemMessage": null,
+            "workingDirectory": "<temporary-workspace-storage>/runtime/9117d921-c5d6-4449-9fd5-34a674cc750f/workspaces/97ede327-7d48-4a88-a0ab-afdf7a907c68",
+            "sendCount": 1
+          }
+        ]
+      }
+    },
     "nativeErrors": 1,
     "skillUsedWithoutTracing": {
       "success": {
@@ -113,8 +1139,8 @@
           }
         }
       },
-      "durationMs": 1270,
-      "evaluationDurationMs": 1270
+      "durationMs": 1177,
+      "evaluationDurationMs": 1177
     },
     "mixedSkillInventory": {
       "successes": 0,
@@ -148,8 +1174,8 @@
           }
         }
       },
-      "durationMs": 2452,
-      "evaluationDurationMs": 2452
+      "durationMs": 2211,
+      "evaluationDurationMs": 2211
     },
     "normalCleanup": true,
     "skippedCleanupRecovery": true,
@@ -172,7 +1198,8 @@
     "packaged llmAssert with defaultTest judge",
     "llm-rubric and llmAssert through Fallback",
     "llmAssert judge outage keeps row results",
-    "llmAssert config.provider over test, --grader and defaultTest judges"
+    "llmAssert config.provider over test, --grader and defaultTest judges",
+    "native Copilot fixed/generated conversation replay, conversationId isolation and per-turn grading (SDK receipt fixture)"
   ],
-  "stdout": "Cache is disabled.\n[OtelSdk] OpenTelemetry SDK initialized successfully\nStarting evaluation eval-t8n-2026-10-24T20:07:01\n[Evaluation] Starting 3 test cases...\nRunning 3 test cases (up to 4 at a time)...\n[Evaluation] ✓ Complete! 3/3 tests in 11s\n[OtelSdk] OpenTelemetry SDK shut down successfully\n\n┌────────────────────────┬────────────────────────┬────────────────────────┬────────────────────────┬────────────────────────┐\n│ task                   │ sessionId              │ [readonly] {{task}}    │ [writable] {{task}}    │ [claude] {{task}}      │\n├────────────────────────┼────────────────────────┼────────────────────────┼────────────────────────┴────────────────────────┤\n│ readonly-row           │ fixture-thread         │ [PASS]                 │                                                 │\n│                        │                        │ {\"task\":\"readonly-row… │                                                 │\n├────────────────────────┼────────────────────────┼────────────────────────┼────────────────────────┬────────────────────────┤\n│ writable-row           │                        │                        │ [PASS]                 │                        │\n│                        │                        │                        │ {\"task\":\"writable-row… │                        │\n├────────────────────────┼────────────────────────┼────────────────────────┼────────────────────────┼────────────────────────┤\n│ claude-row             │ fixture-claude         │                        │                        │ [PASS]                 │\n│                        │                        │                        │                        │ {\"task\":\"claude-row\",… │\n└────────────────────────┴────────────────────────┴────────────────────────┴────────────────────────┴────────────────────────┘\n✓ Eval complete (ID: eval-t8n-2026-10-24T20:07:01)\n\n» View results: promptfoo view\n» Share with your team: https://promptfoo.app\n» Feedback: https://promptfoo.dev/feedback\n\nTotal Tokens: 108\n  Provider: 54 (33 prompt, 21 completion, 2 cached)\n  Grading: 54 (39 prompt, 15 completion, 2 cached)\n\nResults:\n  ✓ 3 passed (100%)\n  0 failed (0%)\n  0 errors (0%)\nDuration: 11s (concurrency: 4)\n\nWriting output to <temporary-consumer>/results.json\n"
+  "stdout": "Cache is disabled.\n[OtelSdk] OpenTelemetry SDK initialized successfully\nStarting evaluation eval-w8G-2026-10-28T14:21:43\n[Evaluation] Starting 3 test cases...\nRunning 3 test cases (up to 4 at a time)...\n[Evaluation] ✓ Complete! 3/3 tests in 9s\n[OtelSdk] OpenTelemetry SDK shut down successfully\n\n┌────────────────────────┬────────────────────────┬────────────────────────┬────────────────────────┬────────────────────────┐\n│ task                   │ sessionId              │ [readonly] {{task}}    │ [writable] {{task}}    │ [claude] {{task}}      │\n├────────────────────────┼────────────────────────┼────────────────────────┼────────────────────────┴────────────────────────┤\n│ readonly-row           │ fixture-thread         │ [PASS]                 │                                                 │\n│                        │                        │ {\"task\":\"readonly-row… │                                                 │\n├────────────────────────┼────────────────────────┼────────────────────────┼────────────────────────┬────────────────────────┤\n│ writable-row           │                        │                        │ [PASS]                 │                        │\n│                        │                        │                        │ {\"task\":\"writable-row… │                        │\n├────────────────────────┼────────────────────────┼────────────────────────┼────────────────────────┼────────────────────────┤\n│ claude-row             │ fixture-claude         │                        │                        │ [PASS]                 │\n│                        │                        │                        │                        │ {\"task\":\"claude-row\",… │\n└────────────────────────┴────────────────────────┴────────────────────────┴────────────────────────┴────────────────────────┘\n✓ Eval complete (ID: eval-w8G-2026-10-28T14:21:43)\n\n» View results: promptfoo view\n» Share with your team: https://promptfoo.app\n» Feedback: https://promptfoo.dev/feedback\n\nTotal Tokens: 108\n  Provider: 54 (33 prompt, 21 completion, 2 cached)\n  Grading: 54 (39 prompt, 15 completion, 2 cached)\n\nResults:\n  ✓ 3 passed (100%)\n  0 failed (0%)\n  0 errors (0%)\nDuration: 10s (concurrency: 4)\n\nWriting output to <temporary-consumer>/results.json\n"
 }

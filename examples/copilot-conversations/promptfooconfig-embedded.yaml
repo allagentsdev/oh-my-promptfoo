@@ -1,0 +1,18 @@
+# npx promptfoo eval -c examples/copilot-conversations/promptfooconfig-embedded.yaml --no-cache
+# JSON inside content is a string: dump escapes it, rather than creating nested messages.
+prompts:
+  - file://embedded.txt
+providers: file://providers.yaml
+tests:
+  - metadata: { conversationId: embedded }
+    vars:
+      question: My codename is orchid. Reply with the codename only.
+    assert: [{ type: equals, value: orchid }]
+  - metadata: { conversationId: embedded }
+    vars:
+      question: What codename was in the previous reply? Reply with it only.
+    assert: [{ type: equals, value: orchid }]
+  - metadata: { conversationId: embedded }
+    vars:
+      question: Repeat the codename in uppercase only.
+    assert: [{ type: equals, value: ORCHID }]

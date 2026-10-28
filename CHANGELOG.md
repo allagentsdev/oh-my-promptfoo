@@ -8,6 +8,7 @@
 * Add adapter-owned schema-version-1 tool inventories with bounded/redacted arguments, explicit completeness and SDK skill-loading names. Copilot includes subagent streams and certifies only clean matched bounded execution; native/Pi retain observations without claiming unsupported completeness.
 * Publish stock Promptfoo JavaScript package assertions `tool-called`, `tool-not-called` and `skill-not-loaded`, with exact/regex names, MCP identity, argument paths and invocation chronology. Missing, malformed or incomplete evidence is a grader error, never a successful absence assertion.
 * Add closed, workspace-contained Node stdio `mcpServers` for Copilot and Claude candidates, including per-test overrides, literal-only child environment, case-insensitive reserved env checks, configured-tool permissions, unambiguous Claude trace identity and independently supervised abort cleanup. Read-only graders reject configured servers; general configuration discovery remains disabled.
+* **copilot:** accept rendered Promptfoo chat arrays in `CopilotSdk` and the Copilot `Agent` delegate, including native JSON/YAML prompt-file authoring. Add `inputFormat: auto | text | chat` in direct/delegate config and existing prompt overrides, conservative complete-intent detection, ordered consolidation of multiple/later systems, and string names on all supported roles. Replay string-only history as delimited user-channel JSON, not native role hydration; keep fresh sessions/workspaces and current-turn-only tool evidence.
 
 ### Bug Fixes
 
@@ -35,6 +36,7 @@
 * Remove obsolete `@types/diff`; workspace file-change capture uses the declarations bundled with `diff@9`.
 * Exercise public provider/protocol inventory boundaries, forged metadata, stream/call/byte/argument bounds, skill RPC failures and chronology. Extend strict packed ESM/CJS/declaration smokes and stock Promptfoo package-assertion E2E; document the certificate's tool-invocation scope and provide an executable example.
 * Exercise MCP candidate execution and packed consumers with pinned Git fixtures on all platforms; retain the Linux-specific protected local-source case.
+* Extend native-authoring Copilot examples and packed-consumer coverage with three generated turns, interleaved conversation IDs, JSON/YAML files, simplified/shared fixtures, full-prompt versus input/output replay, embedded/literal JSON, `storeOutputAs`, and transform-before-storage variable use on both public providers. Verify the real SDK/CLI local-fixture matrix on stock Promptfoo `0.122.1`, `0.124.1` and `0.125.1`; distinguish engine/provider/SDK provenance, preserve returned-error workspace retention, and isolate the native renderer's literal-block-tag limitation. Deterministic SDK receipts alone do not claim runtime/model proof.
 
 ## [1.27.0](https://github.com/allagentsdev/oh-my-promptfoo/compare/v1.26.0...v1.27.0) (2026-10-26)
 
