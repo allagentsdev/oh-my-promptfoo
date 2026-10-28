@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { realpathSync } from "node:fs";
-import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { npmCommand } from "./npm-command";
@@ -421,6 +421,11 @@ for(const provider of [judge,{text:judge},fallback])await assert.rejects(grade(p
     run("node", ["assertions-smoke.mjs"], cwd);
     run(manager.command, [...manager.args, `@github/copilot-sdk@${copilotVersion}`], cwd);
     run("node", ["smoke.mjs", "with-copilot"], cwd);
+    await copyFile(
+      join(repo, "scripts/smoke-copilot-runtime.mjs"),
+      join(cwd, "copilot-runtime-smoke.mjs"),
+    );
+    run("node", ["copilot-runtime-smoke.mjs", copilotVersion], cwd);
     run("node", ["copilot-model-smoke.mjs"], cwd);
     run("node", ["package-ids-smoke.mjs"], cwd);
     run("node", [join(cwd, "judge-install-smoke.mjs")], elsewhere);
@@ -428,7 +433,7 @@ for(const provider of [judge,{text:judge},fallback])await assert.rejects(grade(p
     await compileDeclarations(cwd);
     run("node", [join(repo, "scripts/smoke-mcp.mjs"), cwd], cwd);
     console.log(
-      `${manager.name}: ${registryVersion ? "registry" : "packed"} ${expectedVersion} provider and assertion exports, declarations, CLI, and actual Copilot SDK ${copilotVersion} passed`,
+      `${manager.name}: ${registryVersion ? "registry" : "packed"} ${expectedVersion} provider and assertion exports, declarations, CLI, actual Copilot SDK ${copilotVersion} and bundled runtime passed`,
     );
   }
   console.log(`Pack surface passed: ${names.length} files, ${packed.size} compressed bytes`);

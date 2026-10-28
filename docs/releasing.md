@@ -24,6 +24,14 @@ The initial `1.0.0-rc.1` was published manually without provenance. `1.0.0` was 
 
 The [Validate workflow](../.github/workflows/validate.yml) gives each normal validation, packed Promptfoo E2E, and Linux acquisition job a 15-minute timeout. A stalled compiler, dependency install, or acquisition check fails within that bound rather than occupying a runner for GitHub's six-hour default. Release orchestration and publication keep their separate, longer job budgets and existing indexing retries.
 
+`pnpm pack:check` also starts the real declared Copilot SDK and its bundled runtime in
+each isolated npm and pnpm consumer. The smoke checks the runtime's reported version
+against the SDK's `copilotCliVersion`, a real protocol/ping round trip, and clean shutdown.
+It uses a fresh home directory, excludes credentials and CLI-path overrides, and never
+creates a model session or requests inference. This complements the deterministic SDK
+fixtures; SDK and CLI package version numbers do not have to be identical. The runtime
+test has a 30-second execution timeout and a five-second cleanup timeout.
+
 ## Dependency maintenance
 
 Development and CI use pnpm and the root `pnpm-lock.yaml`; publishing to npm does not change the package manager. Dependabot uses the `npm` ecosystem, which maintains the pnpm lockfile, for workspace dependencies and `github-actions` for workflow actions. Updates arrive weekly, with minor/patch package updates grouped and major package updates left separate. Node types stay on major 22 until the runtime floor changes.
