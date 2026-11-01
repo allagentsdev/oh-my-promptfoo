@@ -320,6 +320,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_PR: ${{ needs.release-please.outputs.pending_pr }}
           RELEASE_PR_SHA: ${{ steps.preview.outputs.pr_sha }}
+          PREVIEW_VERSION: ${{ steps.preview.outputs.version }}
         run: node scripts/check-preview-publication.mjs
       - name: Publish preview under next
         if: steps.recheck.outputs.publish == 'true'
