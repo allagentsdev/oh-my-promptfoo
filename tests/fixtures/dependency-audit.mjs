@@ -2,11 +2,17 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { channel } from "node:diagnostics_channel";
 import { once } from "node:events";
+import fs from "node:fs";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import http from "node:http";
 import https from "node:https";
 import { createRequire, syncBuiltinESMExports } from "node:module";
 import net from "node:net";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { gzipSync } from "node:zlib";
+import { resolve as resolveImport } from "import-meta-resolve";
 
 const mode = process.argv[2];
 const deadline = setTimeout(() => {
@@ -130,6 +136,97 @@ if (mode === "undici") {
     const closed = once(server, "close");
     server.close();
     await closed;
+  }
+}
+
+if (mode === "minimatch") {
+  const promptfooRequire = createRequire(import.meta.resolve("promptfoo"));
+  for (const require of [
+    promptfooRequire,
+    createRequire(import.meta.resolve("@earendil-works/pi-coding-agent")),
+    createRequire(promptfooRequire.resolve("@modelcontextprotocol/server-filesystem/package.json")),
+    createRequire(promptfooRequire.resolve("glob")),
+  ]) {
+    const { Minimatch, minimatch } = require("minimatch");
+    const pattern = Array.from({ length: 8 }, (_, index) => `**/../part${index}/leaf`).join("/");
+    const matcher = new Minimatch(pattern, { optimizationLevel: 2, braceExpandMax: 16 });
+    assert.ok(matcher.set.length <= 16, "Globstar preprocessing exceeded the expansion budget");
+    for (const [path, glob, options, expected] of [
+      ["openai/model-small", "OPENAI/model-*", { nocase: true }, true],
+      ["other/model-small", "openai/model-*", { nocase: true }, false],
+      ["skills/review/SKILL.md", "skills/**/SKILL.md", {}, true],
+      ["skills/review/notes.txt", "**/*.{md,yaml}", {}, false],
+      ["skills/review/SKILL.md", "**/*.{md,yaml}", {}, true],
+      ["src/file.ts", "**/!(*.test).ts", {}, true],
+      ["src/file.test.ts", "**/!(*.test).ts", {}, false],
+      [".private/credentials.json", "**/credentials.json", { dot: true }, true],
+    ])
+      assert.equal(minimatch(path, glob, options), expected, `${path} against ${glob}`);
+  }
+}
+
+if (mode === "glob") {
+  const promptfooRequire = createRequire(import.meta.resolve("promptfoo"));
+  for (const require of [
+    promptfooRequire,
+    createRequire(promptfooRequire.resolve("@modelcontextprotocol/server-filesystem/package.json")),
+  ]) {
+    for (const { Glob, glob, globSync, escape: escapeGlob, hasMagic } of [
+      require("glob"),
+      await import(resolveImport("glob", pathToFileURL(require.resolve("glob/package.json")).href)),
+    ]) {
+      // Published default entries can embed a matcher that dependency overrides do not replace.
+      const pattern = Array.from({ length: 8 }, (_, index) => `**/../part${index}/leaf`).join("/");
+      assert.ok(
+        new Glob(pattern, { braceExpandMax: 16 }).patterns.length <= 16,
+        "Published Glob entry exceeded the pattern expansion budget",
+      );
+      const directory = await mkdtemp(join(tmpdir(), "promptfoo-glob-security-"));
+      try {
+        for (const file of [
+          "cases/a.yaml",
+          "cases/nested/b.csv",
+          "cases/notes.txt",
+          "skip/c.yaml",
+        ]) {
+          const path = join(directory, file);
+          await mkdir(dirname(path), { recursive: true });
+          await writeFile(path, "fixture");
+        }
+        assert.deepEqual(
+          globSync("**/*.{yaml,csv}", {
+            cwd: directory,
+            ignore: ["skip/**"],
+            nodir: true,
+            windowsPathsNoEscape: true,
+          }).sort(),
+          ["cases/a.yaml", "cases/nested/b.csv"],
+        );
+        assert.equal(hasMagic("**/*.yaml"), true);
+        assert.equal(hasMagic(escapeGlob("literal[1].yaml")), false);
+
+        let reads = 0;
+        const controller = new AbortController();
+        const reason = new Error("test-only glob cancellation");
+        const countedFs = {
+          ...fs,
+          readdir(...args) {
+            if (++reads === 1) controller.abort(reason);
+            return fs.readdir(...args);
+          },
+        };
+        await assert.rejects(
+          glob("**", { cwd: directory, signal: controller.signal, fs: countedFs }),
+          (error) => error === reason,
+        );
+        const readsAtRejection = reads;
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        assert.equal(readsAtRejection, 1);
+        assert.equal(reads, readsAtRejection, "Cancelled glob kept reading directories");
+      } finally {
+        await rm(directory, { recursive: true, force: true });
+      }
+    }
   }
 }
 
@@ -302,6 +399,6 @@ if (mode === "azure") {
   assert.equal(requests.length, 0);
 }
 
-assert.ok(["zod", "undici", "azure"].includes(mode));
+assert.ok(["zod", "undici", "azure", "minimatch", "glob"].includes(mode));
 clearTimeout(deadline);
 console.log(JSON.stringify({ mode, securityInvariant: "passed" }));
