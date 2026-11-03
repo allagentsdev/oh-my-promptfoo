@@ -1,0 +1,13 @@
+description: Offline comparison on the same checked-in normalization cases
+prompts:
+  - 'Normalize whitespace in this name. Return only the normalized name, with no quotes or commentary: {{input}}'
+providers:
+  - id: openai:chat:gpt-4.1-mini
+    label: baseline
+    config:
+      temperature: 0
+  - id: openai:chat:gpt-4.1
+    label: candidate
+    config:
+      temperature: 0
+tests: file://cases.yaml

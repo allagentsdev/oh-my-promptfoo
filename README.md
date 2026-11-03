@@ -1,5 +1,8 @@
 # oh-my-promptfoo
 
+Run authored native Promptfoo configs in CI with the reusable [GitHub Action and local reporter](docs/ci-action.md).
+It preserves native selection/scoring, retains private results on failure and reports outcomes, latency, usage and known cost without publishing raw answers.
+
 **An opinionated way to evaluate coding agents and their skills with Promptfoo.**
 
 <p>
@@ -18,10 +21,10 @@ It's a plain Promptfoo package, not a fork or a wrapper. `promptfoo eval`,
 
 ## Quick start
 
-You need Node 22.22 or later and Promptfoo 0.122 or 0.124.
+You need Node 22.22 or later and Promptfoo 0.122, 0.124 or 0.125.
 
 ```sh
-npm install --save-dev promptfoo@0.124.1 oh-my-promptfoo
+npm install --save-dev promptfoo@0.125.1 oh-my-promptfoo
 npm install --save-dev @github/copilot-sdk@1.0.22               # only if you use Copilot
 npm install --save-dev @earendil-works/pi-coding-agent@1.3.0    # only if you use Pi
 ```

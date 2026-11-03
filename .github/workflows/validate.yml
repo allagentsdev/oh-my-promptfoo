@@ -6,6 +6,15 @@ on:
 permissions:
   contents: read
 jobs:
+  native-eval-action:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./
+        with:
+          config: examples/ci/release.yaml
+          args-json: '["--filter-metadata", "suite=required", "--filter-metadata", "language=latin", "--no-cache"]'
   validate:
     runs-on: ubuntu-latest
     timeout-minutes: 15

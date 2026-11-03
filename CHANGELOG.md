@@ -4,6 +4,8 @@
 
 ### Features
 
+* Add a reusable repository-root GitHub Action and local `eval`/`report` CLI with native argument arrays, pinned frozen tooling, private retained results and sanitized case/assertion, latency, candidate/grader usage and cost reports. Missing/error/zero-coverage runs fail closed; native scoring policy stays authoritative. Export the reusable reporter through `oh-my-promptfoo/reporting`.
+
 * Add `pi-sdk` workspace and read-only agent-grader delegates using the maintained optional `@earendil-works/pi-coding-agent@1.3.0` peer, explicit model/credentials and local endpoint support. Isolated in-memory sessions report successful skill-file reads to stock `skill-used` without changing skill authoring.
 * Add adapter-owned schema-version-1 tool inventories with bounded/redacted arguments, explicit completeness and SDK skill-loading names. Copilot includes subagent streams and certifies only clean matched bounded execution; native/Pi retain observations without claiming unsupported completeness.
 * Publish stock Promptfoo JavaScript package assertions `tool-called`, `tool-not-called` and `skill-not-loaded`, with exact/regex names, MCP identity, argument paths and invocation chronology. Missing, malformed or incomplete evidence is a grader error, never a successful absence assertion.

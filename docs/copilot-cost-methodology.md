@@ -10,9 +10,10 @@ Copilot replies carry one of two kinds of cost evidence:
 A consumer can add both, together with native Promptfoo USD costs, into one
 total. This page defines the units, both calculations and the rules for totals.
 
-The package exports this evidence. It converts complete reported session usage to
-USD (below) but never prices tokens or adds amounts across calls; the token-price
-rule and the totals are consumer methodology.
+The package exports this evidence and converts complete reported session usage to
+USD (below). Its optional [local/CI reporter](ci-action.md) applies the token-price
+rule and totals defined here; other consumers can use the same methodology through
+`estimateCopilotCost` from `oh-my-promptfoo/reporting`.
 
 ## Units
 

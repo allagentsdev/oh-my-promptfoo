@@ -9,5 +9,11 @@ export const testEntries = fileURLToPath(
 
 // Spawning TypeScript sources through a loader adds startup time that deadline tests count.
 export default async function setup() {
-  await build({ ...processEntries, outDir: testEntries, clean: true, logLevel: "warn" });
+  await build({
+    ...processEntries,
+    entry: { ...processEntries.entry, assertions: "packages/oh-my-promptfoo/src/assertions.ts" },
+    outDir: testEntries,
+    clean: true,
+    logLevel: "warn",
+  });
 }

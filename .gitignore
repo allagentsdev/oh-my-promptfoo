@@ -125,6 +125,9 @@ dist
 # Stores VSCode versions used for testing VSCode extensions
 .vscode-test
 
+# Private native evaluation results and diagnostics
+.promptfoo-ci/
+
 # pnpm
 .pnpm-store
 
