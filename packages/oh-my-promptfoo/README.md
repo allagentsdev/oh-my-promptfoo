@@ -18,7 +18,8 @@ It's a plain Promptfoo package, not a fork or a wrapper. `promptfoo eval`,
 
 ## Quick start
 
-You need Node 22.22 or later and Promptfoo 0.122 or 0.124.
+You need Node 22.22 or later and Promptfoo 0.122, 0.124 or 0.125.
+The exact prerelease `0.124.1-wtg.6` is also supported; other prereleases are not included.
 
 ```sh
 npm install --save-dev promptfoo@0.124.1 oh-my-promptfoo
