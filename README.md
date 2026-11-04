@@ -18,11 +18,16 @@ It's a plain Promptfoo package, not a fork or a wrapper. `promptfoo eval`,
 
 ## Quick start
 
-You need Node 22.22 or later and Promptfoo 0.122, 0.124 or 0.125.
-The exact prerelease `0.124.1-wtg.6` is also supported; other prereleases are not included.
+You need Node 22.22 or later and an explicitly installed Promptfoo peer.
+Pin both Promptfoo and oh-my-promptfoo in your project. The peer declaration does
+not restrict Promptfoo versions, including vendor-suffixed builds; consumers
+verify compatibility with their chosen versions.
+
+Development tests use Promptfoo 0.125.1; native grading smoke also covers
+0.124.1-wtg.6. These checks do not guarantee every feature or version.
 
 ```sh
-npm install --save-dev promptfoo@0.124.1 oh-my-promptfoo
+npm install --save-dev --save-exact promptfoo@0.125.1 oh-my-promptfoo
 npm install --save-dev @github/copilot-sdk@1.0.22               # only if you use Copilot
 npm install --save-dev @earendil-works/pi-coding-agent@1.3.0    # only if you use Pi
 ```

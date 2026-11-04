@@ -12,7 +12,7 @@
 
 ### Bug Fixes
 
-* **promptfoo:** accept the exact `0.124.1-wtg.6` peer alongside the supported stable ranges without changing grading behavior.
+* **promptfoo:** leave version selection to consumers through an unrestricted required peer, including vendor-suffixed builds, without changing grading behavior.
 * **workspace:** canonicalize declared protected source link targets in the workspace reader so Windows 8.3 short temp paths (`RUNNER~1`) are accepted; undeclared, mismatched and non-symlink sources are still refused.
 * **workspace:** handle Windows `EPERM` while racing to publish an owned root; only a completed ownership marker can establish the concurrent winner, and mismatched root kinds remain rejected.
 * **copilot:** capture bounded final session nano-AIU metrics with versioned units and completeness; export USD usage value only for complete reported totals instead of treating premium-request multipliers as money. Preserve partial/error accounting and distinguish measured zero from unavailable telemetry.
