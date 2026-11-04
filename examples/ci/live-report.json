@@ -1,0 +1,444 @@
+{
+  "recordedAt": "2026-11-04T04:35:43.389Z",
+  "model": "deepseek/deepseek-v4.1-flash",
+  "workspaceCommit": "d04f4c7304a6d94a439f4faa78b842f3235474aa",
+  "configSha256": "7cb90efc04d64eee17b71653f483382443da64198d088702e35ca082264182f8",
+  "report": {
+    "version": 1,
+    "suite": {
+      "number": 2,
+      "title": "Repository agent skill regression"
+    },
+    "status": "pass",
+    "issues": [],
+    "counts": {
+      "pass": 6,
+      "fail": 0,
+      "error": 0,
+      "unknown": 0
+    },
+    "cases": [
+      {
+        "row": 1,
+        "test": 1,
+        "column": 1,
+        "label": "Author a native exact-match smoke config using the repository skill",
+        "candidate": "Pi / deepseek/deepseek-v4.1-flash",
+        "status": "pass",
+        "score": 1,
+        "latencyMs": 15979,
+        "candidateUsage": {
+          "total": 15671,
+          "prompt": 15462,
+          "completion": 209,
+          "cached": 7552,
+          "requests": 3
+        },
+        "graderUsage": {
+          "total": null,
+          "prompt": null,
+          "completion": null,
+          "cached": null,
+          "requests": null
+        },
+        "candidateCost": {
+          "usd": 0.0002368224,
+          "basis": "native"
+        },
+        "graderCost": {
+          "usd": null,
+          "basis": null
+        },
+        "assertions": [
+          {
+            "reference": "1",
+            "type": "skill-used",
+            "label": "skill-use",
+            "status": "pass",
+            "score": 1,
+            "threshold": null
+          },
+          {
+            "reference": "2",
+            "type": "javascript",
+            "label": "artifact-contract",
+            "status": "pass",
+            "score": 1,
+            "threshold": null
+          },
+          {
+            "reference": "3",
+            "type": "javascript",
+            "label": "workspace-review",
+            "status": "pass",
+            "score": 1,
+            "threshold": null
+          },
+          {
+            "reference": "3.1",
+            "type": "llm-rubric",
+            "label": "verified-artifact",
+            "status": "pass",
+            "score": 1,
+            "threshold": 1
+          }
+        ]
+      },
+      {
+        "row": 2,
+        "test": 2,
+        "column": 1,
+        "label": "Identify the package's provider and workspace grader from its own docs",
+        "candidate": "Pi / deepseek/deepseek-v4.1-flash",
+        "status": "pass",
+        "score": 1,
+        "latencyMs": 30266,
+        "candidateUsage": {
+          "total": 24650,
+          "prompt": 24209,
+          "completion": 441,
+          "cached": 2688,
+          "requests": 3
+        },
+        "graderUsage": {
+          "total": null,
+          "prompt": null,
+          "completion": null,
+          "cached": null,
+          "requests": null
+        },
+        "candidateCost": {
+          "usd": 0.00045599616000000003,
+          "basis": "native"
+        },
+        "graderCost": {
+          "usd": null,
+          "basis": null
+        },
+        "assertions": [
+          {
+            "reference": "1",
+            "type": "skill-used",
+            "label": "skill-use",
+            "status": "pass",
+            "score": 1,
+            "threshold": null
+          },
+          {
+            "reference": "2",
+            "type": "javascript",
+            "label": "artifact-contract",
+            "status": "pass",
+            "score": 1,
+            "threshold": null
+          },
+          {
+            "reference": "3",
+            "type": "javascript",
+            "label": "workspace-review",
+            "status": "pass",
+            "score": 1,
+            "threshold": null
+          },
+          {
+            "reference": "3.1",
+            "type": "llm-rubric",
+            "label": "verified-artifact",
+            "status": "pass",
+            "score": 1,
+            "threshold": 1
+          }
+        ]
+      },
+      {
+        "row": 3,
+        "test": 3,
+        "column": 1,
+        "label": "Preserve repeated metadata filters in a CI command",
+        "candidate": "Pi / deepseek/deepseek-v4.1-flash",
+        "status": "pass",
+        "score": 1,
+        "latencyMs": 27043,
+        "candidateUsage": {
+          "total": 16688,
+          "prompt": 16370,
+          "completion": 318,
+          "cached": 2048,
+          "requests": 3
+        },
+        "graderUsage": {
+          "total": null,
+          "prompt": null,
+          "completion": null,
+          "cached": null,
+          "requests": null
+        },
+        "candidateCost": {
+          "usd": 0.00032251392,
+          "basis": "native"
+        },
+        "graderCost": {
+          "usd": null,
+          "basis": null
+        },
+        "assertions": [
+          {
+            "reference": "1",
+            "type": "skill-used",
+            "label": "skill-use",
+            "status": "pass",
+            "score": 1,
+            "threshold": null
+          },
+          {
+            "reference": "2",
+            "type": "javascript",
+            "label": "artifact-contract",
+            "status": "pass",
+            "score": 1,
+            "threshold": null
+          },
+          {
+            "reference": "3",
+            "type": "javascript",
+            "label": "workspace-review",
+            "status": "pass",
+            "score": 1,
+            "threshold": null
+          },
+          {
+            "reference": "3.1",
+            "type": "llm-rubric",
+            "label": "verified-artifact",
+            "status": "pass",
+            "score": 1,
+            "threshold": 1
+          }
+        ]
+      },
+      {
+        "row": 4,
+        "test": 4,
+        "column": 1,
+        "label": "Give the candidate file access and keep the grader read-only",
+        "candidate": "Pi / deepseek/deepseek-v4.1-flash",
+        "status": "pass",
+        "score": 1,
+        "latencyMs": 12977,
+        "candidateUsage": {
+          "total": 59889,
+          "prompt": 59401,
+          "completion": 488,
+          "cached": 41472,
+          "requests": 5
+        },
+        "graderUsage": {
+          "total": null,
+          "prompt": null,
+          "completion": null,
+          "cached": null,
+          "requests": null
+        },
+        "candidateCost": {
+          "usd": 0.00067857984,
+          "basis": "native"
+        },
+        "graderCost": {
+          "usd": null,
+          "basis": null
+        },
+        "assertions": [
+          {
+            "reference": "1",
+            "type": "skill-used",
+            "label": "skill-use",
+            "status": "pass",
+            "score": 1,
+            "threshold": null
+          },
+          {
+            "reference": "2",
+            "type": "javascript",
+            "label": "artifact-contract",
+            "status": "pass",
+            "score": 1,
+            "threshold": null
+          },
+          {
+            "reference": "3",
+            "type": "javascript",
+            "label": "workspace-review",
+            "status": "pass",
+            "score": 1,
+            "threshold": null
+          },
+          {
+            "reference": "3.1",
+            "type": "llm-rubric",
+            "label": "verified-artifact",
+            "status": "pass",
+            "score": 1,
+            "threshold": 1
+          }
+        ]
+      },
+      {
+        "row": 5,
+        "test": 5,
+        "column": 1,
+        "label": "Author reproducible native sampling arguments for a baseline",
+        "candidate": "Pi / deepseek/deepseek-v4.1-flash",
+        "status": "pass",
+        "score": 1,
+        "latencyMs": 7630,
+        "candidateUsage": {
+          "total": 16608,
+          "prompt": 16319,
+          "completion": 289,
+          "cached": 7936,
+          "requests": 3
+        },
+        "graderUsage": {
+          "total": null,
+          "prompt": null,
+          "completion": null,
+          "cached": null,
+          "requests": null
+        },
+        "candidateCost": {
+          "usd": 0.00029922048000000003,
+          "basis": "native"
+        },
+        "graderCost": {
+          "usd": null,
+          "basis": null
+        },
+        "assertions": [
+          {
+            "reference": "1",
+            "type": "skill-used",
+            "label": "skill-use",
+            "status": "pass",
+            "score": 1,
+            "threshold": null
+          },
+          {
+            "reference": "2",
+            "type": "javascript",
+            "label": "artifact-contract",
+            "status": "pass",
+            "score": 1,
+            "threshold": null
+          },
+          {
+            "reference": "3",
+            "type": "javascript",
+            "label": "workspace-review",
+            "status": "pass",
+            "score": 1,
+            "threshold": null
+          },
+          {
+            "reference": "3.1",
+            "type": "llm-rubric",
+            "label": "verified-artifact",
+            "status": "pass",
+            "score": 1,
+            "threshold": 1
+          }
+        ]
+      },
+      {
+        "row": 6,
+        "test": 6,
+        "column": 1,
+        "label": "Require both skill use and valid JSON in an authored test",
+        "candidate": "Pi / deepseek/deepseek-v4.1-flash",
+        "status": "pass",
+        "score": 1,
+        "latencyMs": 12430,
+        "candidateUsage": {
+          "total": 71897,
+          "prompt": 71344,
+          "completion": 553,
+          "cached": 40832,
+          "requests": 6
+        },
+        "graderUsage": {
+          "total": null,
+          "prompt": null,
+          "completion": null,
+          "cached": null,
+          "requests": null
+        },
+        "candidateCost": {
+          "usd": 0.0007944019199999999,
+          "basis": "native"
+        },
+        "graderCost": {
+          "usd": null,
+          "basis": null
+        },
+        "assertions": [
+          {
+            "reference": "1",
+            "type": "skill-used",
+            "label": "skill-use",
+            "status": "pass",
+            "score": 1,
+            "threshold": null
+          },
+          {
+            "reference": "2",
+            "type": "javascript",
+            "label": "artifact-contract",
+            "status": "pass",
+            "score": 1,
+            "threshold": null
+          },
+          {
+            "reference": "3",
+            "type": "javascript",
+            "label": "workspace-review",
+            "status": "pass",
+            "score": 1,
+            "threshold": null
+          },
+          {
+            "reference": "3.1",
+            "type": "llm-rubric",
+            "label": "verified-artifact",
+            "status": "pass",
+            "score": 1,
+            "threshold": 1
+          }
+        ]
+      }
+    ],
+    "totals": {
+      "latencyMs": 106325,
+      "candidateUsage": {
+        "total": 205403,
+        "prompt": 203105,
+        "completion": 2298,
+        "cached": 102528,
+        "requests": 23
+      },
+      "graderUsage": {
+        "total": null,
+        "prompt": null,
+        "completion": null,
+        "cached": null,
+        "requests": null
+      },
+      "candidateCost": {
+        "usd": 0.00278753472,
+        "basis": "native"
+      },
+      "graderCost": {
+        "usd": null,
+        "basis": null
+      }
+    }
+  }
+}

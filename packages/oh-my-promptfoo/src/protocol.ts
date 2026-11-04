@@ -15,7 +15,10 @@ import {
 import { resolve as resolveImport } from "import-meta-resolve";
 import { closed, type DelegateId, type JsonObject, object, validateEnv } from "./config.js";
 import { copilotFailure } from "./copilot-accounting.js";
+import { redact, secrets } from "./redaction.js";
 import { attachToolInventory, toolInventory } from "./tool-inventory.js";
+
+export { redact, secrets } from "./redaction.js";
 
 export const MAX_FRAME_BYTES = 16 * 1024 * 1024;
 export const MAX_STDERR_BYTES = 64 * 1024;
@@ -120,42 +123,6 @@ export function wireContext(input: unknown): JsonObject {
   for (const key of ["traceparent", "tracestate"]) if (carrier[key]) result[key] = carrier[key];
   jsonSafe(result);
   return result;
-}
-export function secrets(config: JsonObject, env: Record<string, string>): string[] {
-  const result = Object.entries(env)
-    .filter(([k]) => /KEY|TOKEN|SECRET|PASSWORD|AUTH|HEADERS/i.test(k))
-    .map(([, v]) => v);
-  for (const [key, value] of Object.entries(env))
-    if (/HEADERS/i.test(key)) {
-      for (const header of value.split(",")) {
-        const idx = header.indexOf("=");
-        if (idx > 0) {
-          try {
-            result.push(decodeURIComponent(header.slice(idx + 1)));
-          } catch {
-            result.push(header.slice(idx + 1));
-          }
-        }
-      }
-    }
-  function visit(v: unknown): void {
-    if (!v || typeof v !== "object") return;
-    for (const [k, x] of Object.entries(v))
-      if (/apiKey|token|password|secret/i.test(k) && typeof x === "string") result.push(x);
-      else visit(x);
-  }
-  visit(config);
-  return [...new Set(result.filter(Boolean))].sort((a, b) => b.length - a.length);
-}
-export function redact(value: string, sensitive: string[]): string {
-  let result = value;
-  for (const secret of sensitive) {
-    result = result.split(secret).join("[REDACTED]");
-    result = result.split(JSON.stringify(secret).slice(1, -1)).join("[REDACTED]");
-    result = result.split(encodeURIComponent(secret)).join("[REDACTED]");
-  }
-  // Restrict to the authority, greedily consuming userinfo through its final @.
-  return result.replace(/(https?:\/\/)[^\s/?#"<>\\]*@/gi, "$1[REDACTED]@");
 }
 export function minimalEnvironment(env: Record<string, string>): NodeJS.ProcessEnv {
   const output: NodeJS.ProcessEnv = {};

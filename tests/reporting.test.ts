@@ -54,7 +54,7 @@ const row = (overrides: Record<string, any> = {}) => ({
   ...overrides,
 });
 const document = (rows: any[], stats?: any) => ({
-  config: { env: { TOKEN: "PRIVATE_CREDENTIAL" } },
+  config: { env: { TOKEN: "PRIVATE_CREDENTIAL" } as Record<string, string> },
   results: {
     results: rows,
     stats: stats ?? {
@@ -83,7 +83,7 @@ test("reports native verdicts without reapplying thresholds or leaking raw field
   assert.deepEqual(report.counts, { pass: 1, fail: 1, error: 0, unknown: 0 });
   assert.equal(report.cases[0].assertions[0].status, "fail");
   const rendered = renderSummary(report);
-  assert.ok(rendered.includes("| 1 | 1 | 1 | pass |"));
+  assert.ok(rendered.includes("| Test 1.1 | ✅ PASS | 10 ms | 1 / 2 |"));
   assert.ok(!JSON.stringify(report).includes("PRIVATE_"));
   assert.ok(!rendered.includes("PRIVATE_"));
   // The explicit native suite policy can allow assertion failures; errors never qualify.
@@ -245,7 +245,7 @@ test("Copilot estimates follow recorded tiers, cache writes and model provenance
     ]),
   );
   assert.equal(report.totals.candidateCost.basis, "estimate");
-  assert.ok(renderSummary(report).includes("~$0.00014500"));
+  assert.ok(renderSummary(report).includes("~$0.000145"));
 });
 
 test("batch diagnostic children are shown once and do not duplicate judge spend", () => {
@@ -296,4 +296,134 @@ test("large summaries are bounded while normalized outcomes stay complete", () =
   assert.ok(Buffer.byteLength(markdown) < 810000);
   assert.ok(markdown.includes("Summary truncated"));
   assert.equal(report.cases.length, 15000);
+});
+
+test("suite and result numbers match the table and details while named checks use their metrics", () => {
+  const input = document(
+    Array.from({ length: 6 }, (_, index) =>
+      row({
+        testIdx: index + 20,
+        testCase: { description: `Repository task ${index + 1}` },
+        provider: { id: "PRIVATE_PROVIDER", label: "Free candidate" },
+        gradingResult: {
+          pass: true,
+          score: 1,
+          componentResults: [
+            {
+              ...assertion(),
+              assertion: { type: "equals", metric: "Artifact contract", value: "PRIVATE_EXPECTED" },
+            },
+          ],
+        },
+      }),
+    ),
+  );
+  input.config = { ...input.config, description: "Repository skill regression" } as any;
+  const report = summarizeEvaluation(input, 0, { suiteNumber: 2, publicLabels: true });
+  const markdown = renderSummary(report);
+  assert.ok(markdown.includes("Suite 2 · Repository skill regression"));
+  assert.ok(markdown.includes("| Test 2.6 · Repository task 6 (Free candidate) | ✅ PASS |"));
+  assert.ok(
+    markdown.includes("<summary>Test 2.6 · Repository task 6 (Free candidate) — ✅ PASS</summary>"),
+  );
+  assert.ok(markdown.includes("| Artifact contract | equals | ✅ PASS | 100% |"));
+  assert.ok(!markdown.includes("2.6/A1"));
+  assert.equal(report.cases[5].test, 26);
+  assert.equal(report.cases[5].row, 6);
+  assert.ok(!JSON.stringify(report).includes("PRIVATE_"));
+  for (const suiteNumber of [0, -1, 1.5, Number.NaN, Number.MAX_SAFE_INTEGER + 1])
+    assert.throws(() => summarizeEvaluation(input, 0, { suiteNumber }), /Suite number/);
+});
+
+test("public labels are bounded, escaped and credential-redacted without publishing private results", () => {
+  const credential = "credential-canary-abc123";
+  const input = document([
+    row({
+      testCase: {
+        description: `Read | </summary><script>alert(1)</script> [link](url) ${credential}\n${"x".repeat(500)}`,
+      },
+      provider: { id: "PRIVATE_PROVIDER", label: "https://user:password@example.test" },
+      gradingResult: {
+        pass: true,
+        score: 1,
+        componentResults: [
+          {
+            ...assertion(),
+            assertion: { type: "file://PRIVATE_PATH", metric: "Public check" },
+          },
+        ],
+      },
+    }),
+  ]);
+  input.config.env.OPENAI_API_KEY = credential;
+  const report = summarizeEvaluation(input, 0, { publicLabels: true });
+  const markdown = renderSummary(report);
+  assert.ok(!JSON.stringify(report).includes(credential));
+  assert.ok(!JSON.stringify(report).includes("PRIVATE_"));
+  assert.ok(report.cases[0].label!.length <= 160);
+  assert.ok(markdown.includes("&#124;") && markdown.includes("&lt;/summary&gt;"));
+  assert.ok(!markdown.includes("<script>") && !markdown.includes("user:password"));
+  assert.ok(markdown.includes("Public check | custom"));
+});
+
+test("assertion types require public-label consent and credential redaction", () => {
+  const credential = "credential-canary-abc123";
+  const input = document([
+    row({
+      gradingResult: {
+        pass: true,
+        score: 1,
+        componentResults: [{ ...assertion(), assertion: { type: credential } }],
+      },
+    }),
+  ]);
+  input.config.env.OPENAI_API_KEY = credential;
+  for (const publicLabels of [false, true]) {
+    const report = summarizeEvaluation(input, 0, { publicLabels });
+    assert.equal(report.cases[0].assertions[0].type, "custom");
+    assert.ok(!JSON.stringify(report).includes(credential));
+    assert.ok(!renderSummary(report).includes(credential));
+  }
+});
+
+test("only unnamed and duplicate check metrics need a numbered fallback", () => {
+  const report = summarizeEvaluation(
+    document([
+      row({
+        gradingResult: {
+          pass: true,
+          score: 1,
+          componentResults: [
+            { ...assertion(), assertion: { type: "equals", metric: "correctness" } },
+            { ...assertion(), assertion: { type: "contains", metric: "correctness" } },
+            { ...assertion(), assertion: { type: "is-json" } },
+          ],
+        },
+      }),
+    ]),
+    0,
+    { publicLabels: true },
+  );
+  const markdown = renderSummary(report);
+  assert.ok(markdown.includes("| correctness (check 1) | equals |"));
+  assert.ok(markdown.includes("| correctness (check 2) | contains |"));
+  assert.ok(markdown.includes("| Check 3 | is-json |"));
+  assert.ok(!markdown.includes("/A"));
+});
+
+test("display rounding preserves native scores and never rounds a positive spend to free", () => {
+  const report = summarizeEvaluation(
+    document([
+      row({
+        score: 1 / 3,
+        latencyMs: 19119,
+        response: { cost: 0.0000000001 },
+      }),
+    ]),
+  );
+  const markdown = renderSummary(report);
+  assert.ok(markdown.includes("33.3%") && markdown.includes("19.1 s"));
+  assert.ok(markdown.includes("&lt;$0.00000001"));
+  assert.equal(report.cases[0].score, 1 / 3);
+  assert.equal(report.cases[0].candidateCost.usd, 0.0000000001);
 });

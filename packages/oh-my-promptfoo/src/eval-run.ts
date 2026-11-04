@@ -13,9 +13,15 @@ import {
 import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
-import { type EvaluationReport, renderSummary, summarizeEvaluation } from "./reporting.js";
+import { secrets } from "./redaction.js";
+import {
+  type EvaluationReport,
+  type ReportOptions,
+  renderSummary,
+  summarizeEvaluation,
+} from "./reporting.js";
 
-export interface EvaluationOptions {
+export interface EvaluationOptions extends ReportOptions {
   config: string;
   outputDirectory: string;
   workingDirectory?: string;
@@ -142,7 +148,7 @@ async function promptfooExecutable(): Promise<string> {
   }
 }
 
-async function files(outputDirectory: string): Promise<EvaluationRun> {
+async function files(outputDirectory: string, options: ReportOptions): Promise<EvaluationRun> {
   await mkdir(outputDirectory, { recursive: true });
   const directory = await mkdtemp(join(outputDirectory, "run-"));
   return {
@@ -153,18 +159,42 @@ async function files(outputDirectory: string): Promise<EvaluationRun> {
     summaryPath: join(directory, "summary.md"),
     resultsAvailable: false,
     exitCode: null,
-    report: summarizeEvaluation(undefined, null),
+    report: summarizeEvaluation(undefined, null, options),
   };
 }
 
-async function readResults(run: EvaluationRun, exitCode?: number | null): Promise<void> {
+async function readResults(
+  run: EvaluationRun,
+  options: ReportOptions,
+  exitCode?: number | null,
+): Promise<void> {
   try {
     const document = JSON.parse(await readFile(run.resultPath, "utf8"));
     run.resultsAvailable = true;
-    run.report = summarizeEvaluation(document, exitCode);
+    run.report = summarizeEvaluation(document, exitCode, options);
   } catch {
-    run.report = summarizeEvaluation(undefined, exitCode);
+    run.report = summarizeEvaluation(undefined, exitCode, options);
   }
+}
+
+function reportingOptions(options: ReportOptions): ReportOptions {
+  return {
+    suiteNumber: options.suiteNumber,
+    publicLabels: options.publicLabels,
+    sensitiveValues: options.publicLabels
+      ? [
+          ...(options.sensitiveValues ?? []),
+          ...secrets(
+            {},
+            Object.fromEntries(
+              Object.entries(process.env).filter(
+                (entry): entry is [string, string] => typeof entry[1] === "string",
+              ),
+            ),
+          ),
+        ]
+      : [],
+  };
 }
 
 async function finish(run: EvaluationRun, github: boolean): Promise<EvaluationRun> {
@@ -200,7 +230,8 @@ async function finish(run: EvaluationRun, github: boolean): Promise<EvaluationRu
 /** Run one authored config through the installed peer's native CLI, retaining output on failure. */
 export async function runEvaluation(options: EvaluationOptions): Promise<EvaluationRun> {
   const cwd = resolve(options.workingDirectory || process.cwd());
-  const run = await files(resolve(cwd, options.outputDirectory));
+  const reporting = reportingOptions(options);
+  const run = await files(resolve(cwd, options.outputDirectory), reporting);
   const log = await open(run.logPath, "wx", 0o600);
   try {
     const args = options.args === undefined ? [] : options.args;
@@ -242,11 +273,11 @@ export async function runEvaluation(options: EvaluationOptions): Promise<Evaluat
       child.once("error", reject);
       child.once("close", (code) => resolveExit(code));
     });
-    await readResults(run, run.exitCode);
+    await readResults(run, reporting, run.exitCode);
     if (run.resultsAvailable) await chmod(run.resultPath, 0o600);
   } catch (error) {
     await log.write(error instanceof Error ? `${error.stack}\n` : "Evaluation setup failed\n");
-    run.report = summarizeEvaluation(undefined, null);
+    run.report = summarizeEvaluation(undefined, null, reporting);
   } finally {
     await log.close();
   }
@@ -257,10 +288,12 @@ export async function runEvaluation(options: EvaluationOptions): Promise<Evaluat
 export async function reportEvaluation(
   resultPath: string,
   outputDirectory: string,
+  options: ReportOptions = {},
 ): Promise<EvaluationRun> {
-  const run = await files(resolve(outputDirectory));
+  const reporting = reportingOptions(options);
+  const run = await files(resolve(outputDirectory), reporting);
   run.resultPath = resolve(resultPath);
-  await readResults(run);
+  await readResults(run, reporting);
   return finish(run, false);
 }
 
@@ -274,6 +307,8 @@ export async function evaluationCommand(command: "eval" | "report", args: string
     command === "eval"
       ? new Set(["--config", "--output-dir", "--working-directory", "--args-json", "--args-file"])
       : new Set(["--results", "--output-dir"]);
+  valid.add("--suite-number");
+  valid.add("--public-labels");
   for (let i = 0; i < own.length; i++) {
     const option = own[i];
     if (option === "--github" && command === "eval") {
@@ -285,6 +320,12 @@ export async function evaluationCommand(command: "eval" | "report", args: string
     values.set(option, own[++i]);
   }
   const output = values.get("--output-dir") || ".promptfoo-ci";
+  const suite = values.get("--suite-number") ?? "1";
+  const labels = values.get("--public-labels") ?? "false";
+  if (!/^[1-9]\d*$/.test(suite) || !Number.isSafeInteger(Number(suite)))
+    throw new Error("Suite number must be a positive safe integer");
+  if (!["true", "false"].includes(labels)) throw new Error("public-labels must be true or false");
+  const reporting = { suiteNumber: Number(suite), publicLabels: labels === "true" };
   let run: EvaluationRun;
   if (command === "eval") {
     const config = values.get("--config");
@@ -317,11 +358,12 @@ export async function evaluationCommand(command: "eval" | "report", args: string
       workingDirectory: values.get("--working-directory"),
       args: parsed as string[],
       github,
+      ...reporting,
     });
   } else {
     const results = values.get("--results");
     if (!results || native.length) throw new Error("One native result is required");
-    run = await reportEvaluation(results, output);
+    run = await reportEvaluation(results, output, reporting);
   }
   console.log(
     `Promptfoo: ${run.report.status}; pass=${run.report.counts.pass}, fail=${run.report.counts.fail}, error=${run.report.counts.error}`,

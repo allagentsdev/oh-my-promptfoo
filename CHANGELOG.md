@@ -4,7 +4,9 @@
 
 ### Features
 
-* Add manually triggered live dogfooding of the repository's skill, workspace Agent and read-only agentAssert through a free OpenRouter model. Keep fixed native cases, exact artifact checks, free-model preflight and sanitized Action reporting.
+* Make CI summaries readable with numbered suites/tests, opt-in public authored labels, compact metrics/results tables and expandable assertions. Add a recorded six-task real agent example for reviewing the format before merge; preserve native scores and unknown measurements.
+
+* Add manually triggered live dogfooding of the repository's skill, workspace Agent and read-only agentAssert through OpenRouter. Select both candidate and grader with the `OPENROUTER_MODEL` repository variable; keep the API key in a secret. Keep fixed native cases, exact artifact checks, model-availability preflight and sanitized Action reporting.
 
 * Add a reusable repository-root GitHub Action and local `eval`/`report` CLI with native argument arrays, pinned frozen tooling, private retained results and sanitized case/assertion, latency, candidate/grader usage and cost reports. Missing/error/zero-coverage runs fail closed; native scoring policy stays authoritative. Export the reusable reporter through `oh-my-promptfoo/reporting`.
 

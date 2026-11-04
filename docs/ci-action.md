@@ -12,6 +12,46 @@ Actions use commit pins. Pin this Action to a reviewed commit too; stable `vX.Y.
 tags follow the package's [release process](releasing.md). There is no automatic
 major-version Action tag or floating-toolchain option.
 
+## Readable reports and suite numbers
+
+The summary starts with a metrics table and a short results table. Each test has
+an expandable section containing its assertion outcomes and measured accounting.
+Scores are displayed as rounded percentages and native candidate latency in seconds or minutes;
+the native values remain unchanged in `report.json`.
+
+Set `suite-number` to a positive integer unique among the Action invocations in
+your workflow. **Test 2.6** is the sixth evaluated result row in **Suite 2**. That
+same number appears in the results table and its expandable details. Checks use
+their authored metric names; only unnamed or duplicate metrics need a numbered
+fallback within that test. Separate candidates and repeats each get their own
+result number. The JSON retains the native row/test/column mapping. These are
+report references, not case IDs or a selection language.
+
+Readable authored labels are opt-in:
+
+```yaml
+- uses: allagentsdev/oh-my-promptfoo@<reviewed-commit>
+  with:
+    config: evals/release.yaml
+    suite-number: '2'
+    public-labels: 'true'
+```
+
+`public-labels: 'true'` publishes the native config's `description`, each test's
+`description`, provider `label`, assertion `metric` and assertion `type`. Enable
+it only for labels approved for the summary's audience. Labels are bounded, escaped and redacted
+using known config/environment credential values. The default is `false`; raw
+answers, assertion values, grader reasons, generated files and provider IDs are
+never used as labels.
+
+For a formatting example before the live workflow is merged, the **Validate**
+job publishes a clearly labelled recorded six-case agent run from
+[`examples/ci/live-report.json`](../examples/ci/live-report.json). It contains only
+the sanitized report and provenance of an actual model run. Its displayed
+failures are the recorded model results; previewing it makes no inference calls
+and does not claim to evaluate the current commit. Render the same sample locally
+after building with `node packages/oh-my-promptfoo/evals/live/preview.mjs`.
+
 ## Release regression
 
 This runs the complete fixed required suite. No sample, range or first-N filter is
@@ -59,25 +99,37 @@ dogfood → Run workflow** and select the reviewed ref to evaluate. It uses this
 checkout's Action and built package, not an older registry release.
 
 The fixed suite in `packages/oh-my-promptfoo/evals/live/promptfooconfig.yaml`
-runs the real Pi SDK through OpenRouter with `cohere/north-mini-code:free` for
-both the candidate and read-only `agentAssert` grader. It stages the selected
-Git commit as a protected source, loads the repository's `oh-my-promptfoo` skill,
-and asks the candidate to author a native smoke config and identify the package's
-provider/grader contract. Captured files must exactly match the checked-in
+runs the real Pi SDK through OpenRouter. Both the candidate and read-only
+`agentAssert` grader use the repository variable **`OPENROUTER_MODEL`**. Set it to
+`deepseek/deepseek-v4.1-flash`, or another tool-capable model supported by the
+pinned SDK. The selected model may incur charges. Changing the variable affects
+the next manual run without changing the authored tasks or scoring. The report
+labels include the selected model. The suite stages the selected Git commit as a
+protected source, loads the repository's `oh-my-promptfoo` skill,
+and asks the candidate to author configs and commands for real repository tasks:
+an exact-match smoke config, package provider/grader IDs, repeated metadata
+filters, candidate/grader permissions, seeded comparison arguments and required
+skill/JSON checks. Captured files must exactly match the checked-in
 expected data; stock `skill-used` and the live workspace grader must pass too.
-The full two-case suite runs without sampling or response caching.
+The full six-case suite runs without sampling or response caching. Candidate and
+grader calls each have a 45-second deadline. This workflow disables Promptfoo's
+adaptive scheduler so rate limits become reported errors without retrying whole
+agent tasks and exhausting the 15-minute job budget. Its public
+descriptions and assertion metrics are included in the numbered report.
 
-Store the OpenRouter key in the repository secret **`OPENROUTER_API_KEY`**:
+Set the model variable and store the key in the repository secret
+**`OPENROUTER_API_KEY`** under **Settings → Secrets and variables → Actions**:
 
 ```sh
+gh variable set OPENROUTER_MODEL --body deepseek/deepseek-v4.1-flash --repo allagentsdev/oh-my-promptfoo
 gh secret set OPENROUTER_API_KEY --repo allagentsdev/oh-my-promptfoo
 ```
 
-This prompts locally; do not put the value in workflow inputs or committed YAML.
+The secret command prompts locally; do not put the key in workflow inputs or committed YAML.
 The preflight checks both model declarations against the current OpenRouter
-catalog and pinned SDK. Missing credentials, a removed/non-free model, unavailable
-catalog or model-call failures fail the job. There is no paid-model fallback.
-Free service rate limits and capacity can still make a run fail. A shared model
+catalog and pinned SDK. Missing settings, a removed/unsupported model, unavailable
+catalog or model-call failures fail the job. There is no automatic model fallback.
+Service rate limits and capacity can still make a run fail. A shared model
 for candidate and grader is a smoke test of the integration, not an independent
 assessment of model quality.
 
@@ -97,9 +149,12 @@ pnpm build
 export DOGFOOD_REPOSITORY="file://$PWD"
 export DOGFOOD_REF="$(git rev-parse HEAD)"
 export PROMPTFOO_CACHE_ENABLED=false
+export PROMPTFOO_DISABLE_ADAPTIVE_SCHEDULER=true
+export OPENROUTER_MODEL=deepseek/deepseek-v4.1-flash
 node scripts/check-live-agent-eval.mjs
 node packages/oh-my-promptfoo/dist/cli.js eval \
-  --config packages/oh-my-promptfoo/evals/live/promptfooconfig.yaml -- \
+  --config packages/oh-my-promptfoo/evals/live/promptfooconfig.yaml \
+  --suite-number 1 --public-labels true -- \
   --no-cache --max-concurrency 1
 ```
 
@@ -122,7 +177,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        candidate: [baseline, candidate]
+        include:
+          - { candidate: baseline, suite: 1 }
+          - { candidate: candidate, suite: 2 }
     steps:
       - uses: actions/checkout@v7
       - uses: ./
@@ -131,6 +188,8 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         with:
           config: examples/ci/comparison.yaml
+          suite-number: ${{ matrix.suite }}
+          public-labels: 'true'
           args-json: >-
             ["--filter-providers", "^${{ matrix.candidate }}$",
              "--filter-metadata", "suite=required", "--filter-metadata", "language=latin",
@@ -223,11 +282,13 @@ the authored scoring policy; see [required assertions](grading-guide.md).
 | `log-path` | Native stdout/stderr, **potentially sensitive**. |
 | `report-path`, `summary-path` | Sanitized JSON and Markdown reports. |
 
-The GitHub step summary contains counts, numeric row/test/column references,
-assertion-tree references, native scores/thresholds, latency and measured usage
-and cost. References are one-based: row 1 is `results.results[0]`, and test/column
-are `testIdx + 1`/`promptIdx + 1`. Labels, descriptions, metadata, assertion values,
-answers, grader reasons, generated files, provider IDs and credentials are omitted.
+The GitHub step summary contains counts, numbered test references, assertion
+outcomes, native scores/thresholds, latency and measured usage and cost. Test
+numbers combine the caller's suite number with the one-based result row. Native
+row 1 is `results.results[0]`; the detailed test/column references are
+`testIdx + 1`/`promptIdx + 1`. Authored labels are omitted unless `public-labels`
+is enabled as described above. Other metadata, assertion values, answers, grader
+reasons, generated files, provider IDs and credentials are omitted.
 Long summaries are bounded; `report.json` retains all sanitized outcomes. No public
 share, comment or artifact upload occurs. Native stdout/stderr goes only to the
 private log, even with debug enabled.
@@ -281,6 +342,7 @@ your lockfile, the same runner and reporter work locally:
 allagents-promptfoo eval --config examples/ci/release.yaml --output-dir .promptfoo-ci -- \
   --filter-metadata suite=required --filter-metadata language=latin --no-cache
 allagents-promptfoo report --results .promptfoo-ci/run-ABC123/results.json --output-dir .promptfoo-ci
+allagents-promptfoo report --results .promptfoo-ci/run-ABC123/results.json --suite-number 2 --public-labels true
 allagents-promptfoo eval --config examples/ci/release.yaml --args-file /private/native-args.json
 ```
 
@@ -291,6 +353,11 @@ source checkout, run `pnpm install --frozen-lockfile`, `pnpm build`, then replac
 invocation; without a process exit code it conservatively gates on native row
 outcomes. Programmatic consumers can import `summarizeEvaluation`, `renderSummary`
 and `estimateCopilotCost` from `oh-my-promptfoo/reporting`.
+`summarizeEvaluation(document, exitCode, { suiteNumber: 2, publicLabels: true })`
+opts into the same numbered public labels; programmatic callers can supply
+additional `sensitiveValues` for redaction. The CLI also uses known credential
+values from its environment. These reporting options belong before the `--`
+separator; arguments after it still go unchanged to Promptfoo.
 
 The [official Action's inputs](https://github.com/promptfoo/promptfoo-action/blob/main/action.yml)
 and [implementation](https://github.com/promptfoo/promptfoo-action/blob/main/src/main.ts)

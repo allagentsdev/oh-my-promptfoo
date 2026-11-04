@@ -19,6 +19,12 @@ inputs:
   output-directory:
     description: Local artifact parent directory, relative to working-directory; each invocation creates a fresh child
     default: '.promptfoo-ci'
+  suite-number:
+    description: Positive suite number, unique within the caller workflow; test 2.6 means suite 2 result row 6
+    default: '1'
+  public-labels:
+    description: Publish authored suite/test descriptions, provider labels and assertion metric names; keep false for private labels
+    default: 'false'
 outputs:
   result-path:
     description: Absolute native JSON path; check results-available before reading
@@ -83,7 +89,10 @@ runs:
         OMP_ARGS_FILE: ${{ inputs.args-file }}
         OMP_WORKING_DIRECTORY: ${{ inputs.working-directory }}
         OMP_OUTPUT_DIRECTORY: ${{ inputs.output-directory }}
+        OMP_SUITE_NUMBER: ${{ inputs.suite-number }}
+        OMP_PUBLIC_LABELS: ${{ inputs.public-labels }}
       run: |
         node "$OMP_ACTION_PATH/packages/oh-my-promptfoo/dist/cli.js" eval \
           --config "$OMP_CONFIG" --args-json "$OMP_ARGS" --args-file "$OMP_ARGS_FILE" \
-          --working-directory "$OMP_WORKING_DIRECTORY" --output-dir "$OMP_OUTPUT_DIRECTORY" --github
+          --working-directory "$OMP_WORKING_DIRECTORY" --output-dir "$OMP_OUTPUT_DIRECTORY" \
+          --suite-number "${OMP_SUITE_NUMBER:-1}" --public-labels "${OMP_PUBLIC_LABELS:-false}" --github

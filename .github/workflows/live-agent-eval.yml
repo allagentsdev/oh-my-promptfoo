@@ -10,6 +10,8 @@ jobs:
   evaluate:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      OPENROUTER_MODEL: ${{ vars.OPENROUTER_MODEL }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -20,7 +22,7 @@ jobs:
           node-version-file: .node-version
           cache: pnpm
       - run: pnpm install --frozen-lockfile --ignore-scripts
-      - name: Verify credentials and free model availability
+      - name: Verify credentials and model availability
         run: node scripts/check-live-agent-eval.mjs
         env:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
@@ -32,6 +34,10 @@ jobs:
           DOGFOOD_REPOSITORY: file://${{ github.workspace }}
           DOGFOOD_REF: ${{ github.sha }}
           PROMPTFOO_CACHE_ENABLED: 'false'
+          # Retain rate-limit errors promptly instead of retrying the whole agent task.
+          PROMPTFOO_DISABLE_ADAPTIVE_SCHEDULER: 'true'
         with:
           config: packages/oh-my-promptfoo/evals/live/promptfooconfig.yaml
+          suite-number: '1'
+          public-labels: 'true'
           args-json: '["--no-cache", "--max-concurrency", "1"]'

@@ -78,6 +78,82 @@ test("native argument boundaries reserve config, output and execution ownership"
     assert.throws(() => validateNativeArgs(args));
 });
 
+test("offline CLI reports redact config-only and ambient credentials from persisted public labels", async () => {
+  const directory = await fixture();
+  try {
+    const configured = "config-only-credential-canary";
+    const ambient = "ambient-only-credential-canary";
+    const nested = "nested-credential-canary";
+    const description = `Public task ${configured} ${ambient} ${nested}`;
+    const native = join(directory, "native.json");
+    const content = JSON.stringify({
+      config: {
+        description,
+        env: { OPENAI_API_KEY: configured },
+        providers: [{ config: { delegate: { env: { CUSTOM_AUTH: nested } } } }],
+      },
+      results: {
+        stats: { successes: 1, failures: 0, errors: 0 },
+        results: [
+          {
+            success: true,
+            score: 1,
+            failureReason: 0,
+            testIdx: 0,
+            promptIdx: 0,
+            testCase: { description },
+            provider: { label: description },
+            response: { output: "PRIVATE_ANSWER" },
+            gradingResult: {
+              pass: true,
+              score: 1,
+              componentResults: [
+                {
+                  pass: true,
+                  score: 1,
+                  reason: "PRIVATE_REASON",
+                  assertion: { type: configured, metric: description },
+                },
+              ],
+            },
+          },
+        ],
+      },
+    });
+    await writeFile(native, content);
+    const env: NodeJS.ProcessEnv = { ...process.env, OMP_AMBIENT_API_KEY: ambient };
+    delete env.OPENAI_API_KEY;
+    for (const publicLabels of ["false", "true"]) {
+      const child = spawnSync(
+        process.execPath,
+        [
+          join(testEntries, "cli.js"),
+          "report",
+          "--results",
+          native,
+          "--output-dir",
+          join(directory, `report-${publicLabels}`),
+          "--public-labels",
+          publicLabels,
+        ],
+        { encoding: "utf8", env, timeout: 30_000 },
+      );
+      assert.equal(child.status, 0, child.stdout + child.stderr);
+      const paths = JSON.parse(child.stdout.trim().split("\n").at(-1)!);
+      const report = await readFile(paths.reportPath, "utf8");
+      const markdown = await readFile(paths.summaryPath, "utf8");
+      for (const output of [child.stdout, child.stderr, report, markdown])
+        for (const value of [configured, ambient, nested, "PRIVATE_ANSWER", "PRIVATE_REASON"])
+          assert.ok(!output.includes(value));
+      assert.equal(JSON.parse(report).totals.candidateCost.usd, null);
+      if (publicLabels === "true") assert.ok(markdown.includes("Public task"));
+    }
+    assert.equal(await readFile(native, "utf8"), content);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("real native CSV selection preserves repeated filters, regex, range, seeded samples and literal values", async () => {
   const directory = await fixture();
   try {
@@ -129,9 +205,15 @@ test("real native CSV selection preserves repeated filters, regex, range, seeded
         workingDirectory: directory,
         outputDirectory: "out",
         args: [...args, "--filter-providers", `^${label}$`],
+        suiteNumber: 3,
+        publicLabels: true,
       });
       assert.equal(run.report.status, "pass", await readFile(run.logPath, "utf8"));
       assert.equal(run.report.counts.pass, 1);
+      assert.equal(run.report.suite?.number, 3);
+      assert.ok(run.report.cases[0].label?.startsWith("kept case"));
+      const summary = await readFile(run.summaryPath, "utf8");
+      assert.ok(summary.includes("Test 3.1 · kept case") && !summary.includes("excluded"));
       const rows = (await json(run.resultPath)).results.results;
       assert.equal(rows.length, 1);
       assert.equal(rows[0].provider.label, label);
@@ -228,8 +310,14 @@ test("the actual Action shell step runs native CLI, sets outputs on failure and 
         prompts: ["PRIVATE_ANSWER"],
         providers: [provider],
         sharing: true,
+        description: "Public Action regression",
         outputPath: join(directory, "must-not-write.json"),
-        tests: [{ assert: [{ type: "equals", value: "not the answer" }] }],
+        tests: [
+          {
+            description: "Reject a wrong answer",
+            assert: [{ type: "equals", value: "not the answer" }],
+          },
+        ],
       }),
     );
     const outputs = join(directory, "outputs"),
@@ -245,6 +333,8 @@ test("the actual Action shell step runs native CLI, sets outputs on failure and 
         OMP_ARGS: '["--no-cache"]',
         OMP_WORKING_DIRECTORY: directory,
         OMP_OUTPUT_DIRECTORY: "private outputs",
+        OMP_SUITE_NUMBER: "7",
+        OMP_PUBLIC_LABELS: "true",
         GITHUB_OUTPUT: outputs,
         GITHUB_STEP_SUMMARY: summary,
         LOG_LEVEL: "debug",
@@ -266,7 +356,16 @@ test("the actual Action shell step runs native CLI, sets outputs on failure and 
     assert.ok((await readFile(values["result-path"], "utf8")).includes("PRIVATE_ANSWER"));
     assert.equal(existsSync(join(directory, "must-not-write.json")), false);
     const markdown = await readFile(summary, "utf8");
-    assert.ok(markdown.includes("Fail: 1") && markdown.includes("unknown"));
+    assert.ok(markdown.includes("| Failed | 1 |") && markdown.includes("unknown"));
+    assert.ok(markdown.includes("Suite 7 · Public Action regression"));
+    assert.equal((markdown.match(/Test 7\.1 · Reject a wrong answer/g) ?? []).length, 2);
+    const local = await reportEvaluation(values["result-path"], join(directory, "local-report"), {
+      suiteNumber: 8,
+      publicLabels: true,
+    });
+    assert.ok(
+      (await readFile(local.summaryPath, "utf8")).includes("Test 8.1 · Reject a wrong answer"),
+    );
     assert.ok(!markdown.includes("PRIVATE_") && !markdown.includes("http"));
   } finally {
     await rm(directory, { recursive: true, force: true });

@@ -8,23 +8,15 @@ export const liveConfig = new URL(
   import.meta.url,
 );
 
-export function requireFreeModel(id, catalog) {
+export function requireAvailableModel(id, catalog) {
   const model = catalog.find((entry) => entry.id === id);
-  const zero = (value) =>
-    typeof value === "string" &&
-    value.trim() !== "" &&
-    Number.isFinite(Number(value)) &&
-    Number(value) === 0;
   if (
     typeof id !== "string" ||
-    !id.endsWith(":free") ||
+    !id.trim() ||
     !model ||
-    !zero(model.pricing?.prompt) ||
-    !zero(model.pricing?.completion) ||
-    (model.pricing?.request !== undefined && !zero(model.pricing.request)) ||
     !model.supported_parameters?.includes("tools")
   )
-    throw new Error("The configured model must be an available free model with tool calling");
+    throw new Error("OPENROUTER_MODEL must be an available model with tool calling");
 }
 
 /** Check the authored candidate and grader before either can make an inference request. */
@@ -35,6 +27,8 @@ export async function checkLiveAgentEval({
 } = {}) {
   if (!env.OPENROUTER_API_KEY?.trim())
     throw new Error("Set the OPENROUTER_API_KEY repository secret");
+  const model = env.OPENROUTER_MODEL;
+  if (!model?.trim()) throw new Error("Set the OPENROUTER_MODEL repository variable");
   const config = parse(await readFile(configPath, "utf8"));
   const graders = config.defaultTest.assert.filter(
     (assertion) => assertion.value === "package:oh-my-promptfoo/assertions:agentAssert",
@@ -55,6 +49,8 @@ export async function checkLiveAgentEval({
     throw new Error(
       "Live dogfood requires the built-in Pi OpenRouter endpoint for candidate and grader",
     );
+  if (delegates.some((delegate) => delegate.config.model !== "{{env.OPENROUTER_MODEL}}"))
+    throw new Error("Live candidate and grader must both use the OPENROUTER_MODEL variable");
   const response = await fetcher("https://openrouter.ai/api/v1/models", {
     signal: AbortSignal.timeout(30000),
   });
@@ -71,12 +67,10 @@ export async function checkLiveAgentEval({
     refreshOnCreate: false,
     allowModelNetwork: false,
   });
-  for (const delegate of delegates) {
-    requireFreeModel(delegate.config.model, catalog);
-    if (!runtime.getModel("openrouter", delegate.config.model))
-      throw new Error("The configured model is not in the pinned Pi SDK catalog");
-  }
-  return [...new Set(delegates.map((delegate) => delegate.config.model))];
+  requireAvailableModel(model, catalog);
+  if (!runtime.getModel("openrouter", model))
+    throw new Error("OPENROUTER_MODEL is not in the pinned Pi SDK catalog");
+  return [model];
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

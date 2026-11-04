@@ -1,4 +1,5 @@
 import { safeCount, safeMultiplier } from "./copilot-accounting.js";
+import { redact, secrets } from "./redaction.js";
 import { type ResultCost, record, responseCost, sumCosts } from "./result-cost.js";
 
 export { estimateCopilotCost } from "./result-cost.js";
@@ -13,6 +14,8 @@ export interface Usage {
 }
 export interface AssertionReport {
   reference: string;
+  type?: string;
+  label?: string;
   status: Outcome;
   score: number | null;
   threshold: number | null;
@@ -21,6 +24,8 @@ export interface CaseReport {
   row: number;
   test: number;
   column: number;
+  label?: string;
+  candidate?: string;
   status: Outcome;
   score: number | null;
   latencyMs: number | null;
@@ -32,6 +37,7 @@ export interface CaseReport {
 }
 export interface EvaluationReport {
   version: 1;
+  suite?: { number: number; title?: string };
   status: Outcome;
   issues: string[];
   counts: { pass: number; fail: number; error: number; unknown: number };
@@ -43,6 +49,15 @@ export interface EvaluationReport {
     candidateCost: ResultCost;
     graderCost: ResultCost;
   };
+}
+
+export interface ReportOptions {
+  /** Caller-assigned number, unique among suites in one workflow. Defaults to 1. */
+  suiteNumber?: number;
+  /** Publish authored descriptions, provider labels and assertion metrics/types. Defaults to false. */
+  publicLabels?: boolean;
+  /** Additional credential values to redact from explicitly public labels. */
+  sensitiveValues?: string[];
 }
 
 const measured = (value: unknown) => (safeMultiplier(value) ? value : null);
@@ -102,13 +117,20 @@ function roots(components: unknown): Record<string, any>[] {
   return result;
 }
 
-function assertionReports(grade: unknown, authored: unknown): AssertionReport[] {
+function assertionReports(
+  grade: unknown,
+  authored: unknown,
+  label: (value: unknown) => string | undefined,
+): AssertionReport[] {
   const result: AssertionReport[] = [];
   const visit = (components: Record<string, any>[], prefix: string) => {
     components.forEach((component, index) => {
       const reference = `${prefix}${index + 1}`;
+      const metricLabel = label(record(component.assertion).metric);
       result.push({
         reference,
+        type: assertionType(label(record(component.assertion).type)),
+        ...(metricLabel ? { label: metricLabel } : {}),
         status: assertionStatus(component),
         score: score(component.score),
         threshold: score(record(component.assertion).threshold),
@@ -119,15 +141,22 @@ function assertionReports(grade: unknown, authored: unknown): AssertionReport[] 
   const components = roots(record(grade).componentResults);
   if (components.length) visit(components, "");
   else if (Array.isArray(authored))
-    authored.forEach((_: unknown, index: number) => {
+    authored.forEach((input: unknown, index: number) => {
+      const metricLabel = label(record(input).metric);
       result.push({
         reference: String(index + 1),
+        type: assertionType(label(record(input).type)),
+        ...(metricLabel ? { label: metricLabel } : {}),
         status: "unknown",
         score: null,
         threshold: null,
       });
     });
   return result;
+}
+
+function assertionType(value: unknown): string {
+  return typeof value === "string" && /^[a-z][a-z0-9-]{0,40}$/.test(value) ? value : "custom";
 }
 
 function assertionStatus(component: Record<string, any>): Outcome {
@@ -188,7 +217,25 @@ function graderMeasurements(grade: unknown, failed: boolean): { cost: ResultCost
 }
 
 /** Read only public JSON exports. No config loading, case selection or scoring occurs here. */
-export function summarizeEvaluation(document: unknown, exitCode?: number | null): EvaluationReport {
+export function summarizeEvaluation(
+  document: unknown,
+  exitCode?: number | null,
+  options: ReportOptions = {},
+): EvaluationReport {
+  const suiteNumber = options.suiteNumber ?? 1;
+  if (!Number.isSafeInteger(suiteNumber) || suiteNumber < 1)
+    throw new Error("Suite number must be a positive safe integer");
+  const sensitive = options.publicLabels
+    ? [...secrets(record(record(document).config), {}), ...(options.sensitiveValues ?? [])]
+    : [];
+  const label = (value: unknown): string | undefined => {
+    if (!options.publicLabels || typeof value !== "string") return;
+    const text = redact(value, sensitive)
+      .replace(/[\p{Cc}\p{Cf}]/gu, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    return text ? Array.from(text).slice(0, 160).join("") : undefined;
+  };
   const exported = record(record(document).results);
   const rows = Array.isArray(exported.results) ? exported.results : [];
   const issues: string[] = [];
@@ -231,10 +278,14 @@ export function summarizeEvaluation(document: unknown, exitCode?: number | null)
     counts[status]++;
     const grader = graderMeasurements(row.gradingResult, hasError);
     const provider = record(row.provider).id;
+    const testLabel = label(test.description);
+    const candidateLabel = label(record(row.provider).label);
     return {
       row: index + 1,
       test: safeCount(row.testIdx) ? row.testIdx + 1 : index + 1,
       column: safeCount(row.promptIdx) ? row.promptIdx + 1 : index + 1,
+      ...(testLabel ? { label: testLabel } : {}),
+      ...(candidateLabel ? { candidate: candidateLabel } : {}),
       status,
       score: score(row.score),
       latencyMs: measured(row.latencyMs),
@@ -247,15 +298,20 @@ export function summarizeEvaluation(document: unknown, exitCode?: number | null)
           : undefined,
       ),
       graderCost: grader.cost,
-      assertions: assertionReports(row.gradingResult, test.assert),
+      assertions: assertionReports(row.gradingResult, test.assert, label),
     };
   });
   if (safeCount(stats.errors) && stats.errors > 0 && !counts.error) issues.push("native-errors");
   const complete = issues.length === 0;
   const failed = exitCode === undefined ? counts.fail > 0 : exitCode !== 0;
   const status = issues.length || counts.error ? "error" : failed ? "fail" : "pass";
+  const suiteTitle = label(record(record(document).config).description);
   return {
     version: 1,
+    suite: {
+      number: suiteNumber,
+      ...(suiteTitle ? { title: suiteTitle } : {}),
+    },
     status,
     issues,
     counts,
@@ -275,70 +331,130 @@ export function summarizeEvaluation(document: unknown, exitCode?: number | null)
   };
 }
 
-/** Fixed text and numbers only: descriptions, IDs, provider labels and reasons are private. */
+/** Render only normalized outcomes and explicitly public, redacted labels. */
 export function renderSummary(report: EvaluationReport): string {
-  const number = (value: number | null) => (value === null ? "unknown" : String(value));
-  const money = (cost: ResultCost) =>
-    cost.usd === null
+  const number = (value: number | null) =>
+    value === null ? "unknown" : value.toLocaleString("en-US");
+  const score = (value: number | null) =>
+    value === null
       ? "unknown"
-      : `${cost.basis === "estimate" ? "~" : ""}$${cost.usd.toFixed(8)}`;
+      : value >= 0 && value <= 1
+        ? `${Number((value * 100).toFixed(1))}%`
+        : String(value);
+  const time = (value: number | null) => {
+    if (value === null) return "unknown";
+    if (value < 1000) return `${Math.round(value)} ms`;
+    if (value < 60000) return `${Number((value / 1000).toFixed(1))} s`;
+    return `${Math.floor(value / 60000)} min ${Math.round((value % 60000) / 1000)} s`;
+  };
+  const money = (cost: ResultCost) => {
+    if (cost.usd === null) return "unknown";
+    const amount =
+      cost.usd > 0 && cost.usd < 0.00000001
+        ? "&lt;$0.00000001"
+        : `$${cost.usd.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 8, useGrouping: false })}`;
+    return `${cost.basis === "estimate" ? "~" : ""}${amount}`;
+  };
+  const escapeMarkup = (value: string) =>
+    value
+      .replace(/([\\`*_[\]{}()!#])/g, "\\$1")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/\|/g, "&#124;");
+  const badge = (status: Outcome) =>
+    `${{ pass: "✅", fail: "❌", error: "⚠️", unknown: "❔" }[status]} ${status.toUpperCase()}`;
+  const usageSummary = (value: Usage) =>
+    value.total === null && value.requests === null
+      ? "unknown"
+      : `${number(value.total)} tokens · ${number(value.requests)} requests`;
+  const suite = report.suite?.number ?? 1;
+  const reference = (item: CaseReport) => `${suite}.${item.row}`;
+  const title = (item: CaseReport) =>
+    `Test ${reference(item)}${item.label ? ` · ${escapeMarkup(item.label)}` : ""}${item.candidate ? ` (${escapeMarkup(item.candidate)})` : ""}`;
   const lines = [
-    "## Promptfoo evaluation",
+    `## Suite ${suite}${report.suite?.title ? ` · ${escapeMarkup(report.suite.title)}` : " · Promptfoo evaluation"} — ${badge(report.status)}`,
     "",
-    `Status: **${report.status.toUpperCase()}**`,
+    "| Metric | Value |",
+    "| --- | --- |",
+    `| Tests | ${number(report.cases.length)} |`,
+    `| Passed | ${report.counts.pass} |`,
+    `| Failed | ${report.counts.fail} |`,
+    `| Errors | ${report.counts.error} |`,
+    ...(report.counts.unknown ? [`| Unknown outcomes | ${report.counts.unknown} |`] : []),
+    `| Pass rate | ${report.cases.length ? score(report.counts.pass / report.cases.length) : "unknown"} |`,
+    `| Total agent time (sum of rows) | ${time(report.totals.latencyMs)} |`,
+    `| Agent usage | ${usageSummary(report.totals.candidateUsage)} |`,
+    `| Grader usage | ${usageSummary(report.totals.graderUsage)} |`,
+    `| Agent cost | ${money(report.totals.candidateCost)} |`,
+    `| Grader cost | ${money(report.totals.graderCost)} |`,
     "",
-    `Pass: ${report.counts.pass} · Fail: ${report.counts.fail} · Error: ${report.counts.error} · Unknown: ${report.counts.unknown}`,
+    "### Results",
     "",
-    `Latency (sum of rows): ${number(report.totals.latencyMs)} ms`,
-    "",
-    "| Role | Tokens | Prompt | Completion | Cached | Requests | USD |",
-    "| --- | ---: | ---: | ---: | ---: | ---: | ---: |",
-    ...(["candidate", "grader"] as const).map((role) => {
-      const tokens = report.totals[`${role}Usage`];
-      return `| ${role} | ${number(tokens.total)} | ${number(tokens.prompt)} | ${number(tokens.completion)} | ${number(tokens.cached)} | ${number(tokens.requests)} | ${money(report.totals[`${role}Cost`])} |`;
-    }),
-    "",
-    "Unknown means unmeasured or incomplete. ~ marks a token-price estimate. Costs are not invoices or savings.",
-    "",
-    "Rows, tests and columns are one-based references into the native JSON. Assertion references follow its grading tree.",
-    "",
-    "| Row | Test | Column | Status | Score | Latency ms | Candidate tokens | Candidate USD | Grader tokens | Grader USD |",
-    "| ---: | ---: | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: |",
+    "| Test | Result | Agent time | Assertions passed |",
+    "| --- | --- | ---: | ---: |",
   ];
   let bytes = Buffer.byteLength(lines.join("\n"));
-  const add = (line: string) => {
-    bytes += Buffer.byteLength(line) + 1;
-    if (bytes > 800_000) return false;
-    lines.push(line);
+  const add = (block: string) => {
+    const size = Buffer.byteLength(block) + 1;
+    if (bytes + size > 800_000) return false;
+    bytes += size;
+    lines.push(block);
     return true;
   };
   let truncated = false;
   for (const item of report.cases) {
+    const checks = item.assertions.filter((check) => !check.reference.includes("."));
     if (
       !add(
-        `| ${item.row} | ${item.test} | ${item.column} | ${item.status} | ${number(item.score)} | ${number(item.latencyMs)} | ${number(item.candidateUsage.total)} | ${money(item.candidateCost)} | ${number(item.graderUsage.total)} | ${money(item.graderCost)} |`,
+        `| ${title(item)} | ${badge(item.status)} | ${time(item.latencyMs)} | ${checks.length ? `${checks.filter((check) => check.status === "pass").length} / ${checks.length}` : "unknown"} |`,
       )
     ) {
       truncated = true;
       break;
     }
   }
-  add(
-    "\n| Row | Assertion | Status | Score | Authored threshold |\n| ---: | --- | --- | ---: | ---: |",
-  );
-  outer: for (const item of report.cases)
-    for (const assertion of item.assertions) {
-      if (
-        !add(
-          `| ${item.row} | ${assertion.reference} | ${assertion.status} | ${number(assertion.score)} | ${number(assertion.threshold)} |`,
-        )
-      ) {
-        truncated = true;
-        break outer;
-      }
+  add("\n### Test details\n");
+  for (const item of report.cases) {
+    const thresholds = item.assertions.some((check) => check.threshold !== null);
+    const names = new Map<string, number>();
+    for (const check of item.assertions)
+      if (check.label) names.set(check.label, (names.get(check.label) ?? 0) + 1);
+    const detail = [
+      `<details><summary>${title(item)} — ${badge(item.status)}</summary>`,
+      "",
+      `Native score: **${score(item.score)}** · Agent time: **${time(item.latencyMs)}**`,
+      "",
+      "| Role | Tokens | Requests | Cost |",
+      "| --- | ---: | ---: | ---: |",
+      `| Agent | ${number(item.candidateUsage.total)} | ${number(item.candidateUsage.requests)} | ${money(item.candidateCost)} |`,
+      `| Grader | ${number(item.graderUsage.total)} | ${number(item.graderUsage.requests)} | ${money(item.graderCost)} |`,
+      "",
+      `| Check | Type | Result | Score |${thresholds ? " Threshold |" : ""}`,
+      `| --- | --- | --- | ---: |${thresholds ? " ---: |" : ""}`,
+      ...item.assertions.map((check, index) => {
+        const name = check.label
+          ? `${escapeMarkup(check.label)}${names.get(check.label) === 1 ? "" : ` (check ${index + 1})`}`
+          : `Check ${index + 1}`;
+        return `| ${name} | ${escapeMarkup(check.type ?? "custom")} | ${badge(check.status)} | ${score(check.score)} |${thresholds ? ` ${score(check.threshold)} |` : ""}`;
+      }),
+      "",
+      "</details>",
+      "",
+    ].join("\n");
+    if (!add(detail)) {
+      truncated = true;
+      break;
     }
+  }
   if (truncated)
     lines.push("", "Summary truncated. The local report.json retains every reported outcome.");
+  lines.push(
+    "",
+    "Test numbers use suite.result-row, so Test 2.6 is result row 6 in Suite 2. Each candidate/repeat has its own result number.",
+    "",
+    "Unknown means unmeasured or incomplete. ~ marks a token-price estimate. Costs are not invoices or savings. Displayed scores are rounded; native precision is retained in report.json.",
+  );
   if (report.issues.length)
     lines.push(
       "",

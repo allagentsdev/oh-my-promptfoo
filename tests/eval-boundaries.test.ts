@@ -95,6 +95,8 @@ test("private argument files reach native evaluation without entering Action inp
       "args-file": argsFile,
       "working-directory": directory,
       "output-directory": "out",
+      "suite-number": "1",
+      "public-labels": "false",
     };
     const actionEnv: Record<string, string> = Object.fromEntries(
       Object.entries(step.env).map(([key, expression]) => [

@@ -4,60 +4,100 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "vitest";
 import { parse, stringify } from "yaml";
+import { runEvaluation } from "../packages/oh-my-promptfoo/src/eval-run";
 
 const { default: checkArtifact } = await import(
   new URL("../packages/oh-my-promptfoo/evals/live/check-artifact.mjs", import.meta.url).href
 );
-const { checkLiveAgentEval, liveConfig, requireFreeModel } = await import(
+const { checkLiveAgentEval, liveConfig, requireAvailableModel } = await import(
   new URL("../scripts/check-live-agent-eval.mjs", import.meta.url).href
 );
 
-const model = "cohere/north-mini-code:free";
+const model = "deepseek/deepseek-v4.1-flash";
+const env = { OPENROUTER_API_KEY: "private-fixture-key", OPENROUTER_MODEL: model };
 const entry = {
   id: model,
-  pricing: { prompt: "0", completion: "0" },
   supported_parameters: ["tools"],
 };
 
-test("live preflight accepts the actual pinned free candidate and grader without sending credentials", async () => {
+test("native evaluation keeps the authored six tasks and expected argument arrays intact", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "omp-live-cardinality-"));
+  try {
+    const config = parse(await readFile(liveConfig, "utf8"));
+    // Exercise native case expansion without making agent or grader requests.
+    config.providers = ["echo"];
+    config.defaultTest.assert = [
+      {
+        type: "javascript",
+        value:
+          "Array.isArray(context.vars.expected) === context.vars.artifact.endsWith('args.json')",
+      },
+    ];
+    const configPath = join(directory, "suite.yaml");
+    await writeFile(configPath, stringify(config));
+    const run = await runEvaluation({
+      config: configPath,
+      outputDirectory: join(directory, "results"),
+      args: ["--no-cache", "--max-concurrency", "1"],
+    });
+    assert.equal(run.report.status, "pass");
+    assert.equal(run.report.cases.length, 6);
+    const native = JSON.parse(await readFile(run.resultPath, "utf8"));
+    assert.deepEqual(
+      native.results.results.map((row: any) => row.testCase.vars.expected),
+      config.tests.map((row: any) => row.vars.expected),
+    );
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+}, 120_000);
+
+test("live preflight accepts the configured candidate and grader without sending credentials", async () => {
   let requests = 0;
-  const models = await checkLiveAgentEval({
-    env: { OPENROUTER_API_KEY: "private-fixture-key" },
-    fetcher: async (url: string, options: RequestInit) => {
-      requests++;
-      assert.equal(url, "https://openrouter.ai/api/v1/models");
-      assert.equal(JSON.stringify(options).includes("private-fixture-key"), false);
-      return Response.json({ data: [entry] });
-    },
-  });
-  assert.deepEqual(models, [model]);
-  assert.equal(requests, 1);
+  for (const selected of [model, "google/gemma-4-31b-it:free"]) {
+    const models = await checkLiveAgentEval({
+      env: { ...env, OPENROUTER_MODEL: selected },
+      fetcher: async (url: string, options: RequestInit) => {
+        requests++;
+        assert.equal(url, "https://openrouter.ai/api/v1/models");
+        assert.equal(JSON.stringify(options).includes("private-fixture-key"), false);
+        return Response.json({ data: [{ ...entry, id: selected }] });
+      },
+    });
+    assert.deepEqual(models, [selected]);
+  }
+  assert.equal(requests, 2);
 });
 
-test("live preflight rejects paid, missing, unpriced or non-tool models", () => {
-  assert.doesNotThrow(() => requireFreeModel(model, [entry]));
-  for (const candidate of [
-    { ...entry, id: "paid/model" },
-    { ...entry, pricing: { prompt: "0.1", completion: "0" } },
-    { ...entry, pricing: { prompt: "0", completion: "" } },
-    { ...entry, pricing: { prompt: "0", completion: "0", request: "1" } },
-    { ...entry, supported_parameters: [] },
-  ])
-    assert.throws(() => requireFreeModel(candidate.id, [candidate]));
-  assert.throws(() => requireFreeModel(model, []));
+test("live preflight accepts paid models and rejects missing or non-tool models", () => {
+  assert.doesNotThrow(() => requireAvailableModel(model, [entry]));
+  assert.throws(() => requireAvailableModel(model, [{ ...entry, supported_parameters: [] }]));
+  assert.throws(() => requireAvailableModel(model, []));
+  assert.throws(() => requireAvailableModel("", [entry]));
 });
 
-test("live preflight blocks absent secrets, catalog errors and a paid grader", async () => {
-  const env = { OPENROUTER_API_KEY: "private-fixture-key" };
+test("live preflight blocks absent settings, catalog errors, unsupported models and a mismatched grader", async () => {
   await assert.rejects(checkLiveAgentEval({ env: {} }), /OPENROUTER_API_KEY/);
+  await assert.rejects(
+    checkLiveAgentEval({ env: { OPENROUTER_API_KEY: "private-fixture-key" } }),
+    /OPENROUTER_MODEL/,
+  );
   await assert.rejects(
     checkLiveAgentEval({ env, fetcher: async () => new Response(null, { status: 503 }) }),
     /availability/,
   );
+  const unsupported = "fixture/not-in-pinned-sdk";
+  await assert.rejects(
+    checkLiveAgentEval({
+      env: { ...env, OPENROUTER_MODEL: unsupported },
+      fetcher: async () => Response.json({ data: [{ ...entry, id: unsupported }] }),
+    }),
+    /pinned Pi SDK/,
+  );
   const directory = await mkdtemp(join(tmpdir(), "omp-live-preflight-"));
   try {
     const config = parse(await readFile(liveConfig, "utf8"));
-    config.defaultTest.assert.at(-1).config.grader.config.model = "paid/model";
+    config.defaultTest.assert.at(-1).config.grader.config.model = "different/model";
     const configPath = join(directory, "suite.yaml");
     await writeFile(configPath, stringify(config));
     await assert.rejects(
@@ -66,7 +106,7 @@ test("live preflight blocks absent secrets, catalog errors and a paid grader", a
         configPath,
         fetcher: async () => Response.json({ data: [entry] }),
       }),
-      /free model/,
+      /both use the OPENROUTER_MODEL variable/,
     );
   } finally {
     await rm(directory, { recursive: true, force: true });
