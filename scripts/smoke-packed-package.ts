@@ -467,9 +467,13 @@ for(const provider of [judge,{text:judge},fallback])await assert.rejects(grade(p
       localReport.status !== "pass" ||
       localReport.counts.pass !== 4 ||
       localReport.totals.candidateCost.usd !== null ||
-      localReport.totals.graderCost.usd !== null
+      localReport.totals.graderCost.usd !== 0 ||
+      localReport.totals.graderUsage.total !== 0 ||
+      localReport.totals.graderUsage.requests !== 0
     )
-      throw new Error("Installed local CLI release regression or unknown-cost reporting failed");
+      throw new Error(
+        "Installed local CLI release regression or candidate/grader accounting failed",
+      );
     run(
       "node",
       ["node_modules/oh-my-promptfoo/dist/cli.js", "report", "--results", paths.resultPath],
