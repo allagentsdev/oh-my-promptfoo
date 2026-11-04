@@ -1,0 +1,98 @@
+# yaml-language-server: $schema=https://promptfoo.dev/config-schema.json
+description: Live OpenRouter dogfood of the repository skill, Agent and agentAssert
+prompts: ['{{task}}']
+providers:
+  - id: package:oh-my-promptfoo/providers:Agent
+    label: pi-openrouter-free
+    config:
+      timeoutMs: 180000
+      delegate:
+        id: pi-sdk
+        config:
+          provider: openrouter
+          model: cohere/north-mini-code:free
+          thinkingLevel: off
+          permissions: { filesystem: write, shell: deny }
+        env:
+          OPENROUTER_API_KEY: '{{env.OPENROUTER_API_KEY}}'
+      workspace:
+        sources:
+          - type: git
+            repository: '{{env.DOGFOOD_REPOSITORY}}'
+            ref: '{{env.DOGFOOD_REF}}'
+            destination: project
+            permissions: read-only
+          - type: local
+            path: ../../../../skills
+            destination: .agents/skills
+            # Pi requires contained skill files; protected source views are symlinks.
+            permissions: all
+      fileChanges: true
+defaultTest:
+  threshold: 1
+  assert:
+    - type: skill-used
+      value: oh-my-promptfoo
+    - type: javascript
+      value: file://check-artifact.mjs
+    - type: javascript
+      value: package:oh-my-promptfoo/assertions:agentAssert
+      config:
+        scoring: binary
+        timeoutMs: 120000
+        grader:
+          id: pi-sdk
+          config:
+            provider: openrouter
+            model: cohere/north-mini-code:free
+            thinkingLevel: off
+            permissions: { filesystem: read, shell: deny }
+          env:
+            OPENROUTER_API_KEY: '{{env.OPENROUTER_API_KEY}}'
+        components:
+          - metric: verified-artifact
+            value: >-
+              Read {{artifact}} in the workspace. Verify that its contents meet
+              the candidate's task: {{task}}. Inspect project/README.md and
+              project/docs/provider-guide.md when checking repository facts.
+              A claimed write in the final answer is insufficient evidence.
+tests:
+  - description: Author a native exact-match smoke config using the repository skill
+    metadata: { suite: live-dogfood }
+    vars:
+      task: >-
+        Read .agents/skills/oh-my-promptfoo/SKILL.md. Use this skill to write
+        answer.yaml at the workspace root: a native Promptfoo config sending
+        the literal prompt READY to the echo provider, with one test asserting
+        that the output equals READY. Use exactly the top-level keys prompts,
+        providers and tests, each containing a list. The providers list contains
+        the single string echo, not a provider object. The test contains only
+        assert, whose single entry has type equals and value READY. Write the
+        file with the write tool. Do not change any source files or run commands.
+        Keep your final answer to one sentence.
+      artifact: answer.yaml
+      format: yaml
+      expected:
+        prompts: [READY]
+        providers: [echo]
+        tests:
+          - assert: [{ type: equals, value: READY }]
+  - description: Identify the package's provider and workspace grader from its own docs
+    metadata: { suite: live-dogfood }
+    vars:
+      task: >-
+        Read .agents/skills/oh-my-promptfoo/SKILL.md and project/README.md.
+        Write answer.json at the workspace root with exactly four string fields:
+        package (the npm package name), agentProvider (the package provider ID
+        that creates an isolated workspace), workspaceGrader (the package
+        assertion ID for inspecting that live workspace), and selectionOwner
+        (the lowercase name of the tool that owns native case selection).
+        Derive the values from the files you read. Do not change source files
+        or run commands. Keep your final answer to one sentence.
+      artifact: answer.json
+      format: json
+      expected:
+        package: oh-my-promptfoo
+        agentProvider: package:oh-my-promptfoo/providers:Agent
+        workspaceGrader: package:oh-my-promptfoo/assertions:agentAssert
+        selectionOwner: promptfoo

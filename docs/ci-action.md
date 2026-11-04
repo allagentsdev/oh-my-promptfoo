@@ -51,6 +51,58 @@ required coding-agent runtimes and workspace helper as described in the
 [provider guide](provider-guide.md). The package's release build is available in
 the Action checkout, but it is not automatically a dependency of the caller.
 
+## Manually triggered live dogfood
+
+The **Live agent dogfood** workflow runs only through `workflow_dispatch`.
+After the workflow lands on the default branch, choose **Actions → Live agent
+dogfood → Run workflow** and select the reviewed ref to evaluate. It uses this
+checkout's Action and built package, not an older registry release.
+
+The fixed suite in `packages/oh-my-promptfoo/evals/live/promptfooconfig.yaml`
+runs the real Pi SDK through OpenRouter with `cohere/north-mini-code:free` for
+both the candidate and read-only `agentAssert` grader. It stages the selected
+Git commit as a protected source, loads the repository's `oh-my-promptfoo` skill,
+and asks the candidate to author a native smoke config and identify the package's
+provider/grader contract. Captured files must exactly match the checked-in
+expected data; stock `skill-used` and the live workspace grader must pass too.
+The full two-case suite runs without sampling or response caching.
+
+Store the OpenRouter key in the repository secret **`OPENROUTER_API_KEY`**:
+
+```sh
+gh secret set OPENROUTER_API_KEY --repo allagentsdev/oh-my-promptfoo
+```
+
+This prompts locally; do not put the value in workflow inputs or committed YAML.
+The preflight checks both model declarations against the current OpenRouter
+catalog and pinned SDK. Missing credentials, a removed/non-free model, unavailable
+catalog or model-call failures fail the job. There is no paid-model fallback.
+Free service rate limits and capacity can still make a run fail. A shared model
+for candidate and grader is a smoke test of the integration, not an independent
+assessment of model quality.
+
+Results appear in the job summary, with candidate/grader accounting handled by
+the same reporter. Raw results, generated files and model reasons are not uploaded.
+GitHub-hosted runner files are temporary; use approved private storage if they need
+to survive the job. The suite's config lives inside the public package directory
+so native package references resolve to the current build through its exports.
+The eval fixtures are excluded from npm publication by the existing `files` list.
+
+To run the same authored suite locally, supply the key through your environment,
+then run from a trusted checkout:
+
+```sh
+pnpm install --frozen-lockfile --ignore-scripts
+pnpm build
+export DOGFOOD_REPOSITORY="file://$PWD"
+export DOGFOOD_REF="$(git rev-parse HEAD)"
+export PROMPTFOO_CACHE_ENABLED=false
+node scripts/check-live-agent-eval.mjs
+node packages/oh-my-promptfoo/dist/cli.js eval \
+  --config packages/oh-my-promptfoo/evals/live/promptfooconfig.yaml -- \
+  --no-cache --max-concurrency 1
+```
+
 ## Offline model comparison
 
 [`comparison.yaml`](../examples/ci/comparison.yaml) has two native model providers

@@ -4,6 +4,8 @@
 
 ### Features
 
+* Add manually triggered live dogfooding of the repository's skill, workspace Agent and read-only agentAssert through a free OpenRouter model. Keep fixed native cases, exact artifact checks, free-model preflight and sanitized Action reporting.
+
 * Add a reusable repository-root GitHub Action and local `eval`/`report` CLI with native argument arrays, pinned frozen tooling, private retained results and sanitized case/assertion, latency, candidate/grader usage and cost reports. Missing/error/zero-coverage runs fail closed; native scoring policy stays authoritative. Export the reusable reporter through `oh-my-promptfoo/reporting`.
 
 * Add `pi-sdk` workspace and read-only agent-grader delegates using the maintained optional `@earendil-works/pi-coding-agent@1.3.0` peer, explicit model/credentials and local endpoint support. Isolated in-memory sessions report successful skill-file reads to stock `skill-used` without changing skill authoring.

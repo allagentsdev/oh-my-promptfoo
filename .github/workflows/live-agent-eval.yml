@@ -1,0 +1,37 @@
+name: Live agent dogfood
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: live-agent-dogfood
+  cancel-in-progress: false
+jobs:
+  evaluate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Verify credentials and free model availability
+        run: node scripts/check-live-agent-eval.mjs
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+      - name: Run the fixed live agent suite and summarize
+        id: eval
+        uses: ./
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          DOGFOOD_REPOSITORY: file://${{ github.workspace }}
+          DOGFOOD_REF: ${{ github.sha }}
+          PROMPTFOO_CACHE_ENABLED: 'false'
+        with:
+          config: packages/oh-my-promptfoo/evals/live/promptfooconfig.yaml
+          args-json: '["--no-cache", "--max-concurrency", "1"]'
