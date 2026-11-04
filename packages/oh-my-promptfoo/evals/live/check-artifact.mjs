@@ -1,6 +1,14 @@
 import { isDeepStrictEqual } from "node:util";
 import { parse } from "yaml";
 
+// This synchronous parser/comparator makes no model requests, including on failure.
+const result = (pass, reason) => ({
+  pass,
+  score: pass ? 1 : 0,
+  reason,
+  tokensUsed: { total: 0, prompt: 0, completion: 0, cached: 0, numRequests: 0, cost: 0 },
+});
+
 /** Grade captured file contents, independently of the candidate's final answer. */
 export default function checkArtifact(_output, context) {
   const changes = context?.providerResponse?.metadata?.fileChanges;
@@ -13,19 +21,18 @@ export default function checkArtifact(_output, context) {
     !["json", "yaml"].includes(vars?.format) ||
     !vars?.expected
   )
-    return { pass: false, score: 0, reason: "Required artifact was not captured completely" };
+    return result(false, "Required artifact was not captured completely");
   try {
     const content = Buffer.from(entry.content, "base64").toString("utf8");
     const actual = vars.format === "json" ? JSON.parse(content) : parse(content);
     const pass = isDeepStrictEqual(actual, vars.expected);
-    return {
+    return result(
       pass,
-      score: pass ? 1 : 0,
-      reason: pass
+      pass
         ? "Artifact matches the authored contract"
         : "Artifact differs from the authored contract",
-    };
+    );
   } catch {
-    return { pass: false, score: 0, reason: "Artifact is not valid for its required format" };
+    return result(false, "Artifact is not valid for its required format");
   }
 }

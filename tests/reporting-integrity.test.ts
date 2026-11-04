@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
-import { summarizeEvaluation } from "../packages/oh-my-promptfoo/src/reporting";
+import { renderSummary, summarizeEvaluation } from "../packages/oh-my-promptfoo/src/reporting";
+
+const { default: checkArtifact } = await import(
+  new URL("../packages/oh-my-promptfoo/evals/live/check-artifact.mjs", import.meta.url).href
+);
 
 const row = {
   success: true,
@@ -10,6 +14,103 @@ const row = {
   promptIdx: 0,
   response: { output: "answer" },
 };
+
+test("known local native assertions establish zero grader spend while missing or custom grading stays unknown", () => {
+  const equals = { pass: true, score: 1, assertion: { type: "equals" } };
+  const summarize = (gradingResult: unknown) =>
+    summarizeEvaluation({
+      results: {
+        stats: { successes: 1, failures: 0, errors: 0 },
+        results: [
+          {
+            ...row,
+            latencyMs: 10,
+            response: {
+              output: "answer",
+              cost: 0.02,
+              tokenUsage: { total: 20, prompt: 15, completion: 5 },
+            },
+            gradingResult,
+          },
+        ],
+      },
+    });
+  const report = summarize({ pass: true, score: 1, componentResults: [equals] });
+  assert.equal(report.totals.graderCost.usd, 0);
+  assert.equal(report.totals.graderUsage.total, 0);
+  assert.equal(report.totals.graderUsage.requests, 0);
+  assert.ok(renderSummary(report).includes("| 10 ms | 20 | $0.02 | ✅ PASS | 1 / 1 |"));
+  for (const gradingResult of [
+    undefined,
+    { pass: true, score: 1, componentResults: [] },
+    { componentResults: [{ assertion: { type: "javascript" }, componentResults: [equals] }] },
+    {
+      componentResults: [
+        { metadata: { assertionSet: { type: "assert-set" } }, componentResults: [] },
+      ],
+    },
+  ]) {
+    const unknown = summarize(gradingResult);
+    assert.equal(unknown.totals.graderCost.usd, null);
+    assert.equal(unknown.totals.graderUsage.total, null);
+  }
+});
+
+test("local skill and artifact checks preserve the workspace grader's reported usage and cost", () => {
+  const local = checkArtifact("unused", {
+    vars: { artifact: "answer.json", format: "json", expected: { ready: true } },
+    providerResponse: {
+      metadata: {
+        fileChanges: {
+          status: "complete",
+          changedFiles: {
+            "answer.json": {
+              kind: "file",
+              content: Buffer.from('{"ready":true}').toString("base64"),
+            },
+          },
+        },
+      },
+    },
+  });
+  const components = [
+    { pass: true, score: 1, assertion: { type: "skill-used" } },
+    { ...local, assertion: { type: "javascript" } },
+    {
+      pass: true,
+      score: 1,
+      assertion: { type: "javascript" },
+      tokensUsed: { total: 9, prompt: 7, completion: 2, numRequests: 1, cost: 0.01 },
+      metadata: { judgeAccounting: { version: 1, attempts: [{ cached: false }] } },
+    },
+  ];
+  const summarize = (componentResults: unknown[]) =>
+    summarizeEvaluation({
+      results: {
+        stats: { successes: 1, failures: 0, errors: 0 },
+        results: [
+          {
+            ...row,
+            gradingResult: { pass: true, score: 1, componentResults },
+          },
+        ],
+      },
+    });
+  const report = summarize(components);
+  assert.equal(report.totals.graderUsage.total, 9);
+  assert.equal(report.totals.graderUsage.requests, 1);
+  assert.equal(report.totals.graderCost.usd, 0.01);
+  const unmeasured = summarize([
+    ...components,
+    {
+      pass: true,
+      score: 1,
+      assertion: { type: "javascript" },
+    },
+  ]);
+  assert.equal(unmeasured.totals.graderCost.usd, null);
+  assert.equal(unmeasured.totals.graderUsage.total, null);
+});
 
 test("contradictory native counters cannot be tolerated by a zero exit", () => {
   assert.equal(

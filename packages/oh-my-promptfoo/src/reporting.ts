@@ -198,13 +198,17 @@ function graderMeasurements(grade: unknown, failed: boolean): { cost: ResultCost
           },
         ];
       }
-      if (children.length) return collect(children);
       // Only known deterministic native checks establish that an unmeasured leaf
       // made no judge call. Custom JavaScript and unknown assertions stay unknown.
       const deterministic =
-        /^(?:not-)?(?:equals|contains|icontains|contains-any|contains-all|icontains-any|icontains-all|regex|starts-with|is-json|contains-json|is-valid-json-schema|is-xml|contains-xml|is-sql|contains-sql|is-html|is-valid-function-call|is-valid-openai-function-call|is-valid-openai-tools-call|is-valid-json|javascript-boolean|latency|cost|perplexity|perplexity-score)$/;
-      return deterministic.test(record(component.assertion).type)
-        ? []
+        /^(?:not-)?(?:skill-used|equals|contains|icontains|contains-any|contains-all|icontains-any|icontains-all|regex|starts-with|is-json|contains-json|is-valid-json-schema|is-xml|contains-xml|is-sql|contains-sql|is-html|is-valid-function-call|is-valid-openai-function-call|is-valid-openai-tools-call|is-valid-json|javascript-boolean|latency|cost|perplexity|perplexity-score)$/;
+      return !children.length && deterministic.test(record(component.assertion).type)
+        ? [
+            {
+              cost: responseCost({ cost: 0 }, undefined),
+              usage: usage({ total: 0, prompt: 0, completion: 0, cached: 0, numRequests: 0 }),
+            },
+          ]
         : [{ cost: sumCosts([]), usage: usage(undefined) }];
     });
   // Root assertions own measurements; aggregate tokens can contain synthetic
@@ -369,14 +373,19 @@ export function renderSummary(report: EvaluationReport): string {
       ? "unknown"
       : `${number(value.total)} tokens · ${number(value.requests)} requests`;
   const suite = report.suite?.number ?? 1;
+  const candidate = report.cases[0]?.candidate;
+  const sharedCandidate = candidate && report.cases.every((item) => item.candidate === candidate);
   const reference = (item: CaseReport) => `${suite}.${item.row}`;
   const title = (item: CaseReport) =>
-    `Test ${reference(item)}${item.label ? ` · ${escapeMarkup(item.label)}` : ""}${item.candidate ? ` (${escapeMarkup(item.candidate)})` : ""}`;
+    `Test ${reference(item)}${item.label ? ` · ${escapeMarkup(item.label)}` : ""}${item.candidate && !sharedCandidate ? ` (${escapeMarkup(item.candidate)})` : ""}`;
   const lines = [
-    `## Suite ${suite}${report.suite?.title ? ` · ${escapeMarkup(report.suite.title)}` : " · Promptfoo evaluation"} — ${badge(report.status)}`,
+    `## Evals — ${badge(report.status)}`,
+    "",
+    `### Suite ${suite}${report.suite?.title ? ` · ${escapeMarkup(report.suite.title)}` : " · Promptfoo evaluation"}`,
     "",
     "| Metric | Value |",
     "| --- | --- |",
+    ...(sharedCandidate ? [`| Candidate | ${escapeMarkup(candidate)} |`] : []),
     `| Tests | ${number(report.cases.length)} |`,
     `| Passed | ${report.counts.pass} |`,
     `| Failed | ${report.counts.fail} |`,
@@ -391,8 +400,8 @@ export function renderSummary(report: EvaluationReport): string {
     "",
     "### Results",
     "",
-    "| Test | Result | Agent time | Assertions passed |",
-    "| --- | --- | ---: | ---: |",
+    "| Test | Latency | Tokens | Cost | Status | Assertions passed |",
+    "| --- | ---: | ---: | ---: | --- | ---: |",
   ];
   let bytes = Buffer.byteLength(lines.join("\n"));
   const add = (block: string) => {
@@ -405,9 +414,10 @@ export function renderSummary(report: EvaluationReport): string {
   let truncated = false;
   for (const item of report.cases) {
     const checks = item.assertions.filter((check) => !check.reference.includes("."));
+    const tokens = sumUsage([item.candidateUsage, item.graderUsage]).total;
     if (
       !add(
-        `| ${title(item)} | ${badge(item.status)} | ${time(item.latencyMs)} | ${checks.length ? `${checks.filter((check) => check.status === "pass").length} / ${checks.length}` : "unknown"} |`,
+        `| ${title(item)} | ${time(item.latencyMs)} | ${number(tokens)} | ${money(sumCosts([item.candidateCost, item.graderCost]))} | ${badge(item.status)} | ${checks.length ? `${checks.filter((check) => check.status === "pass").length} / ${checks.length}` : "unknown"} |`,
       )
     ) {
       truncated = true;
@@ -436,7 +446,7 @@ export function renderSummary(report: EvaluationReport): string {
         const name = check.label
           ? `${escapeMarkup(check.label)}${names.get(check.label) === 1 ? "" : ` (check ${index + 1})`}`
           : `Check ${index + 1}`;
-        return `| ${name} | ${escapeMarkup(check.type ?? "custom")} | ${badge(check.status)} | ${score(check.score)} |${thresholds ? ` ${score(check.threshold)} |` : ""}`;
+        return `| ${name} | ${escapeMarkup(check.type ?? "custom")} | ${badge(check.status)} | ${score(check.score)} |${thresholds ? ` ${check.threshold === null ? "—" : score(check.threshold)} |` : ""}`;
       }),
       "",
       "</details>",
@@ -453,7 +463,7 @@ export function renderSummary(report: EvaluationReport): string {
     "",
     "Test numbers use suite.result-row, so Test 2.6 is result row 6 in Suite 2. Each candidate/repeat has its own result number.",
     "",
-    "Unknown means unmeasured or incomplete. ~ marks a token-price estimate. Costs are not invoices or savings. Displayed scores are rounded; native precision is retained in report.json.",
+    "Results-table tokens and cost include agent and grader when both are reported; latency is the agent's native latency. Unknown means unmeasured or incomplete. — means no assertion threshold was authored. ~ marks a token-price estimate. Costs are not invoices or savings. Native precision is retained in report.json.",
   );
   if (report.issues.length)
     lines.push(

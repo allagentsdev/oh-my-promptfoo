@@ -83,7 +83,7 @@ test("reports native verdicts without reapplying thresholds or leaking raw field
   assert.deepEqual(report.counts, { pass: 1, fail: 1, error: 0, unknown: 0 });
   assert.equal(report.cases[0].assertions[0].status, "fail");
   const rendered = renderSummary(report);
-  assert.ok(rendered.includes("| Test 1.1 | ✅ PASS | 10 ms | 1 / 2 |"));
+  assert.ok(rendered.includes("| Test 1.1 | 10 ms | unknown | unknown | ✅ PASS | 1 / 2 |"));
   assert.ok(!JSON.stringify(report).includes("PRIVATE_"));
   assert.ok(!rendered.includes("PRIVATE_"));
   // The explicit native suite policy can allow assertion failures; errors never qualify.
@@ -321,18 +321,63 @@ test("suite and result numbers match the table and details while named checks us
   input.config = { ...input.config, description: "Repository skill regression" } as any;
   const report = summarizeEvaluation(input, 0, { suiteNumber: 2, publicLabels: true });
   const markdown = renderSummary(report);
+  assert.ok(markdown.startsWith("## Evals — ✅ PASS"));
   assert.ok(markdown.includes("Suite 2 · Repository skill regression"));
-  assert.ok(markdown.includes("| Test 2.6 · Repository task 6 (Free candidate) | ✅ PASS |"));
+  assert.ok(markdown.includes("| Candidate | Free candidate |"));
+  assert.ok(markdown.includes("| Test | Latency | Tokens | Cost | Status | Assertions passed |"));
   assert.ok(
-    markdown.includes("<summary>Test 2.6 · Repository task 6 (Free candidate) — ✅ PASS</summary>"),
+    markdown.includes("| Test 2.6 · Repository task 6 | 10 ms | unknown | unknown | ✅ PASS |"),
   );
+  assert.ok(markdown.includes("<summary>Test 2.6 · Repository task 6 — ✅ PASS</summary>"));
   assert.ok(markdown.includes("| Artifact contract | equals | ✅ PASS | 100% |"));
   assert.ok(!markdown.includes("2.6/A1"));
   assert.equal(report.cases[5].test, 26);
   assert.equal(report.cases[5].row, 6);
   assert.ok(!JSON.stringify(report).includes("PRIVATE_"));
+  input.results.results[5].provider.label = "Other candidate";
+  const comparison = renderSummary(
+    summarizeEvaluation(input, 0, { suiteNumber: 2, publicLabels: true }),
+  );
+  assert.ok(comparison.includes("Test 2.6 · Repository task 6 (Other candidate)"));
+  assert.ok(comparison.includes("Test 2.1 · Repository task 1 (Free candidate)"));
+  assert.ok(!comparison.includes("| Candidate |"));
   for (const suiteNumber of [0, -1, 1.5, Number.NaN, Number.MAX_SAFE_INTEGER + 1])
     assert.throws(() => summarizeEvaluation(input, 0, { suiteNumber }), /Suite number/);
+});
+
+test("results show combined reported accounting and distinguish absent thresholds from missing measurements", () => {
+  const input = document([
+    row({
+      response: { cost: 0.02, tokenUsage: { total: 20, prompt: 15, completion: 5 } },
+      gradingResult: {
+        pass: true,
+        score: 1,
+        componentResults: [
+          {
+            ...assertion(),
+            assertion: { type: "javascript", metric: "workspace-review" },
+            tokensUsed: { total: 10, prompt: 7, completion: 3, numRequests: 1, cost: 0.01 },
+            componentResults: [
+              {
+                ...assertion(),
+                assertion: {
+                  type: "llm-rubric",
+                  metric: "verified-artifact",
+                  threshold: 1,
+                },
+              },
+            ],
+          },
+        ],
+      },
+    }),
+  ]);
+  const report = summarizeEvaluation(input, 0, { publicLabels: true });
+  const markdown = renderSummary(report);
+  assert.ok(markdown.includes("| 10 ms | 30 | $0.03 | ✅ PASS | 1 / 1 |"));
+  assert.ok(markdown.includes("| workspace-review | javascript | ✅ PASS | 100% | — |"));
+  assert.ok(markdown.includes("| verified-artifact | llm-rubric | ✅ PASS | 100% | 100% |"));
+  assert.equal(report.cases[0].assertions[0].threshold, null);
 });
 
 test("public labels are bounded, escaped and credential-redacted without publishing private results", () => {

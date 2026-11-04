@@ -14,10 +14,13 @@ major-version Action tag or floating-toolchain option.
 
 ## Readable reports and suite numbers
 
-The summary starts with a metrics table and a short results table. Each test has
+The **Evals** summary starts with a metrics table and a results table containing
+latency, tokens, cost, status and assertions passed. Results-table tokens and cost
+include candidate and grader only when both are reported. Each test has
 an expandable section containing its assertion outcomes and measured accounting.
 Scores are displayed as rounded percentages and native candidate latency in seconds or minutes;
-the native values remain unchanged in `report.json`.
+the native values remain unchanged in `report.json`. `—` means no assertion
+threshold was authored; it is not a missing measurement.
 
 Set `suite-number` to a positive integer unique among the Action invocations in
 your workflow. **Test 2.6** is the sixth evaluated result row in **Suite 2**. That
@@ -44,8 +47,8 @@ using known config/environment credential values. The default is `false`; raw
 answers, assertion values, grader reasons, generated files and provider IDs are
 never used as labels.
 
-For a formatting example before the live workflow is merged, the **Validate**
-job publishes a clearly labelled recorded six-case agent run from
+For a formatting example before the live workflow is merged, the dedicated
+**Evals** job publishes a clearly labelled recorded six-case agent run from
 [`examples/ci/live-report.json`](../examples/ci/live-report.json). It contains only
 the sanitized report and provenance of an actual model run. Its displayed
 failures are the recorded model results; previewing it makes no inference calls
@@ -330,6 +333,14 @@ existing package accounting helpers, or recorded Copilot model prices and the
 do not own extra spend. Grader errors have unknown usage/cost, including synthetic
 zero-token failure records. Absent costs, incomplete/mixed ledgers and unmeasured
 calls make totals unknown.
+
+The local artifact checker explicitly reports zero model calls and cost because
+it only parses and compares captured content. Known native local checks, including
+skill-use and exact matching, establish zero grader usage/cost without model calls.
+Neither masks the live workspace
+grader's reported usage or cost; arbitrary unmeasured JavaScript stays unknown.
+Missing grading results and unmeasured custom wrappers also stay unknown.
+
 Incomplete result coverage or execution also makes run totals unknown; individual
 measured rows remain visible. Promptfoo response cache hits add no new cost; cache
 read tokens billed by a model remain usage. Estimates are marked `~`; no list-price

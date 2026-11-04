@@ -220,7 +220,8 @@ test("real native CSV selection preserves repeated filters, regex, range, seeded
       assert.ok(rows[0].response.output.includes(literal));
       selected.push(rows[0].testCase.description);
       assert.equal(run.report.totals.candidateCost.usd, null);
-      assert.equal(run.report.totals.graderCost.usd, null);
+      assert.equal(run.report.totals.graderCost.usd, 0);
+      assert.equal(run.report.totals.graderUsage.requests, 0);
     }
     assert.ok(selected.every((value) => value === selected[0] && value.startsWith("kept case")));
     assert.equal(existsSync(marker), false);

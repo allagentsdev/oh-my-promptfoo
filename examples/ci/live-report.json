@@ -1,7 +1,7 @@
 {
-  "recordedAt": "2026-11-04T04:35:43.389Z",
+  "recordedAt": "2026-11-04T08:56:50.459Z",
   "model": "deepseek/deepseek-v4.1-flash",
-  "workspaceCommit": "d04f4c7304a6d94a439f4faa78b842f3235474aa",
+  "workspaceCommit": "4b911a47eb93013e950e6e765b813a1fd21c41b4",
   "configSha256": "7cb90efc04d64eee17b71653f483382443da64198d088702e35ca082264182f8",
   "report": {
     "version": 1,
@@ -26,28 +26,28 @@
         "candidate": "Pi / deepseek/deepseek-v4.1-flash",
         "status": "pass",
         "score": 1,
-        "latencyMs": 15979,
+        "latencyMs": 17196,
         "candidateUsage": {
-          "total": 15671,
-          "prompt": 15462,
+          "total": 15653,
+          "prompt": 15444,
           "completion": 209,
-          "cached": 7552,
+          "cached": 6656,
           "requests": 3
         },
         "graderUsage": {
-          "total": null,
-          "prompt": null,
-          "completion": null,
-          "cached": null,
-          "requests": null
+          "total": 4314,
+          "prompt": 4172,
+          "completion": 142,
+          "cached": 2048,
+          "requests": 2
         },
         "candidateCost": {
-          "usd": 0.0002368224,
+          "usd": 0.00023704128,
           "basis": "native"
         },
         "graderCost": {
-          "usd": null,
-          "basis": null
+          "usd": 0.00012553344,
+          "basis": "native"
         },
         "assertions": [
           {
@@ -92,28 +92,28 @@
         "candidate": "Pi / deepseek/deepseek-v4.1-flash",
         "status": "pass",
         "score": 1,
-        "latencyMs": 30266,
+        "latencyMs": 8051,
         "candidateUsage": {
-          "total": 24650,
-          "prompt": 24209,
-          "completion": 441,
-          "cached": 2688,
+          "total": 24334,
+          "prompt": 24005,
+          "completion": 329,
+          "cached": 11776,
           "requests": 3
         },
         "graderUsage": {
-          "total": null,
-          "prompt": null,
-          "completion": null,
-          "cached": null,
-          "requests": null
+          "total": 45523,
+          "prompt": 44718,
+          "completion": 805,
+          "cached": 24704,
+          "requests": 4
         },
         "candidateCost": {
-          "usd": 0.00045599616000000003,
+          "usd": 0.00037090943999999997,
           "basis": "native"
         },
         "graderCost": {
-          "usd": null,
-          "basis": null
+          "usd": 0.00082828224,
+          "basis": "native"
         },
         "assertions": [
           {
@@ -158,28 +158,28 @@
         "candidate": "Pi / deepseek/deepseek-v4.1-flash",
         "status": "pass",
         "score": 1,
-        "latencyMs": 27043,
+        "latencyMs": 9439,
         "candidateUsage": {
-          "total": 16688,
-          "prompt": 16370,
-          "completion": 318,
-          "cached": 2048,
+          "total": 24973,
+          "prompt": 24679,
+          "completion": 294,
+          "cached": 12800,
           "requests": 3
         },
         "graderUsage": {
-          "total": null,
-          "prompt": null,
-          "completion": null,
-          "cached": null,
-          "requests": null
+          "total": 7708,
+          "prompt": 7407,
+          "completion": 301,
+          "cached": 2816,
+          "requests": 2
         },
         "candidateCost": {
-          "usd": 0.00032251392,
+          "usd": 0.00034922304,
           "basis": "native"
         },
         "graderCost": {
-          "usd": null,
-          "basis": null
+          "usd": 0.00025837056,
+          "basis": "native"
         },
         "assertions": [
           {
@@ -224,28 +224,28 @@
         "candidate": "Pi / deepseek/deepseek-v4.1-flash",
         "status": "pass",
         "score": 1,
-        "latencyMs": 12977,
+        "latencyMs": 4967,
         "candidateUsage": {
-          "total": 59889,
-          "prompt": 59401,
-          "completion": 488,
-          "cached": 41472,
-          "requests": 5
+          "total": 38630,
+          "prompt": 38334,
+          "completion": 296,
+          "cached": 18816,
+          "requests": 3
         },
         "graderUsage": {
-          "total": null,
-          "prompt": null,
-          "completion": null,
-          "cached": null,
-          "requests": null
+          "total": 4368,
+          "prompt": 4212,
+          "completion": 156,
+          "cached": 2688,
+          "requests": 2
         },
         "candidateCost": {
-          "usd": 0.00067857984,
+          "usd": 0.00042715007999999995,
           "basis": "native"
         },
         "graderCost": {
-          "usd": null,
-          "basis": null
+          "usd": 0.00013561344,
+          "basis": "native"
         },
         "assertions": [
           {
@@ -290,28 +290,28 @@
         "candidate": "Pi / deepseek/deepseek-v4.1-flash",
         "status": "pass",
         "score": 1,
-        "latencyMs": 7630,
+        "latencyMs": 4743,
         "candidateUsage": {
-          "total": 16608,
-          "prompt": 16319,
-          "completion": 289,
-          "cached": 7936,
+          "total": 25089,
+          "prompt": 24761,
+          "completion": 328,
+          "cached": 12032,
           "requests": 3
         },
         "graderUsage": {
-          "total": null,
-          "prompt": null,
-          "completion": null,
-          "cached": null,
-          "requests": null
+          "total": 9386,
+          "prompt": 9028,
+          "completion": 358,
+          "cached": 4352,
+          "requests": 3
         },
         "candidateCost": {
-          "usd": 0.00029922048000000003,
+          "usd": 0.00037445184,
           "basis": "native"
         },
         "graderCost": {
-          "usd": null,
-          "basis": null
+          "usd": 0.00030819455999999996,
+          "basis": "native"
         },
         "assertions": [
           {
@@ -356,28 +356,28 @@
         "candidate": "Pi / deepseek/deepseek-v4.1-flash",
         "status": "pass",
         "score": 1,
-        "latencyMs": 12430,
+        "latencyMs": 10973,
         "candidateUsage": {
-          "total": 71897,
-          "prompt": 71344,
-          "completion": 553,
-          "cached": 40832,
-          "requests": 6
+          "total": 50017,
+          "prompt": 49555,
+          "completion": 462,
+          "cached": 16768,
+          "requests": 4
         },
         "graderUsage": {
-          "total": null,
-          "prompt": null,
-          "completion": null,
-          "cached": null,
-          "requests": null
+          "total": 4312,
+          "prompt": 4178,
+          "completion": 134,
+          "cached": 2688,
+          "requests": 2
         },
         "candidateCost": {
-          "usd": 0.0007944019199999999,
+          "usd": 0.00061204032,
           "basis": "native"
         },
         "graderCost": {
-          "usd": null,
-          "basis": null
+          "usd": 0.0001195776,
+          "basis": "native"
         },
         "assertions": [
           {
@@ -416,28 +416,28 @@
       }
     ],
     "totals": {
-      "latencyMs": 106325,
+      "latencyMs": 55369,
       "candidateUsage": {
-        "total": 205403,
-        "prompt": 203105,
-        "completion": 2298,
-        "cached": 102528,
-        "requests": 23
+        "total": 178696,
+        "prompt": 176778,
+        "completion": 1918,
+        "cached": 78848,
+        "requests": 19
       },
       "graderUsage": {
-        "total": null,
-        "prompt": null,
-        "completion": null,
-        "cached": null,
-        "requests": null
+        "total": 75611,
+        "prompt": 73715,
+        "completion": 1896,
+        "cached": 39296,
+        "requests": 15
       },
       "candidateCost": {
-        "usd": 0.00278753472,
+        "usd": 0.002370816,
         "basis": "native"
       },
       "graderCost": {
-        "usd": null,
-        "basis": null
+        "usd": 0.00177557184,
+        "basis": "native"
       }
     }
   }

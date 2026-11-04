@@ -8,6 +8,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   evaluate:
+    name: Evals
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
