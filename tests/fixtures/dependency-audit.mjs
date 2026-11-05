@@ -160,8 +160,12 @@ if (mode === "minimatch") {
       ["src/file.ts", "**/!(*.test).ts", {}, true],
       ["src/file.test.ts", "**/!(*.test).ts", {}, false],
       [".private/credentials.json", "**/credentials.json", { dot: true }, true],
+      [".env", "**/*", {}, false],
+      [".env", "**/*", { dot: true }, true],
+      [".git/config", "**/.git/**", { dot: true }, true],
     ])
       assert.equal(minimatch(path, glob, options), expected, `${path} against ${glob}`);
+    assert.equal(new Minimatch("**/*.ts").match("src/a.ts"), true);
   }
 }
 
@@ -188,6 +192,7 @@ if (mode === "glob") {
           "cases/nested/b.csv",
           "cases/notes.txt",
           "skip/c.yaml",
+          ".hidden.yaml",
         ]) {
           const path = join(directory, file);
           await mkdir(dirname(path), { recursive: true });
