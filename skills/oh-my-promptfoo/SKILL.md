@@ -24,7 +24,7 @@ provider before writing assertions:
 
 Workspace delegates are `openai:codex-sdk`, `anthropic:claude-agent-sdk`,
 `copilot-sdk`, and `pi-sdk`; choose explicit labeled provider entries.
-For Pi install `@earendil-works/pi-coding-agent@1.3.0`, set
+For Pi install `@earendil-works/pi-coding-agent@1.4.0`, set
 `delegate.id: pi-sdk` and nonempty `delegate.config.provider` and `model`,
 and supply `config.apiKey` or explicit credential variables in `delegate.env`.
 Optional `baseUrl` supports HTTP(S) local model endpoints without URL credentials.
@@ -324,8 +324,8 @@ by a time bound.
 ## Prove the run
 
 1. Install the package and the chosen delegate peer; Copilot uses
-   `@github/copilot-sdk@1.0.22` and Pi uses
-   `@earendil-works/pi-coding-agent@1.3.0`. Validate the authored config with
+   `@github/copilot-sdk@1.0.28` and Pi uses
+   `@earendil-works/pi-coding-agent@1.4.0`. Validate the authored config with
    `npx promptfoo validate config -c promptfooconfig.yaml`.
 2. Run `npx promptfoo eval -c promptfooconfig.yaml` with the required agent
    and, when applicable, judge credentials. Inspect the actual scored row.

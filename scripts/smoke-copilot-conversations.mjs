@@ -154,7 +154,7 @@ function assertEvidence(response, answer) {
     "the fixture returns no generated tool calls",
   );
   assert.deepEqual(response.metadata.toolInventory.loadedSkills, []);
-  assert.equal(response.metadata.copilot.sdkVersion, "1.0.22");
+  assert.equal(response.metadata.copilot.sdkVersion, "1.0.28");
 }
 
 function assertChatBoundary(requests, system, messages, ignored) {
@@ -208,7 +208,7 @@ test("source CopilotSdk and Agent use the installed runtime with credential-free
 }, async (t) => {
   const sdkEntry = fileURLToPath(import.meta.resolve("@github/copilot-sdk"));
   const sdk = JSON.parse(await readFile(join(dirname(sdkEntry), "../package.json"), "utf8"));
-  assert.equal(sdk.version, "1.0.22");
+  assert.equal(sdk.version, "1.0.28");
   assert.equal(typeof sdk.copilotCliVersion, "string");
   const root = await mkdtemp(join(tmpdir(), "copilot-conversations-smoke-"));
   const originalEnvironment = { ...process.env };
