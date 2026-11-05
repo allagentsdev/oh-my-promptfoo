@@ -17,6 +17,7 @@ import { promisify } from "node:util";
 import { readProgress } from "./eval-progress.js";
 import { secrets } from "./redaction.js";
 import {
+  addSourceLinks,
   type EvaluationProgress,
   type EvaluationReport,
   type ReportOptions,
@@ -179,6 +180,13 @@ async function readResults(
     const document = JSON.parse(await readFile(run.resultPath, "utf8"));
     run.resultsAvailable = true;
     run.report = summarizeEvaluation(document, exitCode, options);
+    if (options.publicLabels && options.source)
+      run.report = await addSourceLinks(
+        run.report,
+        options.source,
+        document,
+        options.sensitiveValues,
+      );
   } catch {
     run.report = summarizeEvaluation(undefined, exitCode, options);
   }
@@ -187,6 +195,7 @@ async function readResults(
 function reportingOptions(options: ReportOptions): ReportOptions {
   return {
     suiteNumber: options.suiteNumber,
+    source: options.source,
     publicLabels: options.publicLabels,
     sensitiveValues: options.publicLabels
       ? [
@@ -244,6 +253,28 @@ export async function runEvaluation(options: EvaluationOptions): Promise<Evaluat
     const args = options.args === undefined ? [] : options.args;
     const config = resolve(cwd, options.config);
     if (!(await stat(config)).isFile()) throw new Error("One local config file is required");
+    if (
+      options.github &&
+      options.publicLabels &&
+      !reporting.source &&
+      process.env.GITHUB_REPOSITORY
+    ) {
+      try {
+        const repositoryRoot = process.env.GITHUB_WORKSPACE || cwd;
+        const { stdout } = await promisify(execFile)("git", [
+          "-C",
+          repositoryRoot,
+          "rev-parse",
+          "HEAD",
+        ]);
+        reporting.source = {
+          configPath: config,
+          repositoryRoot,
+          repositoryUrl: `${process.env.GITHUB_SERVER_URL || "https://github.com"}/${process.env.GITHUB_REPOSITORY}`,
+          revision: stdout.trim(),
+        };
+      } catch {}
+    }
     const executable = await promptfooExecutable();
     const environment = {
       ...process.env,
@@ -390,15 +421,14 @@ export async function evaluationCommand(command: "eval" | "report", args: string
       parsed = null;
     }
     let completed = 0;
-    console.log(`Suite ${reporting.suiteNumber} · Evaluation started`);
+    console.log("Evaluation started");
     run = await runEvaluation({
       config,
       outputDirectory: output,
       workingDirectory: values.get("--working-directory"),
       args: parsed as string[],
       github,
-      onProgress: (progress) =>
-        console.log(renderProgress(progress, ++completed, reporting.suiteNumber)),
+      onProgress: (progress) => console.log(renderProgress(progress, ++completed)),
       ...reporting,
     });
   } else {

@@ -337,7 +337,7 @@ test("large summaries are bounded while normalized outcomes stay complete", () =
   assert.equal(report.cases.length, 15000);
 });
 
-test("suite and result numbers match the table and details while named checks use their metrics", () => {
+test("suite names title reports and result numbers match the table and details", () => {
   const input = document(
     Array.from({ length: 6 }, (_, index) =>
       row({
@@ -360,8 +360,9 @@ test("suite and result numbers match the table and details while named checks us
   input.config = { ...input.config, description: "Repository skill regression" } as any;
   const report = summarizeEvaluation(input, 0, { suiteNumber: 2, publicLabels: true });
   const markdown = renderSummary(report);
-  assert.ok(markdown.startsWith("## Evals — ✅ PASS"));
-  assert.ok(markdown.includes("Suite 2 · Repository skill regression"));
+  assert.ok(markdown.startsWith("## Repository skill regression — ✅ PASS"));
+  assert.ok(!markdown.includes("Suite 2"));
+  assert.ok(renderConsoleSummary(report).startsWith("Repository skill regression · PASS"));
   assert.ok(!markdown.includes("Test 2."));
   assert.ok(markdown.includes("| Candidate | Free candidate |"));
   assert.ok(markdown.includes("| Test | Latency | Tokens | Cost | Status | Assertions passed |"));

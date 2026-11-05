@@ -1,7 +1,9 @@
 import { safeCount, safeMultiplier } from "./copilot-accounting.js";
+import { type SourceOptions, sourceUrl } from "./eval-sources.js";
 import { redact, secrets } from "./redaction.js";
 import { type ResultCost, record, responseCost, sumCosts } from "./result-cost.js";
 
+export { addSourceLinks, type SourceOptions } from "./eval-sources.js";
 export { estimateCopilotCost } from "./result-cost.js";
 
 export type Outcome = "pass" | "fail" | "error" | "unknown";
@@ -25,6 +27,7 @@ export interface CaseReport {
   test: number;
   column: number;
   label?: string;
+  source?: { url: string; location: "test" | "file" };
   candidate?: string;
   status: Outcome;
   score: number | null;
@@ -53,8 +56,10 @@ export interface EvaluationReport {
 }
 
 export interface ReportOptions {
-  /** Caller-assigned number, unique among suites in one workflow. Defaults to 1. */
+  /** Legacy JSON reference. Suite numbers are not displayed. */
   suiteNumber?: number;
+  /** Checked-in source context for links; only used with publicLabels. */
+  source?: SourceOptions;
   /** Publish authored descriptions, provider labels and assertion metrics/types. Defaults to false. */
   publicLabels?: boolean;
   /** Additional credential values to redact from explicitly public labels. */
@@ -393,16 +398,26 @@ const formats = reportFormats();
 /** Render only normalized outcomes and explicitly public, redacted labels. */
 export function renderSummary(report: EvaluationReport): string {
   const { number, score, time, money, escapeMarkup, badge, usageSummary } = formats;
-  const suite = report.suite?.number ?? 1;
   const rowThresholds = report.cases.some((item) => item.threshold !== undefined);
   const candidate = report.cases[0]?.candidate;
   const sharedCandidate = candidate && report.cases.every((item) => item.candidate === candidate);
-  const title = (item: CaseReport) =>
-    `Test ${item.row}${item.label ? ` · ${escapeMarkup(item.label)}` : ""}${item.candidate && !sharedCandidate ? ` (${escapeMarkup(item.candidate)})` : ""}`;
+  const title = (item: CaseReport, html = false) => {
+    const escapeLabel = html
+      ? (text: string) => text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+      : escapeMarkup;
+    const name = `Test ${item.row}${item.label ? ` · ${escapeLabel(item.label)}` : ""}${item.candidate && !sharedCandidate ? ` (${escapeLabel(item.candidate)})` : ""}`;
+    const url = sourceUrl(item.source?.url);
+    if (!url) return name;
+    const hint =
+      item.source?.location === "test"
+        ? "Test definition"
+        : "Source file; exact test location unavailable";
+    return html
+      ? `<a href="${url.replace(/&/g, "&amp;").replace(/"/g, "&quot;")}" title="${hint}">${name}</a>`
+      : `[${name}](<${url}> "${hint}")`;
+  };
   const lines = [
-    `## Evals — ${badge(report.status)}`,
-    "",
-    `### Suite ${suite}${report.suite?.title ? ` · ${escapeMarkup(report.suite.title)}` : " · Promptfoo evaluation"}`,
+    `## ${escapeMarkup(report.suite?.title ?? "Promptfoo evaluation")} — ${badge(report.status)}`,
     "",
     "| Metric | Value |",
     "| --- | --- |",
@@ -452,7 +467,7 @@ export function renderSummary(report: EvaluationReport): string {
     for (const check of item.assertions)
       if (check.label) names.set(check.label, (names.get(check.label) ?? 0) + 1);
     const detail = [
-      `<details><summary>${title(item)} — ${badge(item.status)}</summary>`,
+      `<details><summary>${title(item, true)} — ${badge(item.status)}</summary>`,
       "",
       `Native score: **${score(item.score)}** · Agent time: **${time(item.latencyMs)}**`,
       "",
@@ -506,9 +521,8 @@ function consoleLabel(value: string): string {
 export function renderConsoleSummary(report: EvaluationReport): string {
   const { number, score, time, usageSummary } = formats;
   const money = (cost: ResultCost) => formats.money(cost).replace("&lt;", "<");
-  const suite = report.suite?.number ?? 1;
   const lines = [
-    `Suite ${suite}${report.suite?.title ? ` · ${consoleLabel(report.suite.title)}` : ""} · ${report.status.toUpperCase()}`,
+    `${consoleLabel(report.suite?.title ?? "Promptfoo evaluation")} · ${report.status.toUpperCase()}`,
     `Tests: ${report.cases.length}; passed: ${report.counts.pass}; failed: ${report.counts.fail}; errors: ${report.counts.error}; unknown outcomes: ${report.counts.unknown}`,
     `Agent: ${usageSummary(report.totals.candidateUsage)}; cost: ${money(report.totals.candidateCost)}; total agent time: ${time(report.totals.latencyMs)}`,
     `Grader: ${usageSummary(report.totals.graderUsage)}; cost: ${money(report.totals.graderCost)}`,
@@ -542,6 +556,10 @@ export interface EvaluationProgress {
   latencyMs: number | null;
 }
 
-export function renderProgress(progress: EvaluationProgress, completed: number, suite = 1): string {
-  return `Suite ${suite} · Completed ${completed} · native test ${progress.test}, column ${progress.column} · ${progress.status === "pending" ? "COMPARISON PENDING" : progress.status.toUpperCase()} · ${formats.time(progress.latencyMs)}`;
+export function renderProgress(
+  progress: EvaluationProgress,
+  completed: number,
+  _suite?: number,
+): string {
+  return `Completed ${completed} · native test ${progress.test}, column ${progress.column} · ${progress.status === "pending" ? "COMPARISON PENDING" : progress.status.toUpperCase()} · ${formats.time(progress.latencyMs)}`;
 }

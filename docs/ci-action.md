@@ -12,9 +12,15 @@ Actions use commit pins. Pin this Action to a reviewed commit too; stable `vX.Y.
 tags follow the package's [release process](releasing.md). There is no automatic
 major-version Action tag or floating-toolchain option.
 
-## Readable reports and suite numbers
+## Suite cards and test links
 
-The **Evals** summary starts with a metrics table and a results table containing
+Use **one suite per job**, with the job's `name` set to the suite name. GitHub
+groups step summaries into job cards, so two Action invocations in the same job
+share a card. Separate named jobs or matrix entries produce separate cards.
+The report heading uses the authored config's `description` when public labels
+are enabled; suite numbers are not displayed.
+
+Each summary starts with a metrics table and a results table containing
 latency, tokens, cost, status and assertions passed. Results-table tokens and cost
 include candidate and grader only when both are reported. Each test has
 an expandable section containing its assertion outcomes and measured accounting.
@@ -30,8 +36,8 @@ The Action and local `eval` CLI print a line as each native `afterEach` hook
 completes, while other tests can still be running:
 
 ```text
-Suite 2 · Evaluation started
-Suite 2 · Completed 1 · native test 3, column 1 · PASS · 9.4 s
+Evaluation started
+Completed 1 · native test 3, column 1 · PASS · 9.4 s
 ```
 
 Concurrent cases can finish out of order. `Completed` counts completion events;
@@ -53,8 +59,7 @@ rows, so those live events say `COMPARISON PENDING`. The final native export own
 their verdicts. A saved-run preview prints its final console report and explicitly
 labels it as recorded; it does not replay fabricated live-completion events.
 
-Set `suite-number` to a positive integer unique among the Action invocations in
-your workflow. Tests restart at **1** in each suite card: **Test 6** is that
+Tests restart at **1** in each suite card: **Test 6** is that
 suite's sixth evaluated result row. The same number appears in the results table
 and its expandable details. Checks use
 their authored metric names; only unnamed or duplicate metrics need a numbered
@@ -62,11 +67,26 @@ fallback within that test. Separate candidates and repeats each get their own
 result number. The JSON retains the native row/test/column mapping. These are
 report references, not case IDs or a selection language.
 
-GitHub orders summaries from different jobs by job completion time, not by suite
-number. To guarantee Suite 1 appears before Suite 2, run both as sequential steps
-in the same job. Use `if: always()` on the later step to retain its report when an
-earlier suite fails; the earlier failure still fails the job. Parallel matrix
-jobs keep their completion-based ordering.
+GitHub orders job cards by completion time. When order matters, make the later
+job depend on the earlier job with `needs`, and use `if: ${{ always() }}` on the
+later job so it still publishes after an earlier failure. Both jobs keep their
+own status. Parallel matrix cards keep their completion-based ordering.
+
+With public labels enabled, the Action links test names in the results table and
+expandable details to their checked-in definitions. Links use the caller
+checkout's commit, including when native filters, samples, providers or repeats
+change result order. Static YAML and JSON definitions, inline tests, scenarios
+and local test-file references/globs get line anchors when a unique definition
+is found. Duplicate descriptions can be disambiguated by literal test variables.
+CSV, generated tests and ambiguous definitions get a source-file link explicitly
+labelled as having no exact test location. Unavailable Git history omits links;
+it never changes the evaluation verdict. The lookup reads committed blobs and
+does not run config code, providers or graders. No source text enters the report.
+Suites mixing CSV, generated or remote resources with static cases use config-file
+links when result ownership cannot be established safely.
+
+The legacy `suite-number` input and JSON reference remain accepted for existing
+callers. They do not control card titles or display numbering.
 
 Readable authored labels are opt-in:
 
@@ -74,7 +94,6 @@ Readable authored labels are opt-in:
 - uses: allagentsdev/oh-my-promptfoo@<reviewed-commit>
   with:
     config: evals/release.yaml
-    suite-number: '2'
     public-labels: 'true'
 ```
 
@@ -85,9 +104,9 @@ using known config/environment credential values. The default is `false`; raw
 answers, assertion values, grader reasons, generated files and provider IDs are
 never used as labels.
 
-For a formatting example before the live workflow is merged, the dedicated
-**Evals** job first runs the local release suite as Suite 1, then publishes a
-clearly labelled recorded six-case agent run as Suite 2 from
+For a formatting example before the live workflow is merged, the validation
+workflow publishes the local release suite and a clearly labelled recorded
+six-case agent run in separate named job cards. The recorded report comes from
 [`examples/ci/live-report.json`](../examples/ci/live-report.json). It contains only
 the sanitized report and provenance of an actual model run. Its displayed
 failures are the recorded model results; previewing it makes no inference calls
@@ -113,6 +132,7 @@ permissions:
   contents: read
 jobs:
   required:
+    name: Required name-normalization release regression
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -197,7 +217,7 @@ export OPENROUTER_MODEL=deepseek/deepseek-v4.1-flash
 node scripts/check-live-agent-eval.mjs
 node packages/oh-my-promptfoo/dist/cli.js eval \
   --config packages/oh-my-promptfoo/evals/live/promptfooconfig.yaml \
-  --suite-number 1 --public-labels true -- \
+  --public-labels true -- \
   --no-cache --max-concurrency 1
 ```
 
@@ -215,14 +235,13 @@ permissions:
   contents: read
 jobs:
   compare:
+    name: Offline model comparison · ${{ matrix.candidate }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - { candidate: baseline, suite: 1 }
-          - { candidate: candidate, suite: 2 }
+        candidate: [baseline, candidate]
     steps:
       - uses: actions/checkout@v7
       - uses: ./
@@ -231,7 +250,6 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         with:
           config: examples/ci/comparison.yaml
-          suite-number: ${{ matrix.suite }}
           public-labels: 'true'
           args-json: >-
             ["--filter-providers", "^${{ matrix.candidate }}$",
@@ -393,7 +411,7 @@ your lockfile, the same runner and reporter work locally:
 allagents-promptfoo eval --config examples/ci/release.yaml --output-dir .promptfoo-ci -- \
   --filter-metadata suite=required --filter-metadata language=latin --no-cache
 allagents-promptfoo report --results .promptfoo-ci/run-ABC123/results.json --output-dir .promptfoo-ci
-allagents-promptfoo report --results .promptfoo-ci/run-ABC123/results.json --suite-number 2 --public-labels true
+allagents-promptfoo report --results .promptfoo-ci/run-ABC123/results.json --public-labels true
 allagents-promptfoo eval --config examples/ci/release.yaml --args-file /private/native-args.json
 ```
 
@@ -404,11 +422,36 @@ source checkout, run `pnpm install --frozen-lockfile`, `pnpm build`, then replac
 invocation; without a process exit code it conservatively gates on native row
 outcomes. Programmatic consumers can import `summarizeEvaluation`, `renderSummary`
 and `estimateCopilotCost` from `oh-my-promptfoo/reporting`.
-`summarizeEvaluation(document, exitCode, { suiteNumber: 2, publicLabels: true })`
+`summarizeEvaluation(document, exitCode, { publicLabels: true })`
 opts into the same numbered public labels; programmatic callers can supply
 additional `sensitiveValues` for redaction. The CLI also uses known credential
 values from its environment. These reporting options belong before the `--`
 separator; arguments after it still go unchanged to Promptfoo.
+
+Source links are also available locally through the same helper. Run this in the
+checkout containing the config and the native result export:
+
+```js
+import { execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
+import { addSourceLinks, renderSummary, summarizeEvaluation } from 'oh-my-promptfoo/reporting';
+
+const native = JSON.parse(readFileSync('.promptfoo-ci/run-ABC123/results.json', 'utf8'));
+const report = summarizeEvaluation(native, undefined, { publicLabels: true });
+const linked = await addSourceLinks(report, {
+  configPath: 'examples/ci/release.yaml',
+  repositoryRoot: process.cwd(),
+  repositoryUrl: 'https://github.com/allagentsdev/oh-my-promptfoo',
+  revision: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(),
+}, native);
+console.log(renderSummary(linked));
+```
+
+Use your repository URL, config and actual result path. `addSourceLinks` also
+accepts an existing sanitized report without the optional native document. Supply
+the evaluated revision, rather than a later checkout, for a historical report.
+The recorded live preview stores its verified source URLs with the sanitized
+report, so rendering it needs neither Git history nor another model call.
 
 The [official Action's inputs](https://github.com/promptfoo/promptfoo-action/blob/main/action.yml)
 and [implementation](https://github.com/promptfoo/promptfoo-action/blob/main/src/main.ts)

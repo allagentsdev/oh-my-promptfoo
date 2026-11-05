@@ -82,7 +82,11 @@
             "score": 1,
             "threshold": 1
           }
-        ]
+        ],
+        "source": {
+          "url": "https://github.com/allagentsdev/oh-my-promptfoo/blob/4b911a47eb93013e950e6e765b813a1fd21c41b4/packages/oh-my-promptfoo/evals/live/promptfooconfig.yaml#L66",
+          "location": "test"
+        }
       },
       {
         "row": 2,
@@ -148,7 +152,11 @@
             "score": 1,
             "threshold": 1
           }
-        ]
+        ],
+        "source": {
+          "url": "https://github.com/allagentsdev/oh-my-promptfoo/blob/4b911a47eb93013e950e6e765b813a1fd21c41b4/packages/oh-my-promptfoo/evals/live/promptfooconfig.yaml#L86",
+          "location": "test"
+        }
       },
       {
         "row": 3,
@@ -214,7 +222,11 @@
             "score": 1,
             "threshold": 1
           }
-        ]
+        ],
+        "source": {
+          "url": "https://github.com/allagentsdev/oh-my-promptfoo/blob/4b911a47eb93013e950e6e765b813a1fd21c41b4/packages/oh-my-promptfoo/evals/live/promptfooconfig.yaml#L105",
+          "location": "test"
+        }
       },
       {
         "row": 4,
@@ -280,7 +292,11 @@
             "score": 1,
             "threshold": 1
           }
-        ]
+        ],
+        "source": {
+          "url": "https://github.com/allagentsdev/oh-my-promptfoo/blob/4b911a47eb93013e950e6e765b813a1fd21c41b4/packages/oh-my-promptfoo/evals/live/promptfooconfig.yaml#L124",
+          "location": "test"
+        }
       },
       {
         "row": 5,
@@ -346,7 +362,11 @@
             "score": 1,
             "threshold": 1
           }
-        ]
+        ],
+        "source": {
+          "url": "https://github.com/allagentsdev/oh-my-promptfoo/blob/4b911a47eb93013e950e6e765b813a1fd21c41b4/packages/oh-my-promptfoo/evals/live/promptfooconfig.yaml#L140",
+          "location": "test"
+        }
       },
       {
         "row": 6,
@@ -412,7 +432,11 @@
             "score": 1,
             "threshold": 1
           }
-        ]
+        ],
+        "source": {
+          "url": "https://github.com/allagentsdev/oh-my-promptfoo/blob/4b911a47eb93013e950e6e765b813a1fd21c41b4/packages/oh-my-promptfoo/evals/live/promptfooconfig.yaml#L162",
+          "location": "test"
+        }
       }
     ],
     "totals": {

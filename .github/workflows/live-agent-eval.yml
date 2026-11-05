@@ -8,7 +8,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   evaluate:
-    name: Evals
+    name: Repository agent skill regression
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
@@ -39,6 +39,5 @@ jobs:
           PROMPTFOO_DISABLE_ADAPTIVE_SCHEDULER: 'true'
         with:
           config: packages/oh-my-promptfoo/evals/live/promptfooconfig.yaml
-          suite-number: '1'
           public-labels: 'true'
           args-json: '["--no-cache", "--max-concurrency", "1"]'

@@ -20,7 +20,7 @@ inputs:
     description: Local artifact parent directory, relative to working-directory; each invocation creates a fresh child
     default: '.promptfoo-ci'
   suite-number:
-    description: Positive suite number for the card heading; tests are numbered from 1 within each suite
+    description: Legacy JSON suite reference; not displayed in reports or required for separate job cards
     default: '1'
   public-labels:
     description: Publish authored suite/test descriptions, provider labels and assertion metric names; keep false for private labels

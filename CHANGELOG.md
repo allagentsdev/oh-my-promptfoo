@@ -4,6 +4,8 @@
 
 ### Features
 
+* Give each evaluation suite its own named GitHub job card, without displayed suite numbers. Link numbered tests to committed YAML/JSON definitions and preserve file-level links when an exact case location is unavailable; expose the same source-link helper for local reporting.
+
 * Stream numeric native test completions to CI/local consoles through Promptfoo's public hooks, preserving authored extensions and private logs. Print final sanitized assertion/accounting reports locally and in Actions; show authored overall score thresholds without changing native verdicts.
 
 * Make CI summaries readable with numbered suites/tests, opt-in public authored labels, compact metrics/results tables and expandable assertions. Add a recorded six-task real agent example for reviewing the format before merge; preserve native scores and unknown measurements.

@@ -254,12 +254,37 @@ test("native argument boundaries reserve config, output and execution ownership"
 
 test("the authored local release suite reports zero model usage and restarts test numbering within its card", async () => {
   const directory = await fixture();
+  const githubKeys = [
+    "GITHUB_WORKSPACE",
+    "GITHUB_REPOSITORY",
+    "GITHUB_SERVER_URL",
+    "GITHUB_OUTPUT",
+    "GITHUB_STEP_SUMMARY",
+  ] as const;
+  const previous = Object.fromEntries(githubKeys.map((key) => [key, process.env[key]]));
   try {
+    Object.assign(process.env, {
+      GITHUB_WORKSPACE: root,
+      GITHUB_REPOSITORY: "allagentsdev/oh-my-promptfoo",
+      GITHUB_SERVER_URL: "https://github.com",
+      GITHUB_OUTPUT: join(directory, "outputs"),
+      GITHUB_STEP_SUMMARY: join(directory, "summary"),
+    });
+    const source = {
+      configPath: join(root, "examples/ci/release.yaml"),
+      repositoryRoot: root,
+      repositoryUrl: "https://github.com/allagentsdev/oh-my-promptfoo",
+      revision: spawnSync("git", ["rev-parse", "HEAD"], {
+        cwd: root,
+        encoding: "utf8",
+      }).stdout.trim(),
+    };
     const run = await runEvaluation({
       config: join(root, "examples/ci/release.yaml"),
       outputDirectory: directory,
       suiteNumber: 9,
       publicLabels: true,
+      github: true,
       args: [
         "--filter-metadata",
         "suite=required",
@@ -277,13 +302,31 @@ test("the authored local release suite reports zero model usage and restarts tes
       assert.equal(item.graderCost.usd, 0);
     }
     const markdown = await readFile(run.summaryPath, "utf8");
-    assert.ok(markdown.includes("Suite 9 · Required name-normalization release regression"));
+    assert.ok(markdown.includes("## Required name-normalization release regression — ✅ PASS"));
+    assert.ok(!markdown.includes("Suite 9"));
     assert.ok(markdown.includes("Local text normalizer \\(no model\\)"));
-    assert.ok(markdown.includes("| Test 1 · Preserve a single name |"));
-    assert.ok(markdown.includes("<summary>Test 4 · Empty input stays empty"));
+    assert.ok(markdown.includes("[Test 1 · Preserve a single name](<https://github.com/"));
+    assert.ok(markdown.includes('<summary><a href="https://github.com/'));
+    assert.equal(
+      run.report.cases.every((item) => item.source?.location === "test"),
+      true,
+    );
+    assert.ok(
+      run.report.cases
+        .find((item) => item.label === "Preserve a single name")
+        ?.source?.url.endsWith("/examples/ci/cases.yaml#L1"),
+    );
+    const privateReport = await reportEvaluation(run.resultPath, join(directory, "private"), {
+      source,
+    });
+    assert.ok(!JSON.stringify(privateReport.report).includes("github.com"));
     assert.ok(!markdown.includes("Test 9."));
     assert.ok(!markdown.includes("| unknown") && !markdown.includes("unknown |"));
   } finally {
+    for (const key of githubKeys) {
+      if (previous[key] === undefined) delete process.env[key];
+      else process.env[key] = previous[key];
+    }
     await rm(directory, { recursive: true, force: true });
   }
 }, 120_000);
@@ -554,7 +597,7 @@ test("the actual Action shell step runs native CLI, sets outputs on failure and 
       },
     });
     assert.equal(result.status, 1, result.stdout + result.stderr);
-    assert.match(result.stdout, /Suite 7 · Completed 1 · native test 1, column 1 · FAIL/);
+    assert.match(result.stdout, /Completed 1 · native test 1, column 1 · FAIL/);
     assert.match(result.stdout, /Test 1 · Reject a wrong answer · FAIL/);
     assert.match(result.stdout, /Grader: 0 tokens · 0 requests; cost: \$0\.00/);
     assert.ok(!result.stdout.includes("PRIVATE_") && !result.stderr.includes("PRIVATE_"));
@@ -571,7 +614,8 @@ test("the actual Action shell step runs native CLI, sets outputs on failure and 
     assert.equal(existsSync(join(directory, "must-not-write.json")), false);
     const markdown = await readFile(summary, "utf8");
     assert.ok(markdown.includes("| Failed | 1 |") && markdown.includes("unknown"));
-    assert.ok(markdown.includes("Suite 7 · Public Action regression"));
+    assert.ok(markdown.includes("## Public Action regression — ❌ FAIL"));
+    assert.ok(!markdown.includes("Suite 7"));
     assert.equal((markdown.match(/Test 1 · Reject a wrong answer/g) ?? []).length, 2);
     const local = await reportEvaluation(values["result-path"], join(directory, "local-report"), {
       suiteNumber: 8,

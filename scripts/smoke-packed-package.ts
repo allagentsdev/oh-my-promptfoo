@@ -30,6 +30,7 @@ const reportStatus: Reporting.Outcome = report.status;
 const markdown: string = Reporting.renderSummary(report);
 const consoleReport: string = Reporting.renderConsoleSummary(report);
 const progressLine: string = Reporting.renderProgress({test:1,column:1,status:'pass',latencyMs:0},1);
+const sourceReport: Promise<Reporting.EvaluationReport> = Reporting.addSourceLinks(report, {configPath:'suite.yaml',repositoryRoot:'.',repositoryUrl:'https://github.com/example/evals',revision:'0'.repeat(40)});
 const estimate: number | undefined = Reporting.estimateCopilotCost({}, {}, 'fixture');
 const agent: Providers.Agent = new Providers.Agent();
 const copilot: Providers.CopilotSdk = new Providers.CopilotSdk();
@@ -465,7 +466,7 @@ for(const provider of [judge,{text:judge},fallback])await assert.rejects(grade(p
     );
     const paths = JSON.parse(localEvaluation.trim().split("\n").at(-1)!);
     if (
-      !localEvaluation.includes("Suite 1 · Completed 1 · native test") ||
+      !localEvaluation.includes("Completed 1 · native test") ||
       !localEvaluation.includes("Test 4") ||
       !localEvaluation.includes("Grader: 0 tokens · 0 requests; cost: $0.00")
     )
