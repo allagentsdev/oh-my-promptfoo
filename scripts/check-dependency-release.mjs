@@ -8,9 +8,11 @@ const bundledDependencies = [
   "import-meta-resolve",
   "jsonc-parser",
   "@opentelemetry/api",
+  "@opentelemetry/api-compat",
   "@opentelemetry/context-async-hooks",
   "@opentelemetry/core",
   "@opentelemetry/sdk-trace-node",
+  "@opentelemetry/sdk-trace",
 ];
 /** @type {DependencySection[]} */
 const dependencySections = [

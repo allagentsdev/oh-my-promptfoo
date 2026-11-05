@@ -11,7 +11,9 @@ import {
   type Span,
   SpanStatusCode,
   trace,
-} from "@opentelemetry/api";
+} from "@opentelemetry/api-compat";
+// The host reads Promptfoo's registry: API 1.9 readers support both tested
+// host registry versions, whereas API 1.10 readers cannot see a 1.9 registry.
 import { resolve as resolveImport } from "import-meta-resolve";
 import { closed, type DelegateId, type JsonObject, object, validateEnv } from "./config.js";
 import { copilotFailure } from "./copilot-accounting.js";

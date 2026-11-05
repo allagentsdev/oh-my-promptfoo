@@ -9,7 +9,7 @@ import { pathToFileURL } from "node:url";
 import { context, propagation, trace } from "@opentelemetry/api";
 import { AsyncLocalStorageContextManager } from "@opentelemetry/context-async-hooks";
 import { W3CTraceContextPropagator } from "@opentelemetry/core";
-import { NodeTracerProvider, type ReadableSpan } from "@opentelemetry/sdk-trace-node";
+import { type ReadableSpan, TracerProvider } from "@opentelemetry/sdk-trace";
 import { afterEach, expect, test, vi } from "vitest";
 import {
   agentAssert,
@@ -514,7 +514,7 @@ for (const [config, write, edit] of [
 for (const id of candidates) {
   test(`${id} preserves display names, call ids and arguments with normalized MCP span identity`, async () => {
     const spans: ReadableSpan[] = [];
-    const telemetry = new NodeTracerProvider({
+    const telemetry = new TracerProvider({
       spanProcessors: [
         {
           onStart() {},
@@ -526,10 +526,9 @@ for (const id of candidates) {
         },
       ],
     });
-    telemetry.register({
-      propagator: new W3CTraceContextPropagator(),
-      contextManager: new AsyncLocalStorageContextManager(),
-    });
+    trace.setGlobalTracerProvider(telemetry);
+    context.setGlobalContextManager(new AsyncLocalStorageContextManager().enable());
+    propagation.setGlobalPropagator(new W3CTraceContextPropagator());
     const root = await projectFor(id);
     const provider = candidate(root, id);
     try {
@@ -888,7 +887,7 @@ test("Claude rejects ambiguous namespace prefixes in per-test overrides", async 
 test("Copilot retains authoritative structured identity for overlapping server prefixes", async () => {
   const root = await consumerProject();
   const spans: ReadableSpan[] = [];
-  const telemetry = new NodeTracerProvider({
+  const telemetry = new TracerProvider({
     spanProcessors: [
       {
         onStart() {},
@@ -900,10 +899,9 @@ test("Copilot retains authoritative structured identity for overlapping server p
       },
     ],
   });
-  telemetry.register({
-    propagator: new W3CTraceContextPropagator(),
-    contextManager: new AsyncLocalStorageContextManager(),
-  });
+  trace.setGlobalTracerProvider(telemetry);
+  context.setGlobalContextManager(new AsyncLocalStorageContextManager().enable());
+  propagation.setGlobalPropagator(new W3CTraceContextPropagator());
   const provider = candidate(
     root,
     "copilot-sdk",
