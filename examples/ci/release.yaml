@@ -2,5 +2,6 @@ description: Required name-normalization release regression
 prompts:
   - '{{input}}'
 providers:
-  - file://normalizer.mjs
+  - id: file://normalizer.mjs
+    label: Local text normalizer (no model)
 tests: file://cases.yaml

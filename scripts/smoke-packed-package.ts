@@ -466,7 +466,9 @@ for(const provider of [judge,{text:judge},fallback])await assert.rejects(grade(p
     if (
       localReport.status !== "pass" ||
       localReport.counts.pass !== 4 ||
-      localReport.totals.candidateCost.usd !== null ||
+      localReport.totals.candidateCost.usd !== 0 ||
+      localReport.totals.candidateUsage.total !== 0 ||
+      localReport.totals.candidateUsage.requests !== 0 ||
       localReport.totals.graderCost.usd !== 0 ||
       localReport.totals.graderUsage.total !== 0 ||
       localReport.totals.graderUsage.requests !== 0

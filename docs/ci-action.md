@@ -23,8 +23,9 @@ the native values remain unchanged in `report.json`. `—` means no assertion
 threshold was authored; it is not a missing measurement.
 
 Set `suite-number` to a positive integer unique among the Action invocations in
-your workflow. **Test 2.6** is the sixth evaluated result row in **Suite 2**. That
-same number appears in the results table and its expandable details. Checks use
+your workflow. Tests restart at **1** in each suite card: **Test 6** is that
+suite's sixth evaluated result row. The same number appears in the results table
+and its expandable details. Checks use
 their authored metric names; only unnamed or duplicate metrics need a numbered
 fallback within that test. Separate candidates and repeats each get their own
 result number. The JSON retains the native row/test/column mapping. These are
@@ -60,7 +61,8 @@ after building with `node packages/oh-my-promptfoo/evals/live/preview.mjs`.
 This runs the complete fixed required suite. No sample, range or first-N filter is
 used. All four cases and their exact assertions live in
 [`examples/ci/cases.yaml`](../examples/ci/cases.yaml). The local candidate needs no
-credentials; replace its provider with your checked-in application/agent config
+credentials and explicitly reports zero model tokens, requests and cost because
+it only normalizes text locally. Replace its provider with your checked-in application/agent config
 for a production gate. Do not set `PROMPTFOO_PASS_RATE_THRESHOLD` if every native
 row must pass.
 

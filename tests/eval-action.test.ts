@@ -78,6 +78,42 @@ test("native argument boundaries reserve config, output and execution ownership"
     assert.throws(() => validateNativeArgs(args));
 });
 
+test("the authored local release suite reports zero model usage and restarts test numbering within its card", async () => {
+  const directory = await fixture();
+  try {
+    const run = await runEvaluation({
+      config: join(root, "examples/ci/release.yaml"),
+      outputDirectory: directory,
+      suiteNumber: 9,
+      publicLabels: true,
+      args: [
+        "--filter-metadata",
+        "suite=required",
+        "--filter-metadata",
+        "language=latin",
+        "--no-cache",
+      ],
+    });
+    assert.equal(run.report.status, "pass");
+    assert.equal(run.report.counts.pass, 4);
+    for (const item of [run.report.totals, ...run.report.cases]) {
+      assert.equal(item.candidateCost.usd, 0);
+      assert.equal(item.candidateUsage.total, 0);
+      assert.equal(item.candidateUsage.requests, 0);
+      assert.equal(item.graderCost.usd, 0);
+    }
+    const markdown = await readFile(run.summaryPath, "utf8");
+    assert.ok(markdown.includes("Suite 9 · Required name-normalization release regression"));
+    assert.ok(markdown.includes("Local text normalizer \\(no model\\)"));
+    assert.ok(markdown.includes("| Test 1 · Preserve a single name |"));
+    assert.ok(markdown.includes("<summary>Test 4 · Empty input stays empty"));
+    assert.ok(!markdown.includes("Test 9."));
+    assert.ok(!markdown.includes("| unknown") && !markdown.includes("unknown |"));
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+}, 120_000);
+
 test("offline CLI reports redact config-only and ambient credentials from persisted public labels", async () => {
   const directory = await fixture();
   try {
@@ -213,7 +249,7 @@ test("real native CSV selection preserves repeated filters, regex, range, seeded
       assert.equal(run.report.suite?.number, 3);
       assert.ok(run.report.cases[0].label?.startsWith("kept case"));
       const summary = await readFile(run.summaryPath, "utf8");
-      assert.ok(summary.includes("Test 3.1 · kept case") && !summary.includes("excluded"));
+      assert.ok(summary.includes("Test 1 · kept case") && !summary.includes("excluded"));
       const rows = (await json(run.resultPath)).results.results;
       assert.equal(rows.length, 1);
       assert.equal(rows[0].provider.label, label);
@@ -359,13 +395,13 @@ test("the actual Action shell step runs native CLI, sets outputs on failure and 
     const markdown = await readFile(summary, "utf8");
     assert.ok(markdown.includes("| Failed | 1 |") && markdown.includes("unknown"));
     assert.ok(markdown.includes("Suite 7 · Public Action regression"));
-    assert.equal((markdown.match(/Test 7\.1 · Reject a wrong answer/g) ?? []).length, 2);
+    assert.equal((markdown.match(/Test 1 · Reject a wrong answer/g) ?? []).length, 2);
     const local = await reportEvaluation(values["result-path"], join(directory, "local-report"), {
       suiteNumber: 8,
       publicLabels: true,
     });
     assert.ok(
-      (await readFile(local.summaryPath, "utf8")).includes("Test 8.1 · Reject a wrong answer"),
+      (await readFile(local.summaryPath, "utf8")).includes("Test 1 · Reject a wrong answer"),
     );
     assert.ok(!markdown.includes("PRIVATE_") && !markdown.includes("http"));
   } finally {

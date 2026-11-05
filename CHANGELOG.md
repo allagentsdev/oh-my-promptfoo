@@ -18,6 +18,8 @@
 
 ### Bug Fixes
 
+* Number tests from 1 within each suite card. Make the local name-normalization example report its known zero model usage and cost instead of leaving measurements absent.
+
 * Give eval previews their own Evals job instead of appending them beneath Vitest's summary. Show latency, combined reported tokens/cost and assertion outcomes in the results table; distinguish unauthored thresholds from missing measurements. Preserve measured workspace-grader accounting alongside stock skill checks and the zero-call artifact checker.
 
 * **dependencies:** pin reviewed Glob `14.0.3` and Minimatch `11.0.2` workspace overrides for cancellation and pattern-expansion advisories while retaining Promptfoo `0.125.1` and Pi `1.3.0`. Add behavioral security and matching regressions.

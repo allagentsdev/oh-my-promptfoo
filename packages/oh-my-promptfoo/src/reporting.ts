@@ -375,9 +375,8 @@ export function renderSummary(report: EvaluationReport): string {
   const suite = report.suite?.number ?? 1;
   const candidate = report.cases[0]?.candidate;
   const sharedCandidate = candidate && report.cases.every((item) => item.candidate === candidate);
-  const reference = (item: CaseReport) => `${suite}.${item.row}`;
   const title = (item: CaseReport) =>
-    `Test ${reference(item)}${item.label ? ` · ${escapeMarkup(item.label)}` : ""}${item.candidate && !sharedCandidate ? ` (${escapeMarkup(item.candidate)})` : ""}`;
+    `Test ${item.row}${item.label ? ` · ${escapeMarkup(item.label)}` : ""}${item.candidate && !sharedCandidate ? ` (${escapeMarkup(item.candidate)})` : ""}`;
   const lines = [
     `## Evals — ${badge(report.status)}`,
     "",
@@ -461,7 +460,7 @@ export function renderSummary(report: EvaluationReport): string {
     lines.push("", "Summary truncated. The local report.json retains every reported outcome.");
   lines.push(
     "",
-    "Test numbers use suite.result-row, so Test 2.6 is result row 6 in Suite 2. Each candidate/repeat has its own result number.",
+    "Tests are numbered from 1 within each suite. Each candidate/repeat has its own result number.",
     "",
     "Results-table tokens and cost include agent and grader when both are reported; latency is the agent's native latency. Unknown means unmeasured or incomplete. — means no assertion threshold was authored. ~ marks a token-price estimate. Costs are not invoices or savings. Native precision is retained in report.json.",
   );
