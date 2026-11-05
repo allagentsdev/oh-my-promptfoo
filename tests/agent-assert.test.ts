@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { realpathSync } from "node:fs";
 import { cp, mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
@@ -47,7 +48,12 @@ interface RecordedCall {
   config: Record<string, unknown>;
   context?: Record<string, unknown>;
   permissions?: { kind: string }[];
-  environment?: { label?: string; codexHome?: string; codexHomeFiles?: string[] };
+  environment?: {
+    label?: string;
+    codexHome?: string;
+    codexHomeFiles?: string[];
+    hasToken?: boolean;
+  };
 }
 
 async function withGrader(
@@ -130,7 +136,7 @@ export class CopilotClient {
   on(fn){listener=fn;return ()=>{};},
   async sendAndWait({prompt}){
    const permissions=await Promise.all(['read','write','shell','url','mcp'].map(kind=>config.onPermissionRequest({kind,path:config.workingDirectory+'/input.txt'})));
-   const next=await reply({id:'copilot-sdk',prompt,workingDir:config.workingDirectory,config:{model:config.model,discovery:config.enableConfigDiscovery},permissions});
+   const next=await reply({id:'copilot-sdk',prompt,workingDir:config.workingDirectory,config:{model:config.model,reasoning_effort:config.reasoningEffort,discovery:config.enableConfigDiscovery},permissions,environment:{hasToken:Boolean(process.env.GH_TOKEN)}});
    last=next;
    if(next.error)throw Error(next.error);
    if(next.forbidden){
@@ -189,6 +195,135 @@ export class CopilotClient {
     await rm(root, { recursive: true, force: true });
   }
 }
+
+test("agentAssert inherits Copilot grading settings and auth while enforcing read-only permissions", async () => {
+  await withGrader(async ({ queue, calls, context }) => {
+    const base = context("copilot-sdk");
+    const { grader: _explicit, ...config } = base.config;
+    const provider = {
+      id: () => "copilot:inherited-model",
+      config: { model: "inherited-model", reasoning_effort: "medium" },
+      async callApi() {
+        throw new Error("The text judge must not inspect the workspace");
+      },
+    };
+    await queue([{ output: verdict() }]);
+    const previous = process.env.GH_TOKEN;
+    try {
+      process.env.GH_TOKEN = "synthetic-inherited-token";
+      assert.equal(
+        (await agentAssert("answer", { ...base, config, test: { options: { provider } } })).pass,
+        true,
+      );
+    } finally {
+      if (previous === undefined) delete process.env.GH_TOKEN;
+      else process.env.GH_TOKEN = previous;
+    }
+    const call = (await calls())[0];
+    assert.equal(call.config.model, "inherited-model");
+    assert.equal(call.config.reasoning_effort, "medium");
+    assert.equal(call.environment?.hasToken, true);
+    assert.deepEqual(
+      call.permissions?.map((p) => p.kind),
+      ["approve-once", "reject", "reject", "reject", "reject"],
+    );
+  });
+});
+
+test("agentAssert preserves explicit overrides and fails clearly for incompatible defaults", async () => {
+  await withGrader(async ({ queue, calls, context }) => {
+    const base = context("copilot-sdk");
+    const provider = {
+      id: () => "other-text-provider",
+      async callApi() {
+        throw new Error("unused");
+      },
+    };
+    await queue([{ output: verdict() }]);
+    assert.equal(
+      (await agentAssert("answer", { ...base, test: { options: { provider } } })).pass,
+      true,
+    );
+    await queue([]);
+    const { grader: _explicit, ...config } = base.config;
+    await assert.rejects(
+      agentAssert("answer", { ...base, config, test: { options: { provider } } }),
+      /does not support workspace inspection/,
+    );
+    await assert.rejects(agentAssert("answer", { ...base, config }), /grading provider/);
+    await assert.rejects(
+      agentAssert("answer", {
+        ...base,
+        config,
+        test: {
+          options: {
+            provider: {
+              ...provider,
+              id: () => "copilot:limited",
+              config: { model: "limited", max_tokens: 100 },
+            },
+          },
+        },
+      }),
+      /cannot inherit.*max_tokens/,
+    );
+    assert.equal((await calls()).length, 0);
+  });
+});
+
+test("agentAssert verifies decoded snapshots and rejects corrupt or invalid text before execution", async () => {
+  await withGrader(async ({ workspace, queue, calls, context }) => {
+    const bytes = Buffer.from([0x93, 0xfa, 0x96, 0x7b]);
+    await writeFile(join(workspace, "message.txt"), bytes);
+    const base = context("copilot-sdk");
+    const file = {
+      kind: "file",
+      change: "added",
+      encoding: "base64",
+      size: bytes.length,
+      content: bytes.toString("base64"),
+      sha256: `sha256:${createHash("sha256").update(bytes).digest("hex")}`,
+    };
+    const input = {
+      ...base,
+      config: { ...base.config, workspaceEvidence: { encodings: { "**/*.txt": "shift_jis" } } },
+      providerResponse: {
+        metadata: {
+          ...base.providerResponse.metadata,
+          fileChanges: {
+            schemaVersion: 2,
+            status: "complete",
+            truncated: false,
+            deletedFiles: [],
+            changedFiles: { "message.txt": file },
+          },
+        },
+      },
+    };
+    await queue([{ output: verdict() }]);
+    const result = await agentAssert("answer", input);
+    assert.equal(result.pass, true);
+    assert.ok((await calls())[0].prompt.includes("日本"));
+    assert.deepEqual(result.metadata.workspaceEvidence, {
+      includedPaths: ["message.txt"],
+      omittedPaths: [],
+      truncated: false,
+      captureTruncated: false,
+      maxBytes: 65536,
+    });
+    await queue([]);
+    file.sha256 = "sha256:wrong";
+    assert.equal((await agentAssert("answer", input)).metadata.graderError, true);
+    const invalid = Buffer.from([0x82]);
+    Object.assign(file, {
+      size: invalid.length,
+      content: invalid.toString("base64"),
+      sha256: `sha256:${createHash("sha256").update(invalid).digest("hex")}`,
+    });
+    assert.equal((await agentAssert("answer", input)).metadata.graderError, true);
+    assert.equal((await calls()).length, 0);
+  });
+});
 
 test("agentAssert shares component scoring and inspects the live workspace with every delegate", async () => {
   await withGrader(async ({ workspace, queue, calls, context }) => {
