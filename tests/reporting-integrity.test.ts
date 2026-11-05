@@ -39,7 +39,7 @@ test("known local native assertions establish zero grader spend while missing or
   assert.equal(report.totals.graderCost.usd, 0);
   assert.equal(report.totals.graderUsage.total, 0);
   assert.equal(report.totals.graderUsage.requests, 0);
-  assert.ok(renderSummary(report).includes("| 10 ms | 20 | $0.02 | ✅ PASS | 1 / 1 |"));
+  assert.ok(renderSummary(report).includes("| 10 ms | 20 | $0.0200 | ✅ PASS | 1 / 1 |"));
   for (const gradingResult of [
     undefined,
     { pass: true, score: 1, componentResults: [] },

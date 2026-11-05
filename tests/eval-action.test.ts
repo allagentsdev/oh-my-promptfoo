@@ -302,7 +302,7 @@ test("the authored local release suite reports zero model usage and restarts tes
       assert.equal(item.graderCost.usd, 0);
     }
     const markdown = await readFile(run.summaryPath, "utf8");
-    assert.ok(markdown.includes("## Required name-normalization release regression — ✅ PASS"));
+    assert.ok(markdown.includes("## Evals — ✅ PASS"));
     assert.ok(!markdown.includes("Suite 9"));
     assert.ok(markdown.includes("Local text normalizer \\(no model\\)"));
     assert.ok(markdown.includes("[Test 1 · Preserve a single name](<https://github.com/"));
@@ -314,7 +314,7 @@ test("the authored local release suite reports zero model usage and restarts tes
     assert.ok(
       run.report.cases
         .find((item) => item.label === "Preserve a single name")
-        ?.source?.url.endsWith("/examples/ci/cases.yaml#L1"),
+        ?.source?.url.endsWith("/examples/ci/cases.yaml#L1-L9"),
     );
     const privateReport = await reportEvaluation(run.resultPath, join(directory, "private"), {
       source,
@@ -614,7 +614,7 @@ test("the actual Action shell step runs native CLI, sets outputs on failure and 
     assert.equal(existsSync(join(directory, "must-not-write.json")), false);
     const markdown = await readFile(summary, "utf8");
     assert.ok(markdown.includes("| Failed | 1 |") && markdown.includes("unknown"));
-    assert.ok(markdown.includes("## Public Action regression — ❌ FAIL"));
+    assert.ok(markdown.includes("## Evals — ❌ FAIL"));
     assert.ok(!markdown.includes("Suite 7"));
     assert.equal((markdown.match(/Test 1 · Reject a wrong answer/g) ?? []).length, 2);
     const local = await reportEvaluation(values["result-path"], join(directory, "local-report"), {

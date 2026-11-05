@@ -84,9 +84,10 @@
           }
         ],
         "source": {
-          "url": "https://github.com/allagentsdev/oh-my-promptfoo/blob/4b911a47eb93013e950e6e765b813a1fd21c41b4/packages/oh-my-promptfoo/evals/live/promptfooconfig.yaml#L66",
+          "url": "https://github.com/allagentsdev/oh-my-promptfoo/blob/4b911a47eb93013e950e6e765b813a1fd21c41b4/packages/oh-my-promptfoo/evals/live/promptfooconfig.yaml#L66-L85",
           "location": "test"
-        }
+        },
+        "threshold": 1
       },
       {
         "row": 2,
@@ -154,9 +155,10 @@
           }
         ],
         "source": {
-          "url": "https://github.com/allagentsdev/oh-my-promptfoo/blob/4b911a47eb93013e950e6e765b813a1fd21c41b4/packages/oh-my-promptfoo/evals/live/promptfooconfig.yaml#L86",
+          "url": "https://github.com/allagentsdev/oh-my-promptfoo/blob/4b911a47eb93013e950e6e765b813a1fd21c41b4/packages/oh-my-promptfoo/evals/live/promptfooconfig.yaml#L86-L104",
           "location": "test"
-        }
+        },
+        "threshold": 1
       },
       {
         "row": 3,
@@ -224,9 +226,10 @@
           }
         ],
         "source": {
-          "url": "https://github.com/allagentsdev/oh-my-promptfoo/blob/4b911a47eb93013e950e6e765b813a1fd21c41b4/packages/oh-my-promptfoo/evals/live/promptfooconfig.yaml#L105",
+          "url": "https://github.com/allagentsdev/oh-my-promptfoo/blob/4b911a47eb93013e950e6e765b813a1fd21c41b4/packages/oh-my-promptfoo/evals/live/promptfooconfig.yaml#L105-L123",
           "location": "test"
-        }
+        },
+        "threshold": 1
       },
       {
         "row": 4,
@@ -294,9 +297,10 @@
           }
         ],
         "source": {
-          "url": "https://github.com/allagentsdev/oh-my-promptfoo/blob/4b911a47eb93013e950e6e765b813a1fd21c41b4/packages/oh-my-promptfoo/evals/live/promptfooconfig.yaml#L124",
+          "url": "https://github.com/allagentsdev/oh-my-promptfoo/blob/4b911a47eb93013e950e6e765b813a1fd21c41b4/packages/oh-my-promptfoo/evals/live/promptfooconfig.yaml#L124-L139",
           "location": "test"
-        }
+        },
+        "threshold": 1
       },
       {
         "row": 5,
@@ -364,9 +368,10 @@
           }
         ],
         "source": {
-          "url": "https://github.com/allagentsdev/oh-my-promptfoo/blob/4b911a47eb93013e950e6e765b813a1fd21c41b4/packages/oh-my-promptfoo/evals/live/promptfooconfig.yaml#L140",
+          "url": "https://github.com/allagentsdev/oh-my-promptfoo/blob/4b911a47eb93013e950e6e765b813a1fd21c41b4/packages/oh-my-promptfoo/evals/live/promptfooconfig.yaml#L140-L161",
           "location": "test"
-        }
+        },
+        "threshold": 1
       },
       {
         "row": 6,
@@ -434,9 +439,10 @@
           }
         ],
         "source": {
-          "url": "https://github.com/allagentsdev/oh-my-promptfoo/blob/4b911a47eb93013e950e6e765b813a1fd21c41b4/packages/oh-my-promptfoo/evals/live/promptfooconfig.yaml#L162",
+          "url": "https://github.com/allagentsdev/oh-my-promptfoo/blob/4b911a47eb93013e950e6e765b813a1fd21c41b4/packages/oh-my-promptfoo/evals/live/promptfooconfig.yaml#L162-L180",
           "location": "test"
-        }
+        },
+        "threshold": 1
       }
     ],
     "totals": {

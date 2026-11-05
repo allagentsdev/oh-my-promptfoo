@@ -8,7 +8,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   evaluate:
-    name: Repository agent skill regression
+    name: Run Evals - Repository agent skill regression
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:

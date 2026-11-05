@@ -7,7 +7,7 @@ permissions:
   contents: read
 jobs:
   native-eval-action:
-    name: Required name-normalization release regression
+    name: Run Evals - Required name-normalization release regression
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -18,7 +18,7 @@ jobs:
           public-labels: 'true'
           args-json: '["--filter-metadata", "suite=required", "--filter-metadata", "language=latin", "--no-cache"]'
   recorded-agent-eval:
-    name: Repository agent skill regression
+    name: Run Evals - Repository agent skill regression
     needs: native-eval-action
     if: ${{ always() }}
     runs-on: ubuntu-latest

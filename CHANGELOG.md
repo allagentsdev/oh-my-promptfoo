@@ -4,7 +4,7 @@
 
 ### Features
 
-* Give each evaluation suite its own named GitHub job card, without displayed suite numbers. Link numbered tests to committed YAML/JSON definitions and preserve file-level links when an exact case location is unavailable; expose the same source-link helper for local reporting.
+* Give each evaluation suite its own `Run Evals - <suite name>` GitHub job card with an `Evals` status heading, without displayed suite numbers. Link numbered tests to full committed YAML/JSON blocks and preserve file-level links when an exact case location is unavailable; expose the same source-link helper for local reporting. Always show native score vs authored threshold, and round costs to four decimal places unless more precision is needed to avoid displaying positive spend as zero.
 
 * Stream numeric native test completions to CI/local consoles through Promptfoo's public hooks, preserving authored extensions and private logs. Print final sanitized assertion/accounting reports locally and in Actions; show authored overall score thresholds without changing native verdicts.
 

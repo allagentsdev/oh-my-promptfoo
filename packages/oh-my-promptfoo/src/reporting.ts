@@ -371,10 +371,12 @@ function reportFormats() {
   };
   const money = (cost: ResultCost) => {
     if (cost.usd === null) return "unknown";
+    const digits =
+      cost.usd > 0 && Number(cost.usd.toFixed(4)) === 0 ? Math.ceil(-Math.log10(cost.usd)) : 4;
     const amount =
-      cost.usd > 0 && cost.usd < 0.00000001
-        ? "&lt;$0.00000001"
-        : `$${cost.usd.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 8, useGrouping: false })}`;
+      digits > 20
+        ? `$${cost.usd.toExponential(0)}`
+        : `$${cost.usd.toLocaleString("en-US", { minimumFractionDigits: digits, maximumFractionDigits: digits, useGrouping: false })}`;
     return `${cost.basis === "estimate" ? "~" : ""}${amount}`;
   };
   const escapeMarkup = (value: string) =>
@@ -398,7 +400,6 @@ const formats = reportFormats();
 /** Render only normalized outcomes and explicitly public, redacted labels. */
 export function renderSummary(report: EvaluationReport): string {
   const { number, score, time, money, escapeMarkup, badge, usageSummary } = formats;
-  const rowThresholds = report.cases.some((item) => item.threshold !== undefined);
   const candidate = report.cases[0]?.candidate;
   const sharedCandidate = candidate && report.cases.every((item) => item.candidate === candidate);
   const title = (item: CaseReport, html = false) => {
@@ -417,7 +418,7 @@ export function renderSummary(report: EvaluationReport): string {
       : `[${name}](<${url}> "${hint}")`;
   };
   const lines = [
-    `## ${escapeMarkup(report.suite?.title ?? "Promptfoo evaluation")} — ${badge(report.status)}`,
+    `## Evals — ${badge(report.status)}`,
     "",
     "| Metric | Value |",
     "| --- | --- |",
@@ -436,8 +437,8 @@ export function renderSummary(report: EvaluationReport): string {
     "",
     "### Results",
     "",
-    `| Test | Latency | Tokens | Cost | Status | Assertions passed |${rowThresholds ? " Score / threshold |" : ""}`,
-    `| --- | ---: | ---: | ---: | --- | ---: |${rowThresholds ? " ---: |" : ""}`,
+    "| Test | Latency | Tokens | Cost | Status | Assertions passed | Score vs threshold |",
+    "| --- | ---: | ---: | ---: | --- | ---: | ---: |",
   ];
   let bytes = Buffer.byteLength(lines.join("\n"));
   const add = (block: string) => {
@@ -453,7 +454,7 @@ export function renderSummary(report: EvaluationReport): string {
     const tokens = sumUsage([item.candidateUsage, item.graderUsage]).total;
     if (
       !add(
-        `| ${title(item)} | ${time(item.latencyMs)} | ${number(tokens)} | ${money(sumCosts([item.candidateCost, item.graderCost]))} | ${badge(item.status)} | ${checks.length ? `${checks.filter((check) => check.status === "pass").length} / ${checks.length}` : "unknown"} |${rowThresholds ? ` ${item.threshold === undefined ? "—" : `${score(item.score)} / ${score(item.threshold)}`} |` : ""}`,
+        `| ${title(item)} | ${time(item.latencyMs)} | ${number(tokens)} | ${money(sumCosts([item.candidateCost, item.graderCost]))} | ${badge(item.status)} | ${checks.length ? `${checks.filter((check) => check.status === "pass").length} / ${checks.length}` : "unknown"} | ${score(item.score)} / ${item.threshold === undefined ? "—" : score(item.threshold)} |`,
       )
     ) {
       truncated = true;

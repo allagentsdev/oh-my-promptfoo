@@ -14,21 +14,23 @@ major-version Action tag or floating-toolchain option.
 
 ## Suite cards and test links
 
-Use **one suite per job**, with the job's `name` set to the suite name. GitHub
+Use **one suite per job**, with the job's `name` set to `Run Evals - <suite name>`. GitHub
 groups step summaries into job cards, so two Action invocations in the same job
 share a card. Separate named jobs or matrix entries produce separate cards.
-The report heading uses the authored config's `description` when public labels
-are enabled; suite numbers are not displayed.
+The report heading is `Evals — ✅ PASS` (or the native failure/error status);
+suite numbers are not displayed.
 
 Each summary starts with a metrics table and a results table containing
-latency, tokens, cost, status and assertions passed. Results-table tokens and cost
+latency, tokens, cost, status, assertions passed and **Score vs threshold**. Results-table tokens and cost
 include candidate and grader only when both are reported. Each test has
 an expandable section containing its assertion outcomes and measured accounting.
 Scores are displayed as rounded percentages and native candidate latency in seconds or minutes;
 the native values remain unchanged in `report.json`. `—` means no assertion
 threshold was authored; it is not a missing measurement.
-When tests author an overall `threshold`, the results table also shows the native
-score alongside that threshold. The displayed score never determines the verdict.
+The results table always shows each native score alongside its authored overall
+test `threshold`, or `—` when none was authored. The displayed score never determines
+the verdict. Costs use four decimal places, with extra precision when a positive
+amount would otherwise round to zero. Native cost precision stays in `report.json`.
 
 ### Live console progress
 
@@ -76,7 +78,7 @@ With public labels enabled, the Action links test names in the results table and
 expandable details to their checked-in definitions. Links use the caller
 checkout's commit, including when native filters, samples, providers or repeats
 change result order. Static YAML and JSON definitions, inline tests, scenarios
-and local test-file references/globs get line anchors when a unique definition
+and local test-file references/globs get line ranges covering the entire test block when a unique definition
 is found. Duplicate descriptions can be disambiguated by literal test variables.
 CSV, generated tests and ambiguous definitions get a source-file link explicitly
 labelled as having no exact test location. Unavailable Git history omits links;
@@ -132,7 +134,7 @@ permissions:
   contents: read
 jobs:
   required:
-    name: Required name-normalization release regression
+    name: Run Evals - Required name-normalization release regression
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -235,7 +237,7 @@ permissions:
   contents: read
 jobs:
   compare:
-    name: Offline model comparison · ${{ matrix.candidate }}
+    name: Run Evals - Offline model comparison · ${{ matrix.candidate }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     strategy:

@@ -42,9 +42,9 @@ export async function addSourceLinks(
       .filter(Boolean);
     if (!tracked.includes(config)) return report;
     const sensitive = [...secrets(record(record(document).config), {}), ...sensitiveValues];
-    const link = (path: string, line?: number) => {
+    const link = (path: string, line?: number, endLine?: number) => {
       if (redact(path, sensitive) !== path) return;
-      const url = `${base.replace(/\/$/, "")}/blob/${options.revision}/${path.split("/").map(encodeURIComponent).join("/")}${line ? `#L${line}` : ""}`;
+      const url = `${base.replace(/\/$/, "")}/blob/${options.revision}/${path.split("/").map(encodeURIComponent).join("/")}${line ? `#L${line}${endLine && endLine > line ? `-L${endLine}` : ""}` : ""}`;
       return redact(url, sensitive) === url ? sourceUrl(url) : undefined;
     };
     const candidates: {
@@ -100,7 +100,11 @@ export async function addSourceLinks(
         } else if (isMap(node) && node.range) {
           const description = node.get("description");
           const vars = node.get("vars", true);
-          const url = link(path, counter.linePos(node.range[0]).line);
+          const url = link(
+            path,
+            counter.linePos(node.range[0]).line,
+            counter.linePos(node.range[1] - 1).line,
+          );
           if (url)
             candidates.push({
               ...(typeof description === "string" ? { description } : {}),

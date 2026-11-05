@@ -82,9 +82,10 @@ test("console and Markdown show authored score thresholds without overriding nat
   const report = summarizeEvaluation(input, 100, { suiteNumber: 4, publicLabels: true });
   const markdown = renderSummary(report),
     consoleText = renderConsoleSummary(report);
-  assert.ok(markdown.includes("Score / threshold"));
+  assert.ok(markdown.startsWith("## Evals — ❌ FAIL"));
+  assert.ok(markdown.includes("Score vs threshold"));
   assert.ok(markdown.includes("❌ FAIL | 1 / 1 | 95% / 90% |"));
-  assert.ok(markdown.includes("✅ PASS | 1 / 1 | — |"));
+  assert.ok(markdown.includes("✅ PASS | 1 / 1 | 100% / — |"));
   assert.ok(consoleText.includes("Test 1 · A required check"));
   assert.ok(consoleText.includes("FAIL · 10 ms · score 95% / threshold 90%"));
   assert.ok(consoleText.includes("Agent: unknown; cost: unknown"));
@@ -284,7 +285,7 @@ test("Copilot estimates follow recorded tiers, cache writes and model provenance
     ]),
   );
   assert.equal(report.totals.candidateCost.basis, "estimate");
-  assert.ok(renderSummary(report).includes("~$0.000145"));
+  assert.ok(renderSummary(report).includes("~$0.0001"));
 });
 
 test("batch diagnostic children are shown once and do not duplicate judge spend", () => {
@@ -337,7 +338,7 @@ test("large summaries are bounded while normalized outcomes stay complete", () =
   assert.equal(report.cases.length, 15000);
 });
 
-test("suite names title reports and result numbers match the table and details", () => {
+test("Evals titles reports and result numbers match the table and details", () => {
   const input = document(
     Array.from({ length: 6 }, (_, index) =>
       row({
@@ -360,7 +361,7 @@ test("suite names title reports and result numbers match the table and details",
   input.config = { ...input.config, description: "Repository skill regression" } as any;
   const report = summarizeEvaluation(input, 0, { suiteNumber: 2, publicLabels: true });
   const markdown = renderSummary(report);
-  assert.ok(markdown.startsWith("## Repository skill regression — ✅ PASS"));
+  assert.ok(markdown.startsWith("## Evals — ✅ PASS"));
   assert.ok(!markdown.includes("Suite 2"));
   assert.ok(renderConsoleSummary(report).startsWith("Repository skill regression · PASS"));
   assert.ok(!markdown.includes("Test 2."));
@@ -415,7 +416,7 @@ test("results show combined reported accounting and distinguish absent threshold
   ]);
   const report = summarizeEvaluation(input, 0, { publicLabels: true });
   const markdown = renderSummary(report);
-  assert.ok(markdown.includes("| 10 ms | 30 | $0.03 | ✅ PASS | 1 / 1 |"));
+  assert.ok(markdown.includes("| 10 ms | 30 | $0.0300 | ✅ PASS | 1 / 1 | 100% / — |"));
   assert.ok(markdown.includes("| workspace-review | javascript | ✅ PASS | 100% | — |"));
   assert.ok(markdown.includes("| verified-artifact | llm-rubric | ✅ PASS | 100% | 100% |"));
   assert.equal(report.cases[0].assertions[0].threshold, null);
@@ -509,7 +510,19 @@ test("display rounding preserves native scores and never rounds a positive spend
   );
   const markdown = renderSummary(report);
   assert.ok(markdown.includes("33.3%") && markdown.includes("19.1 s"));
-  assert.ok(markdown.includes("&lt;$0.00000001"));
+  assert.ok(markdown.includes("$0.0000000001"));
   assert.equal(report.cases[0].score, 1 / 3);
   assert.equal(report.cases[0].candidateCost.usd, 0.0000000001);
+  for (const [usd, formatted] of [
+    [0, "$0.0000"],
+    [0.00237082, "$0.0024"],
+    [0.000049, "$0.00005"],
+    [0.000000145, "$0.0000001"],
+    [1e-25, "$1e-25"],
+  ] as const) {
+    report.cases[0].candidateCost.usd = usd;
+    assert.ok(renderSummary(report).includes(formatted));
+    assert.ok(renderConsoleSummary(report).includes(formatted));
+    assert.equal(report.cases[0].candidateCost.usd, usd);
+  }
 });

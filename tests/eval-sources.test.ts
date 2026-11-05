@@ -62,7 +62,7 @@ test("filtered, reordered and repeated native rows link to committed YAML sectio
     "suite.yaml":
       "description: Authored suite\ntests:\n  - description: Inline case\n    vars: {input: inline}\n  - file://cases *.yaml\n",
     "cases #1.yaml":
-      "- description: First external\n  vars: {input: first}\n- description: Repeated label\n  vars: {input: A}\n- description: Repeated label\n  vars: {input: B}\n",
+      "- description: First external\n  vars: {input: first}\n  assert:\n    - type: equals\n      value: first\n- description: Repeated label\n  vars: {input: A}\n- description: Repeated label\n  vars: {input: B}\n",
   });
   try {
     // The report links to evaluated history even if the checkout has changed since.
@@ -79,14 +79,14 @@ test("filtered, reordered and repeated native rows link to committed YAML sectio
     assert.deepEqual(
       linked.cases.map((item) => item.source?.url),
       [
-        `https://github.com/example/evals/blob/${source.revision}/cases%20%231.yaml#L5`,
-        `https://github.com/example/evals/blob/${source.revision}/suite.yaml#L3`,
-        `https://github.com/example/evals/blob/${source.revision}/cases%20%231.yaml#L1`,
-        `https://github.com/example/evals/blob/${source.revision}/cases%20%231.yaml#L1`,
+        `https://github.com/example/evals/blob/${source.revision}/cases%20%231.yaml#L8-L9`,
+        `https://github.com/example/evals/blob/${source.revision}/suite.yaml#L3-L4`,
+        `https://github.com/example/evals/blob/${source.revision}/cases%20%231.yaml#L1-L5`,
+        `https://github.com/example/evals/blob/${source.revision}/cases%20%231.yaml#L1-L5`,
       ],
     );
     const markdown = renderSummary(linked);
-    assert.ok(markdown.startsWith("## Authored suite — ✅ PASS"));
+    assert.ok(markdown.startsWith("## Evals — ✅ PASS"));
     assert.ok(!markdown.includes("Suite 1"));
     assert.ok(markdown.includes("[Test 1 · Repeated label](<https://github.com/"));
     assert.ok(markdown.includes('<summary><a href="https://github.com/'));
@@ -207,7 +207,8 @@ test("recorded reports render their pinned definition links without resolving Gi
   );
   const markdown = renderSummary(sample.report);
   assert.equal((markdown.match(/\[Test \d+ ·/g) ?? []).length, 6);
-  assert.equal((markdown.match(/promptfooconfig\.yaml#L\d+/g) ?? []).length, 12);
+  assert.equal((markdown.match(/promptfooconfig\.yaml#L\d+-L\d+/g) ?? []).length, 12);
+  assert.equal((markdown.match(/\| 100% \/ 100% \|/g) ?? []).length, 6);
   assert.ok(
     sample.report.cases.every(
       (item: any) =>
