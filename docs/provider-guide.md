@@ -79,7 +79,7 @@ tool/MCP identities or SDK skill names makes the inventory incomplete: a replace
 value cannot silently become a successful negative match. Raw secrets are never
 retained. All three assertions return a grader error for that evidence loss.
 
-For pinned SDK 1.0.22, a non-autopilot root `session.idle` explicitly means no
+For pinned SDK 1.0.28, a non-autopilot root `session.idle` explicitly means no
 background agents or attached shell commands remain in flight. The adapter must
 observe that clean root idle; a resolved `sendAndWait` promise alone is not a
 certificate. Child-only/autopilot idle cannot substitute for it. This certificate
@@ -420,7 +420,7 @@ Both commands report removed/retained entries and allocated bytes and return non
 ## Pi configuration
 
 Install the optional maintained SDK peer with
-`npm install --save-dev @earendil-works/pi-coding-agent@1.3.0`.
+`npm install --save-dev @earendil-works/pi-coding-agent@1.4.0`.
 Select Pi using the same labeled workspace-provider pattern:
 
 ```yaml
@@ -463,7 +463,7 @@ resources beyond the staged skill roots and workspace root `AGENTS.md`.
 Prompts are submitted as raw text with prompt-template expansion disabled,
 so eval text cannot dispatch slash commands. Output, cached and uncached token
 usage, request count, cost and tool start/end traces remain available.
-`metadata.pi` identifies SDK `1.3.0`, provider, model and skill support.
+`metadata.pi` identifies SDK `1.4.0`, provider, model and skill support.
 
 For `agentAssert`, choose `grader.id: pi-sdk` with the same model and credential
 fields. The grader enables guarded `read` and `ls` tools, with no skill/context
@@ -566,7 +566,7 @@ The provider consumes the **rendered JSON array**, not the prompt's source file.
 Promptfoo loads JSON and YAML prompt files, renders Nunjucks, groups conversations
 and manages outputs. There is no JavaScript conversation adapter.
 
-Run the examples after installing the package and `@github/copilot-sdk@1.0.22`,
+Run the examples after installing the package and `@github/copilot-sdk@1.0.28`,
 exporting `COPILOT_GITHUB_TOKEN` and setting `COPILOT_WORKING_DIR` to an existing
 directory. Every config uses both public providers through shared `providers.yaml`:
 
@@ -730,7 +730,7 @@ Maintainer `corepack pnpm e2e` covers installed stock Promptfoo with a
 `createSession.systemMessage`; that is adapter-boundary proof, not real Copilot
 runtime or model proof. The real SDK/CLI matrix uses
 `scripts/smoke-copilot-conversations.mjs` with a loopback OpenAI-compatible model
-fixture with SDK `1.0.22` and its bundled CLI `1.0.98`. No paid model credentials
+fixture with SDK `1.0.28` and its bundled CLI `1.0.105`. No paid model credentials
 are needed. Run after building, inside the required verification resource limits:
 
 ```sh

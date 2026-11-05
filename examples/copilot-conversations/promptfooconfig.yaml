@@ -1,4 +1,4 @@
-# Install promptfoo and oh-my-promptfoo plus @github/copilot-sdk@1.0.22.
+# Install promptfoo and oh-my-promptfoo plus @github/copilot-sdk@1.0.28.
 # Export COPILOT_GITHUB_TOKEN and COPILOT_WORKING_DIR (an existing folder).
 # npx promptfoo eval -c examples/copilot-conversations/promptfooconfig.yaml --no-cache
 # Promptfoo owns grouping/history; Copilot receives replay in a fresh session per row.

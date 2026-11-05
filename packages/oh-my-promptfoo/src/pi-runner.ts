@@ -17,7 +17,7 @@ import { observedSkillRead, type SkillCall, workspaceSkillDirectories } from "./
 import { ToolInventoryBuilder } from "./tool-inventory.js";
 
 type PiSdk = typeof PiSdkModule;
-const SDK_VERSION = "1.3.0";
+const SDK_VERSION = "1.4.0";
 
 /** Supply only staged resources; the default loader also discovers executable extensions. */
 async function resourceLoader(

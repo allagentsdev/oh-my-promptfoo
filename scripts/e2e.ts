@@ -61,7 +61,7 @@ try {
     "--no-fund",
     registryVersion ? `oh-my-promptfoo@${registryVersion}` : join(cwd, packed.filename),
     `promptfoo@${promptfooVersion}`,
-    "@earendil-works/pi-coding-agent@1.3.0",
+    "@earendil-works/pi-coding-agent@1.4.0",
   ]);
   const installedManifest = JSON.parse(
     await readFile(join(cwd, "node_modules/oh-my-promptfoo/package.json"), "utf8"),
@@ -75,7 +75,7 @@ try {
     throw new Error("Installed Promptfoo version mismatch");
   for (const [name, fixture, version] of [
     ["@openai/codex-sdk", "codex-sdk.mjs", "0.156.1"],
-    ["@github/copilot-sdk", "copilot-sdk.mjs", "1.0.22"],
+    ["@github/copilot-sdk", "copilot-sdk.mjs", "1.0.28"],
     ["@anthropic-ai/claude-agent-sdk", "claude-sdk.mjs", "0.3.273"],
   ]) {
     const dir = join(cwd, "node_modules", name);
