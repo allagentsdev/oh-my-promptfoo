@@ -449,16 +449,19 @@ for(const provider of [judge,{text:judge},fallback])await assert.rejects(grade(p
     await compileDeclarations(cwd);
     run("node", ["node_modules/oh-my-promptfoo/dist/cli.js", "--help"], cwd);
     const ciExamples = join(cwd, "ci");
-    await mkdir(ciExamples);
-    for (const file of ["release.yaml", "cases.yaml", "normalizer.mjs"])
-      await copyFile(join(repo, "examples/ci", file), join(ciExamples, file));
+    await mkdir(join(ciExamples, "release"), { recursive: true });
+    await copyFile(join(repo, "examples/ci/normalizer.mjs"), join(ciExamples, "normalizer.mjs"));
+    await copyFile(
+      join(repo, "examples/ci/release/promptfooconfig.yaml"),
+      join(ciExamples, "release/promptfooconfig.yaml"),
+    );
     const localEvaluation = run(
       "node",
       [
         "node_modules/oh-my-promptfoo/dist/cli.js",
         "eval",
         "--config",
-        "ci/release.yaml",
+        "ci/release/promptfooconfig.yaml",
         "--",
         "--filter-metadata",
         "suite=required",

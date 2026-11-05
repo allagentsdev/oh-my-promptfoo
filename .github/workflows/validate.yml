@@ -15,7 +15,7 @@ jobs:
       - uses: ./
         id: eval
         with:
-          config: examples/ci/release.yaml
+          config: examples/ci/release/promptfooconfig.yaml
           public-labels: "true"
           upload-results: "true"
           args-json: '["--filter-metadata", "suite=required", "--filter-metadata", "language=latin", "--no-cache"]'

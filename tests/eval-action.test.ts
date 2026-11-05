@@ -271,7 +271,7 @@ test("the authored local release suite reports zero model usage and restarts tes
       GITHUB_STEP_SUMMARY: join(directory, "summary"),
     });
     const source = {
-      configPath: join(root, "examples/ci/release.yaml"),
+      configPath: join(root, "examples/ci/release/promptfooconfig.yaml"),
       repositoryRoot: root,
       repositoryUrl: "https://github.com/allagentsdev/oh-my-promptfoo",
       revision: spawnSync("git", ["rev-parse", "HEAD"], {
@@ -280,7 +280,7 @@ test("the authored local release suite reports zero model usage and restarts tes
       }).stdout.trim(),
     };
     const run = await runEvaluation({
-      config: join(root, "examples/ci/release.yaml"),
+      config: join(root, "examples/ci/release/promptfooconfig.yaml"),
       outputDirectory: directory,
       suiteNumber: 9,
       publicLabels: true,
@@ -314,7 +314,7 @@ test("the authored local release suite reports zero model usage and restarts tes
     assert.ok(
       run.report.cases
         .find((item) => item.label === "Preserve a single name")
-        ?.source?.url.endsWith("/examples/ci/cases.yaml#L1-L9"),
+        ?.source?.url.endsWith("/examples/ci/release/promptfooconfig.yaml#L8-L16"),
     );
     const privateReport = await reportEvaluation(run.resultPath, join(directory, "private"), {
       source,

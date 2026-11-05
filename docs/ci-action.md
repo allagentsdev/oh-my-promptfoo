@@ -95,7 +95,7 @@ Readable authored labels are opt-in:
 ```yaml
 - uses: allagentsdev/oh-my-promptfoo@<reviewed-commit>
   with:
-    config: evals/release.yaml
+    config: evals/release/promptfooconfig.yaml
     public-labels: "true"
 ```
 
@@ -119,7 +119,7 @@ after building with `node packages/oh-my-promptfoo/evals/live/preview.mjs`.
 
 This runs the complete fixed required suite. No sample, range or first-N filter is
 used. All four cases and their exact assertions live in
-[`examples/ci/cases.yaml`](../examples/ci/cases.yaml). The local candidate needs no
+[`examples/ci/release/promptfooconfig.yaml`](../examples/ci/release/promptfooconfig.yaml). Test-name links open the full test block in that suite file. The local candidate needs no
 credentials and explicitly reports zero model tokens, requests and cost because
 it only normalizes text locally. Replace its provider with your checked-in application/agent config
 for a production gate. Do not set `PROMPTFOO_PASS_RATE_THRESHOLD` if every native
@@ -142,7 +142,7 @@ jobs:
       - uses: ./
         id: eval
         with:
-          config: examples/ci/release.yaml
+          config: examples/ci/release/promptfooconfig.yaml
           args-json: '["--filter-metadata", "suite=required", "--no-cache", "--max-concurrency", "2"]'
 ```
 
@@ -311,7 +311,7 @@ For example, prepare a private native argument array without printing its conten
     NODE
 - uses: ./
   with:
-    config: examples/ci/release.yaml
+    config: examples/ci/release/promptfooconfig.yaml
     args-file: ${{ runner.temp }}/native-args.json
 ```
 
@@ -465,11 +465,11 @@ With Node 22.22+ and pinned `oh-my-promptfoo` and `promptfoo@0.125.1` installed 
 your lockfile, the same runner and reporter work locally:
 
 ```sh
-allagents-promptfoo eval --config examples/ci/release.yaml --output-dir .promptfoo-ci -- \
+allagents-promptfoo eval --config examples/ci/release/promptfooconfig.yaml --output-dir .promptfoo-ci -- \
   --filter-metadata suite=required --filter-metadata language=latin --no-cache
 allagents-promptfoo report --results .promptfoo-ci/run-ABC123/results.json --output-dir .promptfoo-ci
 allagents-promptfoo report --results .promptfoo-ci/run-ABC123/results.json --public-labels true
-allagents-promptfoo eval --config examples/ci/release.yaml --args-file /private/native-args.json
+allagents-promptfoo eval --config examples/ci/release/promptfooconfig.yaml --args-file /private/native-args.json
 ```
 
 Use the actual path printed by `eval` in the second command. To run from this
@@ -498,7 +498,7 @@ const report = summarizeEvaluation(native, undefined, { publicLabels: true });
 const linked = await addSourceLinks(
   report,
   {
-    configPath: "examples/ci/release.yaml",
+    configPath: "examples/ci/release/promptfooconfig.yaml",
     repositoryRoot: process.cwd(),
     repositoryUrl: "https://github.com/allagentsdev/oh-my-promptfoo",
     revision: execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim(),

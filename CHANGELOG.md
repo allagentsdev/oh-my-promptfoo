@@ -24,6 +24,8 @@
 
 ### Bug Fixes
 
+- Put the required release regression and its tests in `examples/ci/release/promptfooconfig.yaml`, so numbered test links open the complete test block in the suite configuration.
+
 - Publish the local release suite and saved live preview sequentially in separate named jobs so the required suite card appears first, including when its evaluation fails.
 
 - Number tests from 1 within each suite card. Make the local name-normalization example report its known zero model usage and cost instead of leaving measurements absent.
