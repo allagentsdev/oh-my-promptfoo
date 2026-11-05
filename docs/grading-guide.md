@@ -500,7 +500,8 @@ support bot replying "I've cancelled your order". To grade real edits, use
 
 `agentAssert` uses the same named components, weights, scoring, threshold and
 `rubricPrompt` contract, but verifies claims against the live case workspace.
-Choose any supported delegate, including Copilot:
+With a `CopilotModel` grading provider, it inherits the model, reasoning effort
+and authentication selected for the run or test. Each assertion only needs its criteria:
 
 ```yaml
 assert:
@@ -508,14 +509,6 @@ assert:
     value: package:oh-my-promptfoo/assertions:agentAssert
     metric: workspace-change
     config:
-      scoring: binary
-      grader:
-        id: copilot-sdk
-        config:
-          model: '{{env.GRADER_MODEL}}'
-          permissions: { filesystem: read, shell: deny, network: deny }
-        env:
-          GH_TOKEN: '{{env.GH_TOKEN}}'
       components:
         - metric: parser-fix-present
           value: The workspace contains a focused fix in src/parser.ts for the reported bug.
@@ -525,6 +518,9 @@ assert:
 
 Use this with the workspace `Agent`; a missing or released
 `metadata.workspace.path` fails instead of falling back to the answer text.
+An explicit `config.grader` overrides the default and accepts every supported
+delegate. Other text providers require that override. CopilotModel's `max_tokens`
+cannot be inherited by an agent and produces an error rather than being ignored.
 Enable provider `fileChanges: true` to give the judge changed-file paths and
 metadata plus the diff, not captured base64 contents. The answer goes in the
 same `<Output>` block and the criteria in the same `<Rubric>` block as for
@@ -543,7 +539,8 @@ it accepts integers from 1 to 16,777,216. If the prompt is too large, the diff
 is omitted with an explicit notice recording the omitted byte count. If the
 remaining prompt still exceeds the budget, grading fails before a delegate
 starts, naming both the measured size and budget. Files remain available for
-on-demand inspection; increasing the budget never sends captured base64 bytes.
+on-demand inspection. Captured contents are included only when `workspaceEvidence`
+is enabled.
 
 The grader has a 120-second execution timeout, configurable with assertion
 `timeoutMs`, including one retry for a malformed verdict. It starts after the
@@ -623,7 +620,8 @@ in defaults, tests, and scenarios instead of silently losing the veto.
 ## Captured workspace evidence without a grader agent
 
 `llmAssert.config.workspaceEvidence` attaches final captured file contents to
-the judge request. No grader agent is launched:
+the judge request without launching an agent. `agentAssert` accepts the same
+option when it needs decoded capture contents alongside workspace inspection:
 
 ```yaml
 - type: javascript
@@ -648,8 +646,20 @@ including JSON escaping, capture status, omission counts, and omission names
 when space permits. Binary contents are labelled base64; partial binary
 contents end at a base64 quantum. Files are ordered by path.
 
+For other text encodings, map relative POSIX globs to WHATWG TextDecoder labels:
+
+```yaml
+workspaceEvidence:
+  encodings:
+    '**/*.txt': shift_jis
+```
+
+Unmatched files keep the UTF-8/base64 default. Unsupported encodings, overlapping
+patterns and invalid bytes in a declared encoding produce a grader error.
+Capture integrity checks and byte budgets still apply.
+
 `defaultTest.options.workspaceEvidence` also supplies the default for
-`llmAssert`; its own config overrides it, and `false` disables it. To use this
+`llmAssert` and `agentAssert`; their own config overrides it, and `false` disables it. To use this
 option with native `type: llm-rubric`, wrap the config with `withAssertions`.
 The package then attaches the evidence and delegates grading to stock
 Promptfoo's public assertion API, preserving its judge selection and verdict
