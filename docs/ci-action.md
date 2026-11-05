@@ -21,6 +21,37 @@ an expandable section containing its assertion outcomes and measured accounting.
 Scores are displayed as rounded percentages and native candidate latency in seconds or minutes;
 the native values remain unchanged in `report.json`. `—` means no assertion
 threshold was authored; it is not a missing measurement.
+When tests author an overall `threshold`, the results table also shows the native
+score alongside that threshold. The displayed score never determines the verdict.
+
+### Live console progress
+
+The Action and local `eval` CLI print a line as each native `afterEach` hook
+completes, while other tests can still be running:
+
+```text
+Suite 2 · Evaluation started
+Suite 2 · Completed 1 · native test 3, column 1 · PASS · 9.4 s
+```
+
+Concurrent cases can finish out of order. `Completed` counts completion events;
+native test/result-column references are `testIdx + 1` and `promptIdx + 1`. They are
+not the final export's `Test N` row numbers. Final console output uses the same
+`Test N` references as the Markdown report, with per-assertion outcomes and separate
+candidate/grader usage and cost. Missing measurements remain unknown.
+
+Progress is numeric only: no answers, reasons, labels or generated content are
+streamed. Final console labels follow the same `public-labels` consent and
+credential redaction as the summary. Terminal controls and workflow-command
+markers are neutralized. Native stdout/stderr stays in the private log, including
+when debug logging is enabled.
+
+The runner adds its own [public Promptfoo extension hook](https://www.promptfoo.dev/docs/configuration/reference/#extension-hooks)
+alongside authored config/CLI hooks; it does not replace them or modify results.
+Native comparison assertions (`select-best` and `max-score`) run after individual
+rows, so those live events say `COMPARISON PENDING`. The final native export owns
+their verdicts. A saved-run preview prints its final console report and explicitly
+labels it as recorded; it does not replay fabricated live-completion events.
 
 Set `suite-number` to a positive integer unique among the Action invocations in
 your workflow. Tests restart at **1** in each suite card: **Test 6** is that
@@ -296,14 +327,14 @@ the authored scoring policy; see [required assertions](grading-guide.md).
 
 The GitHub step summary contains counts, numbered test references, assertion
 outcomes, native scores/thresholds, latency and measured usage and cost. Test
-numbers combine the caller's suite number with the one-based result row. Native
+numbers restart at 1 within each suite and use the one-based result row. Native
 row 1 is `results.results[0]`; the detailed test/column references are
 `testIdx + 1`/`promptIdx + 1`. Authored labels are omitted unless `public-labels`
 is enabled as described above. Other metadata, assertion values, answers, grader
 reasons, generated files, provider IDs and credentials are omitted.
 Long summaries are bounded; `report.json` retains all sanitized outcomes. No public
-share, comment or artifact upload occurs. Native stdout/stderr goes only to the
-private log, even with debug enabled.
+share, comment or artifact upload occurs. Only numeric progress and the sanitized
+final report are printed publicly; native stdout/stderr stays in the private log.
 
 Raw JSON/logs can contain confidential data and credentials. The caller owns
 storage approval, access controls and retention. Add `.promptfoo-ci/` to the

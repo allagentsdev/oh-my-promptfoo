@@ -12,11 +12,16 @@ import {
 } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
+import { readProgress } from "./eval-progress.js";
 import { secrets } from "./redaction.js";
 import {
+  type EvaluationProgress,
   type EvaluationReport,
   type ReportOptions,
+  renderConsoleSummary,
+  renderProgress,
   renderSummary,
   summarizeEvaluation,
 } from "./reporting.js";
@@ -27,6 +32,8 @@ export interface EvaluationOptions extends ReportOptions {
   workingDirectory?: string;
   args?: string[];
   github?: boolean;
+  /** Called as native afterEach hooks complete; final exports remain authoritative. */
+  onProgress?: (progress: EvaluationProgress) => void;
 }
 export interface EvaluationRun {
   directory: string;
@@ -248,6 +255,12 @@ export async function runEvaluation(options: EvaluationOptions): Promise<Evaluat
       PROMPTFOO_FAILED_TEST_EXIT_CODE: "100",
     };
     validateNativeArgs(args, await readNativeOptions(executable, environment));
+    const hookPath = join(
+      process.env.OH_MY_PROMPTFOO_TEST_ENTRIES || dirname(fileURLToPath(import.meta.url)),
+      "eval-progress.js",
+    );
+    if (!(await stat(hookPath)).isFile()) throw new Error("Evaluation progress hook unavailable");
+    const progressHook = `file://${hookPath}`;
     run.exitCode = await new Promise<number | null>((resolveExit, reject) => {
       const child = spawn(
         process.execPath,
@@ -263,15 +276,39 @@ export async function runEvaluation(options: EvaluationOptions): Promise<Evaluat
           "--no-write",
           "--no-table",
           "--no-progress-bar",
+          "--extension",
+          `${progressHook}:afterEach`,
         ],
         {
           cwd,
-          stdio: ["ignore", log.fd, log.fd],
+          stdio: ["ignore", log.fd, log.fd, "ipc"],
           env: environment,
         },
       );
+      let progressFailed = false;
+      let progressError: unknown;
+      let termination: ReturnType<typeof setTimeout> | undefined;
       child.once("error", reject);
-      child.once("close", (code) => resolveExit(code));
+      child.on("message", (input) => {
+        if (progressFailed) return;
+        const progress = readProgress(input);
+        if (progress) {
+          try {
+            options.onProgress?.(progress);
+          } catch (error) {
+            progressFailed = true;
+            progressError = error;
+            child.kill();
+            termination = setTimeout(() => child.kill("SIGKILL"), 5_000);
+            termination.unref();
+          }
+        }
+      });
+      child.once("close", (code) => {
+        clearTimeout(termination);
+        if (progressFailed) reject(progressError);
+        else resolveExit(code);
+      });
     });
     await readResults(run, reporting, run.exitCode);
     if (run.resultsAvailable) await chmod(run.resultPath, 0o600);
@@ -352,12 +389,16 @@ export async function evaluationCommand(command: "eval" | "report", args: string
     } catch {
       parsed = null;
     }
+    let completed = 0;
+    console.log(`Suite ${reporting.suiteNumber} · Evaluation started`);
     run = await runEvaluation({
       config,
       outputDirectory: output,
       workingDirectory: values.get("--working-directory"),
       args: parsed as string[],
       github,
+      onProgress: (progress) =>
+        console.log(renderProgress(progress, ++completed, reporting.suiteNumber)),
       ...reporting,
     });
   } else {
@@ -365,6 +406,7 @@ export async function evaluationCommand(command: "eval" | "report", args: string
     if (!results || native.length) throw new Error("One native result is required");
     run = await reportEvaluation(results, output, reporting);
   }
+  console.log(renderConsoleSummary(run.report));
   console.log(
     `Promptfoo: ${run.report.status}; pass=${run.report.counts.pass}, fail=${run.report.counts.fail}, error=${run.report.counts.error}`,
   );

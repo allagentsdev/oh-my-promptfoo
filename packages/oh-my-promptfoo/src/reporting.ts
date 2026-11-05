@@ -28,6 +28,7 @@ export interface CaseReport {
   candidate?: string;
   status: Outcome;
   score: number | null;
+  threshold?: number;
   latencyMs: number | null;
   candidateUsage: Usage;
   graderUsage: Usage;
@@ -95,6 +96,25 @@ function graderError(grade: unknown): boolean {
     record(value.metadata).graderError === true ||
     (Array.isArray(value.componentResults) && value.componentResults.some(graderError))
   );
+}
+
+/** Classify an already evaluated native row; never apply a scoring policy. */
+export function nativeTestOutcome(input: unknown): Outcome {
+  const row = record(input);
+  const valid =
+    typeof row.success === "boolean" &&
+    safeCount(row.testIdx) &&
+    safeCount(row.promptIdx) &&
+    [0, 1, 2].includes(row.failureReason) &&
+    score(row.score) !== null;
+  return row.failureReason === 2 ||
+    record(row.response).error ||
+    graderError(row.gradingResult) ||
+    !valid
+    ? "error"
+    : row.success
+      ? "pass"
+      : "fail";
 }
 
 /** Promptfoo serializes nested children both under their parent and immediately after it. */
@@ -270,15 +290,8 @@ export function summarizeEvaluation(
     const row = record(input),
       reply = record(row.response),
       test = record(row.testCase);
-    const gradeFailed = graderError(row.gradingResult);
-    const valid =
-      typeof row.success === "boolean" &&
-      safeCount(row.testIdx) &&
-      safeCount(row.promptIdx) &&
-      [0, 1, 2].includes(row.failureReason) &&
-      score(row.score) !== null;
-    const hasError = row.failureReason === 2 || Boolean(reply.error) || gradeFailed || !valid;
-    const status = hasError ? "error" : row.success ? "pass" : "fail";
+    const status = nativeTestOutcome(row);
+    const hasError = status === "error";
     counts[status]++;
     const grader = graderMeasurements(row.gradingResult, hasError);
     const provider = record(row.provider).id;
@@ -292,6 +305,7 @@ export function summarizeEvaluation(
       ...(candidateLabel ? { candidate: candidateLabel } : {}),
       status,
       score: score(row.score),
+      ...(score(test.threshold) !== null ? { threshold: score(test.threshold)! } : {}),
       latencyMs: measured(row.latencyMs),
       candidateUsage: usage(reply.tokenUsage),
       graderUsage: grader.usage,
@@ -335,8 +349,7 @@ export function summarizeEvaluation(
   };
 }
 
-/** Render only normalized outcomes and explicitly public, redacted labels. */
-export function renderSummary(report: EvaluationReport): string {
+function reportFormats() {
   const number = (value: number | null) =>
     value === null ? "unknown" : value.toLocaleString("en-US");
   const score = (value: number | null) =>
@@ -372,7 +385,16 @@ export function renderSummary(report: EvaluationReport): string {
     value.total === null && value.requests === null
       ? "unknown"
       : `${number(value.total)} tokens · ${number(value.requests)} requests`;
+  return { number, score, time, money, escapeMarkup, badge, usageSummary };
+}
+
+const formats = reportFormats();
+
+/** Render only normalized outcomes and explicitly public, redacted labels. */
+export function renderSummary(report: EvaluationReport): string {
+  const { number, score, time, money, escapeMarkup, badge, usageSummary } = formats;
   const suite = report.suite?.number ?? 1;
+  const rowThresholds = report.cases.some((item) => item.threshold !== undefined);
   const candidate = report.cases[0]?.candidate;
   const sharedCandidate = candidate && report.cases.every((item) => item.candidate === candidate);
   const title = (item: CaseReport) =>
@@ -399,8 +421,8 @@ export function renderSummary(report: EvaluationReport): string {
     "",
     "### Results",
     "",
-    "| Test | Latency | Tokens | Cost | Status | Assertions passed |",
-    "| --- | ---: | ---: | ---: | --- | ---: |",
+    `| Test | Latency | Tokens | Cost | Status | Assertions passed |${rowThresholds ? " Score / threshold |" : ""}`,
+    `| --- | ---: | ---: | ---: | --- | ---: |${rowThresholds ? " ---: |" : ""}`,
   ];
   let bytes = Buffer.byteLength(lines.join("\n"));
   const add = (block: string) => {
@@ -416,7 +438,7 @@ export function renderSummary(report: EvaluationReport): string {
     const tokens = sumUsage([item.candidateUsage, item.graderUsage]).total;
     if (
       !add(
-        `| ${title(item)} | ${time(item.latencyMs)} | ${number(tokens)} | ${money(sumCosts([item.candidateCost, item.graderCost]))} | ${badge(item.status)} | ${checks.length ? `${checks.filter((check) => check.status === "pass").length} / ${checks.length}` : "unknown"} |`,
+        `| ${title(item)} | ${time(item.latencyMs)} | ${number(tokens)} | ${money(sumCosts([item.candidateCost, item.graderCost]))} | ${badge(item.status)} | ${checks.length ? `${checks.filter((check) => check.status === "pass").length} / ${checks.length}` : "unknown"} |${rowThresholds ? ` ${item.threshold === undefined ? "—" : `${score(item.score)} / ${score(item.threshold)}`} |` : ""}`,
       )
     ) {
       truncated = true;
@@ -470,4 +492,56 @@ export function renderSummary(report: EvaluationReport): string {
       "Result coverage or execution is incomplete; inspect the retained private diagnostics.",
     );
   return `${lines.join("\n")}\n`;
+}
+
+/** Console labels cannot contain terminal controls or GitHub workflow commands. */
+function consoleLabel(value: string): string {
+  return value
+    .replace(/[\p{Cc}\p{Cf}]/gu, " ")
+    .replace(/\s+/g, " ")
+    .replace(/:{2,}/g, (value) => value.split("").join(" "))
+    .replaceAll("##[", "# #[");
+}
+
+export function renderConsoleSummary(report: EvaluationReport): string {
+  const { number, score, time, usageSummary } = formats;
+  const money = (cost: ResultCost) => formats.money(cost).replace("&lt;", "<");
+  const suite = report.suite?.number ?? 1;
+  const lines = [
+    `Suite ${suite}${report.suite?.title ? ` · ${consoleLabel(report.suite.title)}` : ""} · ${report.status.toUpperCase()}`,
+    `Tests: ${report.cases.length}; passed: ${report.counts.pass}; failed: ${report.counts.fail}; errors: ${report.counts.error}; unknown outcomes: ${report.counts.unknown}`,
+    `Agent: ${usageSummary(report.totals.candidateUsage)}; cost: ${money(report.totals.candidateCost)}; total agent time: ${time(report.totals.latencyMs)}`,
+    `Grader: ${usageSummary(report.totals.graderUsage)}; cost: ${money(report.totals.graderCost)}`,
+  ];
+  for (const item of report.cases) {
+    lines.push(
+      `Test ${item.row}${item.label ? ` · ${consoleLabel(item.label)}` : ""}${item.candidate ? ` (${consoleLabel(item.candidate)})` : ""} · ${item.status.toUpperCase()} · ${time(item.latencyMs)} · score ${score(item.score)}${item.threshold === undefined ? "" : ` / threshold ${score(item.threshold)}`}`,
+      `  Agent: ${number(item.candidateUsage.total)} tokens; ${number(item.candidateUsage.requests)} requests; ${money(item.candidateCost)}. Grader: ${number(item.graderUsage.total)} tokens; ${number(item.graderUsage.requests)} requests; ${money(item.graderCost)}.`,
+    );
+    const names = new Map<string, number>();
+    for (const check of item.assertions)
+      if (check.label) names.set(check.label, (names.get(check.label) ?? 0) + 1);
+    item.assertions.forEach((check, index) => {
+      lines.push(
+        `  ${check.label ? `${consoleLabel(check.label)}${names.get(check.label) === 1 ? "" : ` (check ${index + 1})`}` : `Check ${index + 1}`}: ${check.status.toUpperCase()}; score ${score(check.score)}${check.threshold === null ? "" : `; threshold ${score(check.threshold)}`}`,
+      );
+    });
+  }
+  if (report.issues.length)
+    lines.push("Result coverage or execution is incomplete; inspect retained private diagnostics.");
+  lines.push(
+    "Unknown means unmeasured or incomplete; ~ marks a token-price estimate. Costs are not invoices or savings.",
+  );
+  return `${lines.join("\n")}\n`;
+}
+
+export interface EvaluationProgress {
+  test: number;
+  column: number;
+  status: Outcome | "pending";
+  latencyMs: number | null;
+}
+
+export function renderProgress(progress: EvaluationProgress, completed: number, suite = 1): string {
+  return `Suite ${suite} · Completed ${completed} · native test ${progress.test}, column ${progress.column} · ${progress.status === "pending" ? "COMPARISON PENDING" : progress.status.toUpperCase()} · ${formats.time(progress.latencyMs)}`;
 }

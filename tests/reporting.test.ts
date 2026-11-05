@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
-import { renderSummary, summarizeEvaluation } from "../packages/oh-my-promptfoo/src/reporting";
+import {
+  renderConsoleSummary,
+  renderSummary,
+  summarizeEvaluation,
+} from "../packages/oh-my-promptfoo/src/reporting";
 import { estimateCopilotCost, responseCost } from "../packages/oh-my-promptfoo/src/result-cost";
 
 const usage = { prompt: 100, completion: 10, total: 110, numRequests: 1 };
@@ -63,6 +67,41 @@ const document = (rows: any[], stats?: any) => ({
       errors: rows.filter((item) => item.failureReason === 2).length,
     },
   },
+});
+
+test("console and Markdown show authored score thresholds without overriding native verdicts or leaking raw fields", () => {
+  const input = document([
+    row({
+      testCase: { description: "A required check", threshold: 0.9 },
+      score: 0.95,
+      success: false,
+      failureReason: 1,
+    }),
+    row({ testIdx: 1, testCase: { description: "No overall threshold" } }),
+  ]);
+  const report = summarizeEvaluation(input, 100, { suiteNumber: 4, publicLabels: true });
+  const markdown = renderSummary(report),
+    consoleText = renderConsoleSummary(report);
+  assert.ok(markdown.includes("Score / threshold"));
+  assert.ok(markdown.includes("❌ FAIL | 1 / 1 | 95% / 90% |"));
+  assert.ok(markdown.includes("✅ PASS | 1 / 1 | — |"));
+  assert.ok(consoleText.includes("Test 1 · A required check"));
+  assert.ok(consoleText.includes("FAIL · 10 ms · score 95% / threshold 90%"));
+  assert.ok(consoleText.includes("Agent: unknown; cost: unknown"));
+  assert.ok(
+    !consoleText.includes("PRIVATE_ANSWER") && !consoleText.includes("PRIVATE_GRADER_REASON"),
+  );
+  assert.equal(report.status, "fail");
+  const privateText = renderConsoleSummary(summarizeEvaluation(input, 100));
+  assert.ok(!privateText.includes("A required check") && !privateText.includes("PRIVATE_"));
+});
+
+test("console labels cannot emit modern or legacy workflow commands or terminal controls", () => {
+  const input = document([
+    row({ testCase: { description: "::error::unsafe ##[error] \u001b[31m" } }),
+  ]);
+  const text = renderConsoleSummary(summarizeEvaluation(input, 0, { publicLabels: true }));
+  assert.ok(!text.includes("::error::") && !text.includes("##[error]") && !text.includes("\u001b"));
 });
 
 test("reports native verdicts without reapplying thresholds or leaking raw fields", () => {

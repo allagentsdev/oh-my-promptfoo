@@ -4,6 +4,8 @@
 
 ### Features
 
+* Stream numeric native test completions to CI/local consoles through Promptfoo's public hooks, preserving authored extensions and private logs. Print final sanitized assertion/accounting reports locally and in Actions; show authored overall score thresholds without changing native verdicts.
+
 * Make CI summaries readable with numbered suites/tests, opt-in public authored labels, compact metrics/results tables and expandable assertions. Add a recorded six-task real agent example for reviewing the format before merge; preserve native scores and unknown measurements.
 
 * Add manually triggered live dogfooding of the repository's skill, workspace Agent and read-only agentAssert through OpenRouter. Select both candidate and grader with the `OPENROUTER_MODEL` repository variable; keep the API key in a secret. Keep fixed native cases, exact artifact checks, model-availability preflight and sanitized Action reporting.

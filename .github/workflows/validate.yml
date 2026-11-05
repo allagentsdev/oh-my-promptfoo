@@ -60,6 +60,7 @@ jobs:
       - run: pnpm build
       - run: pnpm e2e
   copilot-conversations:
+    name: Copilot compatibility · Promptfoo ${{ matrix.promptfoo }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     strategy:

@@ -28,6 +28,8 @@ async function compileDeclarations(cwd: string) {
 const report: Reporting.EvaluationReport = Reporting.summarizeEvaluation(undefined);
 const reportStatus: Reporting.Outcome = report.status;
 const markdown: string = Reporting.renderSummary(report);
+const consoleReport: string = Reporting.renderConsoleSummary(report);
+const progressLine: string = Reporting.renderProgress({test:1,column:1,status:'pass',latencyMs:0},1);
 const estimate: number | undefined = Reporting.estimateCopilotCost({}, {}, 'fixture');
 const agent: Providers.Agent = new Providers.Agent();
 const copilot: Providers.CopilotSdk = new Providers.CopilotSdk();
@@ -106,7 +108,7 @@ import Reporting = require('oh-my-promptfoo/reporting');`,
 }
 // Consumer smokes compare paths with process.cwd(), which is already canonical: macOS
 // tmpdir() is under the /var -> /private/var symlink and Windows may use 8.3 names.
-const temp = await mkdtemp(join(realpathSync.native(tmpdir()), "allagents-pack-"));
+const temp = await mkdtemp(join(realpathSync.native(tmpdir()), "allagents pack-"));
 try {
   const packed = JSON.parse(
     run(
@@ -462,6 +464,14 @@ for(const provider of [judge,{text:judge},fallback])await assert.rejects(grade(p
       cwd,
     );
     const paths = JSON.parse(localEvaluation.trim().split("\n").at(-1)!);
+    if (
+      !localEvaluation.includes("Suite 1 · Completed 1 · native test") ||
+      !localEvaluation.includes("Test 4") ||
+      !localEvaluation.includes("Grader: 0 tokens · 0 requests; cost: $0.00")
+    )
+      throw new Error(
+        "Installed local CLI did not emit live progress and sanitized final accounting",
+      );
     const localReport = JSON.parse(await readFile(paths.reportPath, "utf8"));
     if (
       localReport.status !== "pass" ||
