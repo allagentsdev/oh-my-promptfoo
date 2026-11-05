@@ -27,12 +27,12 @@ provider response. It works with all four delegates without changing skill
 files or assertion syntax. No OpenTelemetry collector, OTLP endpoint, or
 `tracing.enabled: true` setting is required for this assertion.
 
-| Delegate | Skill-use evidence |
-| --- | --- |
-| `anthropic:claude-agent-sdk` | Promptfoo derives calls from the native `Skill` tool's `input.skill`, with `source: "tool"`. Calls marked `is_error: true` do not satisfy `skill-used`. |
-| `openai:codex-sdk` | Promptfoo derives calls from successful commands referencing recognized skill paths, with `source: "heuristic"`. Failed commands can appear in `attemptedSkillCalls` without satisfying `skill-used`. |
-| `copilot-sdk` | The adapter records successful contained skill-file reads or verified SDK skill-loader records. See [Direct Copilot configuration](#direct-copilot-configuration). |
-| `pi-sdk` | Successful guarded `read` tool calls to contained, non-symlink `SKILL.md` files produce `source: "read-tool"`. Discovery, failed reads and assistant claims do not count. |
+| Delegate                     | Skill-use evidence                                                                                                                                                                                    |
+| ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `anthropic:claude-agent-sdk` | Promptfoo derives calls from the native `Skill` tool's `input.skill`, with `source: "tool"`. Calls marked `is_error: true` do not satisfy `skill-used`.                                               |
+| `openai:codex-sdk`           | Promptfoo derives calls from successful commands referencing recognized skill paths, with `source: "heuristic"`. Failed commands can appear in `attemptedSkillCalls` without satisfying `skill-used`. |
+| `copilot-sdk`                | The adapter records successful contained skill-file reads or verified SDK skill-loader records. See [Direct Copilot configuration](#direct-copilot-configuration).                                    |
+| `pi-sdk`                     | Successful guarded `read` tool calls to contained, non-symlink `SKILL.md` files produce `source: "read-tool"`. Discovery, failed reads and assistant claims do not count.                             |
 
 Claude and Codex use the consumer's native Promptfoo providers; the wrapper
 preserves their metadata and provenance rather than deriving skills again.
@@ -144,9 +144,9 @@ assert:
   - type: javascript
     value: package:oh-my-promptfoo/assertions:tool-called
     config:
-      name: { regex: '^(read|read_file|view)$' }
-      argumentsMatch: { path: /path, regex: 'README' }
-      before: { name: { regex: '^(write|write_file|create)$' } }
+      name: { regex: "^(read|read_file|view)$" }
+      argumentsMatch: { path: /path, regex: "README" }
+      before: { name: { regex: "^(write|write_file|create)$" } }
   - type: javascript
     value: package:oh-my-promptfoo/assertions:tool-not-called
     config:
@@ -248,10 +248,10 @@ For Codex and Claude **candidates**, `delegate.config` passes through to the con
 
 Only native keys that conflict with provider-owned workspace, per-row sessions or CLI environment are denied, in both provider config and prompt overrides:
 
-| Delegate | Workspace keys | Session keys | Environment keys |
-| --- | --- | --- | --- |
-| `openai:codex-sdk` | `working_dir`, `copy_working_dir`, `skip_git_repo_check` | `thread_id`, `persist_threads`, `thread_pool_size` | `inherit_process_env`, `cli_env` |
-| `anthropic:claude-agent-sdk` | `working_dir` | `resume`, `fork_session`, `resume_session_at`, `continue`, `session_id`, `persist_session` | `env` |
+| Delegate                     | Workspace keys                                           | Session keys                                                                               | Environment keys                 |
+| ---------------------------- | -------------------------------------------------------- | ------------------------------------------------------------------------------------------ | -------------------------------- |
+| `openai:codex-sdk`           | `working_dir`, `copy_working_dir`, `skip_git_repo_check` | `thread_id`, `persist_threads`, `thread_pool_size`                                         | `inherit_process_env`, `cli_env` |
+| `anthropic:claude-agent-sdk` | `working_dir`                                            | `resume`, `fork_session`, `resume_session_at`, `continue`, `session_id`, `persist_session` | `env`                            |
 
 Claude `extra_args` cannot bypass these ownership checks. Denied session flags are `resume`/`r`, `continue`/`c`, `fork-session`, `session-id`, `resume-session-at`, `resume-drops-turn`, `no-session-persistence`, `from-pr`, `teleport` and `cloud`; `worktree`/`w` is denied because it changes the workspace. Leading dashes, case and `=value` spelling do not bypass the check. `add-dir` remains allowed, just like `additional_directories`. All other extra flags pass through to Promptfoo.
 
@@ -267,29 +267,29 @@ rubric can live once in `defaultTest.options` instead of on every assertion.
 All other non-undefined prompt-config root keys except `delegate` remain rejected,
 and `delegate.config.timeoutMs` remains constructor-only.
 
-| Field | Required | Purpose |
-| --- | --- | --- |
-| `delegate.id` | Yes | Selects one of the four supported agents |
-| `delegate.config` | Pi only | Passes native candidate options to Promptfoo for Codex/Claude, except provider-owned keys above; Copilot/Pi use closed lists, and Pi requires nonempty `provider` and `model` |
-| `delegate.env` | No | Passes only the named environment values to the agent |
-| `workspace.sources` | Yes | Lists Git, OCI, or host-local inputs; `[]` starts with an empty workspace |
-| `workspace.limits` | No | Narrows source count and download/extraction byte budgets |
-| `workspaceTimeoutMs` | No | Bounds workspace preparation; provider value overrides `ALLAGENTS_WORKSPACE_TIMEOUT_MS`, then the 120,000 ms package default |
-| `workspace.viewMode` | No | `auto` (default) tries reflinks then disk-admitted physical copies; `copy-only` skips reflinks and uses disk-admitted physical copies for writable views and protected read-only checkouts |
-| `workingDir` | No | Starts the agent in an existing directory relative to the prepared workspace root, such as `project`; defaults to the root. The path must be normalized and contained. A protected read-only source can be selected. |
-| `fileChanges` | No | Captures bounded after-bytes and a diff; defaults to `false` |
-| `timeoutMs` | No | Limits the agent call |
+| Field                | Required | Purpose                                                                                                                                                                                                              |
+| -------------------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `delegate.id`        | Yes      | Selects one of the four supported agents                                                                                                                                                                             |
+| `delegate.config`    | Pi only  | Passes native candidate options to Promptfoo for Codex/Claude, except provider-owned keys above; Copilot/Pi use closed lists, and Pi requires nonempty `provider` and `model`                                        |
+| `delegate.env`       | No       | Passes only the named environment values to the agent                                                                                                                                                                |
+| `workspace.sources`  | Yes      | Lists Git, OCI, or host-local inputs; `[]` starts with an empty workspace                                                                                                                                            |
+| `workspace.limits`   | No       | Narrows source count and download/extraction byte budgets                                                                                                                                                            |
+| `workspaceTimeoutMs` | No       | Bounds workspace preparation; provider value overrides `ALLAGENTS_WORKSPACE_TIMEOUT_MS`, then the 120,000 ms package default                                                                                         |
+| `workspace.viewMode` | No       | `auto` (default) tries reflinks then disk-admitted physical copies; `copy-only` skips reflinks and uses disk-admitted physical copies for writable views and protected read-only checkouts                           |
+| `workingDir`         | No       | Starts the agent in an existing directory relative to the prepared workspace root, such as `project`; defaults to the root. The path must be normalized and contained. A protected read-only source can be selected. |
+| `fileChanges`        | No       | Captures bounded after-bytes and a diff; defaults to `false`                                                                                                                                                         |
+| `timeoutMs`          | No       | Limits the agent call                                                                                                                                                                                                |
 
 `workspaceTimeoutMs` accepts an integer from 1 to 3,600,000 ms. The separate
 `timeoutMs` limits the agent call and defaults to 900,000 ms.
 
 ## Workspace sources and permissions
 
-| Source type | Required fields | Identity recorded in the response |
-| --- | --- | --- |
-| Git | `type: git`, `repository`, `ref`, `destination` | Resolved commit |
-| OCI | `type: oci`, `repository`, `destination`, and one of `tag` or `digest` | Resolved manifest digest |
-| Local | `type: local`, `path`, `destination` | SHA-256 of sorted relative paths, modes, and file bytes |
+| Source type | Required fields                                                        | Identity recorded in the response                       |
+| ----------- | ---------------------------------------------------------------------- | ------------------------------------------------------- |
+| Git         | `type: git`, `repository`, `ref`, `destination`                        | Resolved commit                                         |
+| OCI         | `type: oci`, `repository`, `destination`, and one of `tag` or `digest` | Resolved manifest digest                                |
+| Local       | `type: local`, `path`, `destination`                                   | SHA-256 of sorted relative paths, modes, and file bytes |
 
 Relative paths in provider config resolve the way Promptfoo resolves its own `file://` references: against the eval config's directory, which Promptfoo's loader passes to every provider as `basePath`. A provider included through `providers: file://providers.yaml` uses the same directory, not the directory of the included file. This covers a local `path` such as `../plugins/x/skills` and a `file://` Git repository such as `file://../vendor/repo`. Absolute paths, `file:///absolute` and `file://localhost/absolute` URLs are used unchanged. Without a loader `basePath`, as when constructing a provider directly, the base is the process working directory. See [ADR 0010](adr/0010-resolve-provider-paths-against-the-eval-config.md).
 
@@ -435,7 +435,7 @@ providers:
           model: gpt-4o-mini
           permissions: { filesystem: read, shell: deny }
         env:
-          OPENAI_API_KEY: '{{env.OPENAI_API_KEY}}'
+          OPENAI_API_KEY: "{{env.OPENAI_API_KEY}}"
       workspace:
         sources: []
 ```
@@ -477,13 +477,13 @@ Copilot and Claude candidates accept the same closed
 `delegate.config.mcpServers.<name>` object. Server names use
 `^[A-Za-z0-9_-]{1,64}$`; each entry has only:
 
-| Field | Required | Meaning |
-| --- | --- | --- |
-| `path` | Yes | Normalized relative Node script path, resolved against the delegate working directory |
-| `args` | No | Literal string arguments; no shell or interpolation |
-| `env` | No | Literal string environment entries, default `{}`; no host/delegate inheritance or interpolation |
-| `tools` | No | Exact, case-sensitive tool names; omitted or `["*"]` allows all, `[]` allows none |
-| `timeoutMs` | No | Positive safe-integer limit for each tool request; timeout closes the server |
+| Field       | Required | Meaning                                                                                         |
+| ----------- | -------- | ----------------------------------------------------------------------------------------------- |
+| `path`      | Yes      | Normalized relative Node script path, resolved against the delegate working directory           |
+| `args`      | No       | Literal string arguments; no shell or interpolation                                             |
+| `env`       | No       | Literal string environment entries, default `{}`; no host/delegate inheritance or interpolation |
+| `tools`     | No       | Exact, case-sensitive tool names; omitted or `["*"]` allows all, `[]` allows none               |
+| `timeoutMs` | No       | Positive safe-integer limit for each tool request; timeout closes the server                    |
 
 For Claude, configured names cannot overlap at a double-underscore boundary:
 `a` and `a__b` cannot coexist, because a tool `b__read` on `a` has the same
@@ -570,15 +570,15 @@ Run the examples after installing the package and `@github/copilot-sdk@1.0.22`,
 exporting `COPILOT_GITHUB_TOKEN` and setting `COPILOT_WORKING_DIR` to an existing
 directory. Every config uses both public providers through shared `providers.yaml`:
 
-| Config in [`examples/copilot-conversations`](../examples/copilot-conversations) | Pattern |
-| --- | --- |
-| `promptfooconfig.yaml` | Fixed role/content history plus **three generated turns**, with an interleaved `conversationId`; loops over `completion.input` and `completion.output` |
-| `promptfooconfig-native.yaml` | Equivalent native JSON and YAML prompt files, string names, tool IDs and later/multiple system messages |
-| `promptfooconfig-simplified.yaml` | Upstream `{ user: ... }` / `{ assistant: ... }` shorthand expanded by a Nunjucks template; shared `defaultTest.vars.messages` fixture across follow-ups |
-| `promptfooconfig-prompt-history.yaml` | Alternative three-turn replay using only the **last** `completion.prompt`, then its `completion.output` |
-| `promptfooconfig-embedded.yaml` | JSON embedded inside string `content`, escaped with `dump`, including previous replies |
-| `promptfooconfig-text.yaml` | Literal chat-shaped business JSON with `inputFormat: text` |
-| `promptfooconfig-storage.yaml` | `storeOutputAs`, transform-before-storage, and two subsequent questions using stored variables |
+| Config in [`examples/copilot-conversations`](../examples/copilot-conversations) | Pattern                                                                                                                                                 |
+| ------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `promptfooconfig.yaml`                                                          | Fixed role/content history plus **three generated turns**, with an interleaved `conversationId`; loops over `completion.input` and `completion.output`  |
+| `promptfooconfig-native.yaml`                                                   | Equivalent native JSON and YAML prompt files, string names, tool IDs and later/multiple system messages                                                 |
+| `promptfooconfig-simplified.yaml`                                               | Upstream `{ user: ... }` / `{ assistant: ... }` shorthand expanded by a Nunjucks template; shared `defaultTest.vars.messages` fixture across follow-ups |
+| `promptfooconfig-prompt-history.yaml`                                           | Alternative three-turn replay using only the **last** `completion.prompt`, then its `completion.output`                                                 |
+| `promptfooconfig-embedded.yaml`                                                 | JSON embedded inside string `content`, escaped with `dump`, including previous replies                                                                  |
+| `promptfooconfig-text.yaml`                                                     | Literal chat-shaped business JSON with `inputFormat: text`                                                                                              |
+| `promptfooconfig-storage.yaml`                                                  | `storeOutputAs`, transform-before-storage, and two subsequent questions using stored variables                                                          |
 
 For example:
 
@@ -650,14 +650,14 @@ tests:
       payload: '[{"role":"user","content":"business record"}]'
 ```
 
-* `text` bypasses **provider** chat parsing and forwards the supplied/rendered
+- `text` bypasses **provider** chat parsing and forwards the supplied/rendered
   string exactly, including chat-looking JSON. It does not disable stock
   Promptfoo's earlier Nunjucks rendering, variable expansion or source-file
   loading/serialization; it cannot promise original source bytes.
-* `chat` requires a nonempty JSON message array and validates every message.
+- `chat` requires a nonempty JSON message array and validates every message.
   YAML **prompt files** work because Promptfoo loads them into rendered JSON;
   the provider does not parse arbitrary raw YAML strings.
-* `auto` recognizes complete intent only: a nonempty JSON array whose **every**
+- `auto` recognizes complete intent only: a nonempty JSON array whose **every**
   entry is an object with its own `content` and a recognized chat-vocabulary
   role (`system`, `user`, `assistant`, `tool`, `developer`, `function`).
   Once detected, unsupported roles or content fail validation, rather than
@@ -710,20 +710,20 @@ unpublished workspaces. Do not call cleanup while assertions are using them.
 
 ### Feature and verification provenance
 
-| Feature | Owner / proof boundary | Coverage status for this follow-up |
-| --- | --- | --- |
-| JSON/YAML **file** loading, Nunjucks, simplified/shared fixtures | Stock Promptfoo engine; provider receives rendered JSON | Verified through both public source providers and the real SDK/CLI loopback matrix |
-| `_conversation` prompt/input/output, three turns, interleaved IDs, grading | Stock Promptfoo engine, separate history per prompt/provider/ID | Verified exact-once replay, provider/prompt/ID separation and fresh-evaluation isolation in the real-runtime matrix |
-| `storeOutputAs`, transform-before-storage, later variable substitution | Stock Promptfoo engine registers, not SDK session state | Verified native three-row dependency chains independently per provider |
-| `inputFormat`, complete-intent detection, ordered system/name/tool-ID mapping | This provider's rendered-input mapping and public SDK options | Focused regressions and real model-request receipts verify literal, strict-chat and per-row override routes |
-| Native assistant/tool hydration, imported/persistent sessions, multimodal parity | Not implemented by this SDK mapping | Unsupported; no parity claim |
-| Current-turn tools/usage, fresh Agent workspace, returned-error retention and cleanup | Provider/runner lifecycle, not conversation history | Focused provider regressions plus real SDK zero-tool usage/lifecycle checks; no generated-tool/skill claim from the local model fixture |
+| Feature                                                                               | Owner / proof boundary                                          | Coverage status for this follow-up                                                                                                      |
+| ------------------------------------------------------------------------------------- | --------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| JSON/YAML **file** loading, Nunjucks, simplified/shared fixtures                      | Stock Promptfoo engine; provider receives rendered JSON         | Verified through both public source providers and the real SDK/CLI loopback matrix                                                      |
+| `_conversation` prompt/input/output, three turns, interleaved IDs, grading            | Stock Promptfoo engine, separate history per prompt/provider/ID | Verified exact-once replay, provider/prompt/ID separation and fresh-evaluation isolation in the real-runtime matrix                     |
+| `storeOutputAs`, transform-before-storage, later variable substitution                | Stock Promptfoo engine registers, not SDK session state         | Verified native three-row dependency chains independently per provider                                                                  |
+| `inputFormat`, complete-intent detection, ordered system/name/tool-ID mapping         | This provider's rendered-input mapping and public SDK options   | Focused regressions and real model-request receipts verify literal, strict-chat and per-row override routes                             |
+| Native assistant/tool hydration, imported/persistent sessions, multimodal parity      | Not implemented by this SDK mapping                             | Unsupported; no parity claim                                                                                                            |
+| Current-turn tools/usage, fresh Agent workspace, returned-error retention and cleanup | Provider/runner lifecycle, not conversation history             | Focused provider regressions plus real SDK zero-tool usage/lifecycle checks; no generated-tool/skill claim from the local model fixture |
 
 | Promptfoo version | Both public source providers + real SDK/CLI + local model fixture |
-| --- | --- |
-| `0.122.1` | All nine authoring scenarios passed; 66 generated model turns |
-| `0.124.1` | All nine authoring scenarios passed; 66 generated model turns |
-| `0.125.1` | All nine authoring scenarios passed; 66 generated model turns |
+| ----------------- | ----------------------------------------------------------------- |
+| `0.122.1`         | All nine authoring scenarios passed; 66 generated model turns     |
+| `0.124.1`         | All nine authoring scenarios passed; 66 generated model turns     |
+| `0.125.1`         | All nine authoring scenarios passed; 66 generated model turns     |
 
 Maintainer `corepack pnpm e2e` covers installed stock Promptfoo with a
 **deterministic SDK receipt fixture**. It captures actual `sendAndWait` input and
@@ -797,16 +797,16 @@ root is not admitted. Merely discovering a skill does not count as using it:
 a file read or SDK-confirmed body load must complete successfully. Sessions
 without a local skills directory keep skill loading disabled.
 
-| Field | Required | Purpose |
-| --- | --- | --- |
-| `working_dir` | Yes | Existing directory where Copilot runs; absolute, or relative to the eval config's directory |
-| `env` | No | Explicit values, including `COPILOT_GITHUB_TOKEN`, passed to Copilot |
-| `model`, `reasoning_effort` | No | Select the model and its supported reasoning effort |
-| `inputFormat` | No | `auto` (default), `chat` or `text`; same setting in Copilot `delegate.config` and per-test `options.delegate.config` |
-| `permissions` | No | Allow filesystem writes, shell, or network requests when needed |
-| `provider` | No | Configure a BYOK endpoint with `baseUrl` and supported SDK fields |
-| `mcpServers` | No | Contained local Node MCP fixtures with the shape above |
-| `timeoutMs` | No | Limit the call |
+| Field                       | Required | Purpose                                                                                                              |
+| --------------------------- | -------- | -------------------------------------------------------------------------------------------------------------------- |
+| `working_dir`               | Yes      | Existing directory where Copilot runs; absolute, or relative to the eval config's directory                          |
+| `env`                       | No       | Explicit values, including `COPILOT_GITHUB_TOKEN`, passed to Copilot                                                 |
+| `model`, `reasoning_effort` | No       | Select the model and its supported reasoning effort                                                                  |
+| `inputFormat`               | No       | `auto` (default), `chat` or `text`; same setting in Copilot `delegate.config` and per-test `options.delegate.config` |
+| `permissions`               | No       | Allow filesystem writes, shell, or network requests when needed                                                      |
+| `provider`                  | No       | Configure a BYOK endpoint with `baseUrl` and supported SDK fields                                                    |
+| `mcpServers`                | No       | Contained local Node MCP fixtures with the shape above                                                               |
+| `timeoutMs`                 | No       | Limit the call                                                                                                       |
 
 ### Copilot runtime accounting v1
 
@@ -830,8 +830,14 @@ type CopilotAccounting = {
   unit: "nano-AIU";
   status: "complete" | "partial" | "unavailable";
   totalNanoAiu?: number;
-  reason?: "unsupported" | "timeout" | "capture_failed" | "missing_total"
-    | "invalid_total" | "execution_incomplete" | "session_not_created";
+  reason?:
+    | "unsupported"
+    | "timeout"
+    | "capture_failed"
+    | "missing_total"
+    | "invalid_total"
+    | "execution_incomplete"
+    | "session_not_created";
   requestedModel?: string;
   currentModel?: string;
   totalPremiumRequestCost?: number;
