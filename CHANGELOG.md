@@ -18,6 +18,8 @@
 
 ### Bug Fixes
 
+* Publish the local release suite and saved live preview sequentially in one Evals job so Suite 1 always appears before Suite 2, including when the first evaluation fails.
+
 * Number tests from 1 within each suite card. Make the local name-normalization example report its known zero model usage and cost instead of leaving measurements absent.
 
 * Give eval previews their own Evals job instead of appending them beneath Vitest's summary. Show latency, combined reported tokens/cost and assertion outcomes in the results table; distinguish unauthored thresholds from missing measurements. Preserve measured workspace-grader accounting alongside stock skill checks and the zero-call artifact checker.

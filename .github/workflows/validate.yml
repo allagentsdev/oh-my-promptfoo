@@ -6,23 +6,8 @@ on:
 permissions:
   contents: read
 jobs:
-  evals-report-preview:
-    name: Evals
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v7
-      - uses: pnpm/action-setup@v6
-      - uses: actions/setup-node@v7
-        with:
-          node-version-file: .node-version
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile --ignore-scripts
-      - run: pnpm build
-      - name: Preview a recorded live agent evaluation
-        run: node packages/oh-my-promptfoo/evals/live/preview.mjs
   native-eval-action:
-    name: Action integration smoke
+    name: Evals
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -33,6 +18,9 @@ jobs:
           suite-number: '1'
           public-labels: 'true'
           args-json: '["--filter-metadata", "suite=required", "--filter-metadata", "language=latin", "--no-cache"]'
+      - name: Preview a recorded live agent evaluation
+        if: always()
+        run: node packages/oh-my-promptfoo/evals/live/preview.mjs
   validate:
     runs-on: ubuntu-latest
     timeout-minutes: 15

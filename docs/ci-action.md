@@ -31,6 +31,12 @@ fallback within that test. Separate candidates and repeats each get their own
 result number. The JSON retains the native row/test/column mapping. These are
 report references, not case IDs or a selection language.
 
+GitHub orders summaries from different jobs by job completion time, not by suite
+number. To guarantee Suite 1 appears before Suite 2, run both as sequential steps
+in the same job. Use `if: always()` on the later step to retain its report when an
+earlier suite fails; the earlier failure still fails the job. Parallel matrix
+jobs keep their completion-based ordering.
+
 Readable authored labels are opt-in:
 
 ```yaml
@@ -49,7 +55,8 @@ answers, assertion values, grader reasons, generated files and provider IDs are
 never used as labels.
 
 For a formatting example before the live workflow is merged, the dedicated
-**Evals** job publishes a clearly labelled recorded six-case agent run from
+**Evals** job first runs the local release suite as Suite 1, then publishes a
+clearly labelled recorded six-case agent run as Suite 2 from
 [`examples/ci/live-report.json`](../examples/ci/live-report.json). It contains only
 the sanitized report and provenance of an actual model run. Its displayed
 failures are the recorded model results; previewing it makes no inference calls
