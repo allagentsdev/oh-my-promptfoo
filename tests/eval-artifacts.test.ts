@@ -55,6 +55,13 @@ test("approved scored copies keep native answers, reasons and numbers while reda
       prepareResultArtifact(join(directory, "malformed.json"), join(directory, "missing.json")),
     );
     await assert.rejects(stat(join(directory, "missing.json")));
+    for (const [index, empty] of [{}, { results: { results: [] } }].entries()) {
+      const inputPath = join(directory, `empty-${index}.json`);
+      const destination = join(directory, `empty-${index}-scored.json`);
+      await writeFile(inputPath, JSON.stringify(empty));
+      await assert.rejects(prepareResultArtifact(inputPath, destination), /native evaluation rows/);
+      await assert.rejects(stat(destination));
+    }
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

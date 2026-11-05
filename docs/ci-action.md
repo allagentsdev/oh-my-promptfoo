@@ -395,7 +395,7 @@ runner. Logs are not uploaded. Redaction does not make business data public-safe
 GitHub artifacts follow the calling repository's access rules, and logged-in
 readers of a public repository can download them. The caller owns storage approval.
 Assertion/provider failures still fail the Action and retain/upload available
-results. Missing or malformed results never create an empty successful artifact.
+results. Missing, unparseable or zero-row results never create a scored artifact.
 
 The fixed release example and manual live workflow explicitly enable uploads.
 The recorded agent preview has only a sanitized report, so it does not claim to

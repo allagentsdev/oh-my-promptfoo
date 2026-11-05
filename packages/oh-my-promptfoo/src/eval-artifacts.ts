@@ -12,6 +12,9 @@ export async function prepareResultArtifact(
   const document: unknown = JSON.parse(await readFile(resultPath, "utf8"));
   if (!document || typeof document !== "object" || Array.isArray(document))
     throw new Error("A native result object is required");
+  const rows = record(record(document).results).results;
+  if (!Array.isArray(rows) || rows.length === 0)
+    throw new Error("A scored result with native evaluation rows is required");
   const sensitive = [
     ...sensitiveValues,
     ...secrets(
