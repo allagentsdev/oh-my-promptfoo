@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
   schedule:
     # Monday 03:17 UTC; use workflow_dispatch for release-time checks.
-    - cron: '17 3 * * 1'
+    - cron: "17 3 * * 1"
 permissions:
   contents: read
 jobs:

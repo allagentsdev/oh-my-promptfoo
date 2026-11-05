@@ -2,7 +2,7 @@
 # text bypasses provider chat parsing, including business records shaped exactly like chat.
 # It preserves supplied/rendered provider input, not earlier Nunjucks expansion or file bytes.
 prompts:
-  - '{{ payload }}'
+  - "{{ payload }}"
 providers: file://providers.yaml
 defaultTest:
   options:

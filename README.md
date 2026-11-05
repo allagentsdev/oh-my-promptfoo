@@ -42,16 +42,16 @@ providers:
       delegate:
         id: copilot-sdk
         env:
-          GH_TOKEN: "{{env.GH_TOKEN}}"   # pass the agent's credentials here
+          GH_TOKEN: "{{env.GH_TOKEN}}" # pass the agent's credentials here
       workspace:
         sources:
           - type: local
-            path: ./skills               # relative to this file
+            path: ./skills # relative to this file
             destination: .agents/skills
             permissions: all
 defaultTest:
   options:
-    provider: openai:chat:gpt-6-sol      # the llmAssert judge
+    provider: openai:chat:gpt-6-sol # the llmAssert judge
 tests:
   - vars:
       task: Our checkout page crashes when the price is empty. Explain the likely cause.
@@ -114,12 +114,12 @@ pinned Git and OCI sources, and larger runs.
 
 Every provider comes from the `oh-my-promptfoo/providers` entry:
 
-| Provider id | What it does |
-| --- | --- |
-| `package:oh-my-promptfoo/providers:Agent` | Prepares a private workspace per test and runs a coding agent (`delegate`) in it |
-| `package:oh-my-promptfoo/providers:CopilotSdk` | Runs Copilot in an existing `working_dir` |
+| Provider id                                      | What it does                                                                       |
+| ------------------------------------------------ | ---------------------------------------------------------------------------------- |
+| `package:oh-my-promptfoo/providers:Agent`        | Prepares a private workspace per test and runs a coding agent (`delegate`) in it   |
+| `package:oh-my-promptfoo/providers:CopilotSdk`   | Runs Copilot in an existing `working_dir`                                          |
 | `package:oh-my-promptfoo/providers:CopilotModel` | Calls a Copilot model over the API Copilot serves it on, as a candidate or a judge |
-| `package:oh-my-promptfoo/providers:Fallback` | Tries judges in order and fails over on rate limits and outages |
+| `package:oh-my-promptfoo/providers:Fallback`     | Tries judges in order and fails over on rate limits and outages                    |
 
 The assertions are `package:oh-my-promptfoo/assertions:llmAssert` and
 `package:oh-my-promptfoo/assertions:agentAssert`. Version 1.22.0 moved the
@@ -214,9 +214,9 @@ providers:
   - id: package:oh-my-promptfoo/providers:CopilotModel
     label: gpt-5.6-sol
     config:
-      model: gpt-5.6-sol           # required, exactly as Copilot lists it
-      reasoning_effort: medium     # optional: low, medium or high
-      max_tokens: 32000            # optional; defaults to the model's output limit
+      model: gpt-5.6-sol # required, exactly as Copilot lists it
+      reasoning_effort: medium # optional: low, medium or high
+      max_tokens: 32000 # optional; defaults to the model's output limit
 defaultTest:
   options:
     provider:
@@ -224,7 +224,7 @@ defaultTest:
       config:
         model: gpt-6-sol
         reasoning_effort: low
-        response_format: { type: json_object }   # optional; the only accepted format
+        response_format: { type: json_object } # optional; the only accepted format
 ```
 
 Those four keys are the whole config. The endpoint and credentials always come
@@ -234,11 +234,11 @@ the model's endpoint and short-lived credentials, and refreshes them before they
 expire. Promptfoo's own provider for the API Copilot serves the model on then
 makes the request, so usage counting and cancellation work as usual:
 
-| Copilot serves the model over | Promptfoo provider | Request path | `metadata.copilotEndpoint` |
-| --- | --- | --- | --- |
-| OpenAI Responses (GPT, Codex, Grok, MAI) | `openai:responses` | `/responses` | `responses` |
-| OpenAI Chat Completions (kimi-k3) | `openai:chat` | `/chat/completions` | `chat/completions` |
-| Anthropic Messages (Claude) | `anthropic:messages` | `/v1/messages` | `messages` |
+| Copilot serves the model over            | Promptfoo provider   | Request path        | `metadata.copilotEndpoint` |
+| ---------------------------------------- | -------------------- | ------------------- | -------------------------- |
+| OpenAI Responses (GPT, Codex, Grok, MAI) | `openai:responses`   | `/responses`        | `responses`                |
+| OpenAI Chat Completions (kimi-k3)        | `openai:chat`        | `/chat/completions` | `chat/completions`         |
+| Anthropic Messages (Claude)              | `anthropic:messages` | `/v1/messages`      | `messages`                 |
 
 Any other endpoint Copilot reports, such as another API or a WebSocket
 transport, fails the call with an error that names it. The settings reach each
@@ -282,8 +282,20 @@ reports prices for the model, carries them in `metadata.copilotTokenPrices`:
 {
   "model": "gpt-6-sol",
   "batchSize": 1000000,
-  "default": { "inputPrice": 200, "cacheReadPrice": 20, "cacheWritePrice": 250, "outputPrice": 1000, "maxPromptTokens": 272000 },
-  "longContext": { "inputPrice": 400, "cacheReadPrice": 40, "cacheWritePrice": 500, "outputPrice": 1500, "maxPromptTokens": 872000 }
+  "default": {
+    "inputPrice": 200,
+    "cacheReadPrice": 20,
+    "cacheWritePrice": 250,
+    "outputPrice": 1000,
+    "maxPromptTokens": 272000
+  },
+  "longContext": {
+    "inputPrice": 400,
+    "cacheReadPrice": 40,
+    "cacheWritePrice": 500,
+    "outputPrice": 1500,
+    "maxPromptTokens": 872000
+  }
 }
 ```
 

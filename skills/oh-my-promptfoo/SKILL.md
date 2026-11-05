@@ -1,4 +1,5 @@
 ---
+
 name: oh-my-promptfoo
 description: Use when authoring, running, or debugging stock Promptfoo coding-agent evals with oh-my-promptfoo's workspace Agent, direct CopilotSdk, llmAssert or agentAssert assertions. Not for Promptfoo core changes or redteam scans.
 ---
@@ -144,7 +145,7 @@ a configuration error before any request:
 ```yaml
 defaultTest:
   options:
-    provider: openai:chat:gpt-6-sol   # reads OPENAI_API_KEY and OPENAI_BASE_URL
+    provider: openai:chat:gpt-6-sol # reads OPENAI_API_KEY and OPENAI_BASE_URL
 ```
 
 Or pass `--grader openai:chat:gpt-6-sol`, which replaces
@@ -279,10 +280,10 @@ assert:
       grader:
         id: copilot-sdk
         config:
-          model: '{{env.GRADER_MODEL}}'
+          model: "{{env.GRADER_MODEL}}"
           permissions: { filesystem: read, shell: deny, network: deny }
         env:
-          GH_TOKEN: '{{env.GH_TOKEN}}'
+          GH_TOKEN: "{{env.GH_TOKEN}}"
       components:
         - metric: focused-fix
           value: src/parser.ts implements the requested fix without unrelated edits.
