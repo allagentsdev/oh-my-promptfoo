@@ -267,7 +267,7 @@ test("Pi missing optional peer errors name the supported SDK package", async () 
   const frame = callFrame(path, "http://127.0.0.1:1");
   frame.basePath = path;
   await expect(runDelegate(frame, {}, 20_000)).rejects.toThrow(
-    /Install @earendil-works\/pi-coding-agent@1\.3\.0/,
+    /Install @earendil-works\/pi-coding-agent@1\.4\.0/,
   );
 }, 30_000);
 
