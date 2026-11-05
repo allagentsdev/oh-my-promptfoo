@@ -353,8 +353,63 @@ row 1 is `results.results[0]`; the detailed test/column references are
 is enabled as described above. Other metadata, assertion values, answers, grader
 reasons, generated files, provider IDs and credentials are omitted.
 Long summaries are bounded; `report.json` retains all sanitized outcomes. No public
-share, comment or artifact upload occurs. Only numeric progress and the sanitized
+share, comment or artifact upload occurs by default. Only numeric progress and the sanitized
 final report are printed publicly; native stdout/stderr stays in the private log.
+
+### Downloading scored results
+
+Enable uploads only when GitHub artifact storage is approved for the suite's
+answers, judge reasons and generated content. The reusable Action leaves uploads
+off by default. To enable them:
+
+```yaml
+- uses: allagentsdev/oh-my-promptfoo@<reviewed-commit>
+  id: eval
+  with:
+    config: promptfooconfig.yaml
+    upload-results: 'true'
+    artifact-retention-days: '0'
+```
+
+`0` uses the **calling repository's** default retention. Repository/organization
+settings still apply; an explicit positive number can shorten retention. The
+Action does not change those settings. For example, callers can use `14` for a
+14-day artifact instead. See GitHub's [retention inputs](https://github.com/actions/upload-artifact#inputs).
+
+After a successful upload, the suite card includes:
+
+> Agent output and judge reasons: download the scored result (expires in 14 days).
+
+The actual text uses the configured effective retention, including the runner's
+repository limit; it never assumes 14 days. If retention is unavailable locally,
+the helper says it follows repository settings. No download link is printed when
+an upload is disabled, skipped or fails. `result-artifact-url` and
+`result-artifact-id` expose the successful upload to later workflow steps.
+An optional `artifact-name` replaces the generated unique invocation name; use
+distinct names for matrix jobs and multiple invocations.
+
+The artifact contains **scored-results.json**, a native export retaining answers,
+judge reasons, scores and usage with known credential values redacted using the
+package's existing redaction helpers. Private original JSON and logs stay on the
+runner. Logs are not uploaded. Redaction does not make business data public-safe:
+GitHub artifacts follow the calling repository's access rules, and logged-in
+readers of a public repository can download them. The caller owns storage approval.
+Assertion/provider failures still fail the Action and retain/upload available
+results. Missing or malformed results never create an empty successful artifact.
+
+The fixed release example and manual live workflow explicitly enable uploads.
+The recorded agent preview has only a sanitized report, so it does not claim to
+offer original answers or judge reasons. A fresh manual live run produces them.
+
+Local callers can prepare the same redacted native export for their approved
+storage and render the link after upload:
+
+```js
+import { prepareResultArtifact, renderResultArtifactLink } from 'oh-my-promptfoo/reporting';
+await prepareResultArtifact('results.json', 'scored-results.json');
+// Upload scored-results.json using your approved storage, then use its real URL.
+console.log(renderResultArtifactLink(artifactUrl, 14));
+```
 
 Raw JSON/logs can contain confidential data and credentials. The caller owns
 storage approval, access controls and retention. Add `.promptfoo-ci/` to the

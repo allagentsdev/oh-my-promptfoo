@@ -31,6 +31,8 @@ const markdown: string = Reporting.renderSummary(report);
 const consoleReport: string = Reporting.renderConsoleSummary(report);
 const progressLine: string = Reporting.renderProgress({test:1,column:1,status:'pass',latencyMs:0},1);
 const sourceReport: Promise<Reporting.EvaluationReport> = Reporting.addSourceLinks(report, {configPath:'suite.yaml',repositoryRoot:'.',repositoryUrl:'https://github.com/example/evals',revision:'0'.repeat(40)});
+const artifactNote: string = Reporting.renderResultArtifactLink('https://github.com/example/evals/actions/runs/1/artifacts/2',14);
+const artifactCopy: Promise<void> = Reporting.prepareResultArtifact('results.json','scored-results.json');
 const estimate: number | undefined = Reporting.estimateCopilotCost({}, {}, 'fixture');
 const agent: Providers.Agent = new Providers.Agent();
 const copilot: Providers.CopilotSdk = new Providers.CopilotSdk();
@@ -223,6 +225,8 @@ for(const entry of [Reporting,require('oh-my-promptfoo/reporting')]){
   assert.equal(report.totals.candidateCost.usd,null);
   assert.equal(report.totals.graderCost.usd,null);
   assert.ok(entry.renderSummary(report).includes('unknown'));
+  assert.ok(entry.renderResultArtifactLink('https://github.com/example/evals/actions/runs/1/artifacts/2',14).includes('expires in 14 days'));
+  assert.equal(typeof entry.prepareResultArtifact,'function');
 }
 const c=require('oh-my-promptfoo/providers');
 for(const entry of [Providers,c])if(Object.keys(entry).sort().join()!=='Agent,CopilotModel,CopilotSdk,Fallback,createCopilotEndpointClient')throw Error('Provider entry exports '+Object.keys(entry));

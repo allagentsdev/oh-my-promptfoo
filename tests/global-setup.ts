@@ -11,7 +11,11 @@ export const testEntries = fileURLToPath(
 export default async function setup() {
   await build({
     ...processEntries,
-    entry: { ...processEntries.entry, assertions: "packages/oh-my-promptfoo/src/assertions.ts" },
+    entry: {
+      ...processEntries.entry,
+      assertions: "packages/oh-my-promptfoo/src/assertions.ts",
+      reporting: "packages/oh-my-promptfoo/src/reporting.ts",
+    },
     outDir: testEntries,
     clean: true,
     logLevel: "warn",

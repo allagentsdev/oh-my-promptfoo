@@ -40,4 +40,5 @@ jobs:
         with:
           config: packages/oh-my-promptfoo/evals/live/promptfooconfig.yaml
           public-labels: 'true'
+          upload-results: 'true'
           args-json: '["--no-cache", "--max-concurrency", "1"]'

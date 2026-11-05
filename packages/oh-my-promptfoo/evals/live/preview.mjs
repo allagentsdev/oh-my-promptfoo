@@ -9,6 +9,7 @@ const markdown = [
   "> **Recorded live evaluation:** a saved real model run for reviewing the report format, not a new evaluation or a gate on this commit. The manual live workflow runs the suite again.",
   "",
   renderSummary(report),
+  "Agent output and judge reasons are unavailable for this recorded preview. The manual live workflow retains a downloadable scored result.",
   "",
   `Recorded **${sample.recordedAt}** using **${sample.model}** against repository commit [${sample.workspaceCommit.slice(0, 7)}](https://github.com/allagentsdev/oh-my-promptfoo/commit/${sample.workspaceCommit}).`,
 ].join("\n");

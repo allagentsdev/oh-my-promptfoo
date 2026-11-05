@@ -3,6 +3,7 @@ import { type SourceOptions, sourceUrl } from "./eval-sources.js";
 import { redact, secrets } from "./redaction.js";
 import { type ResultCost, record, responseCost, sumCosts } from "./result-cost.js";
 
+export { prepareResultArtifact, renderResultArtifactLink } from "./eval-artifacts.js";
 export { addSourceLinks, type SourceOptions } from "./eval-sources.js";
 export { estimateCopilotCost } from "./result-cost.js";
 

@@ -1,0 +1,48 @@
+name: Eval Action artifact smoke
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  failure-artifact:
+    name: Scored result survives assertion failure
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./
+        id: eval
+        continue-on-error: true
+        env:
+          ARTIFACT_CANARY_TOKEN: artifact-secret-canary
+        with:
+          config: tests/fixtures/ci-artifact-failure.yaml
+          upload-results: 'true'
+          artifact-retention-days: '1'
+          args-json: '["--no-cache"]'
+      - name: Assert the Action failed and still uploaded its scored result
+        env:
+          OUTCOME: ${{ steps.eval.outcome }}
+          STATUS: ${{ steps.eval.outputs.evaluation-status }}
+          ARTIFACT_URL: ${{ steps.eval.outputs.result-artifact-url }}
+          NATIVE_RESULT: ${{ steps.eval.outputs.result-path }}
+          SCORED_RESULT: ${{ steps.eval.outputs.artifact-directory }}/scored-results.json
+        run: |
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import { readFile } from 'node:fs/promises';
+          assert.equal(process.env.OUTCOME, 'failure');
+          assert.equal(process.env.STATUS, 'fail');
+          assert.match(process.env.ARTIFACT_URL, /^https:\/\/github\.com\/.+\/artifacts\/\d+$/);
+          const native = await readFile(process.env.NATIVE_RESULT, 'utf8');
+          const scored = await readFile(process.env.SCORED_RESULT, 'utf8');
+          assert.ok(native.includes('artifact-secret-canary'));
+          assert.ok(!scored.includes('artifact-secret-canary'));
+          const rows = JSON.parse(scored).results.results;
+          assert.equal(rows.length, 1);
+          assert.equal(rows[0].success, false);
+          assert.equal(rows[0].response.output, 'READY');
+          assert.ok(rows[0].gradingResult.reason);
+          NODE
