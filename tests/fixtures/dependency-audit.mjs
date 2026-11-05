@@ -2,16 +2,84 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { channel } from "node:diagnostics_channel";
 import { once } from "node:events";
+import fs from "node:fs";
 import http from "node:http";
 import https from "node:https";
 import { createRequire, syncBuiltinESMExports } from "node:module";
 import net from "node:net";
+import os from "node:os";
+import path from "node:path";
 import { gzipSync } from "node:zlib";
 
 const mode = process.argv[2];
 const deadline = setTimeout(() => {
   throw new Error(`Dependency fixture hung: ${mode}`);
 }, 20_000);
+
+if (mode === "glob" || mode === "minimatch") {
+  const promptfooRequire = createRequire(import.meta.resolve("promptfoo"));
+  const filesystemRequire = createRequire(
+    promptfooRequire.resolve("@modelcontextprotocol/server-filesystem/package.json"),
+  );
+  if (mode === "glob") {
+    const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "dependency-glob-"));
+    try {
+      for (const dir of ["a/b/c", "a/d/e", "f/g/h"]) {
+        fs.mkdirSync(path.join(cwd, dir), { recursive: true });
+        fs.writeFileSync(path.join(cwd, dir, "test.yaml"), "fixture");
+      }
+      fs.writeFileSync(path.join(cwd, ".hidden.yaml"), "hidden");
+      for (const parentRequire of [promptfooRequire, filesystemRequire]) {
+        const { glob, globSync, escape: escapeGlob, hasMagic } = parentRequire("glob");
+        assert.equal(hasMagic("**/*.yaml"), true);
+        assert.equal(hasMagic(escapeGlob("literal[1].yaml")), false);
+        assert.deepEqual(globSync("**/*.yaml", { cwd, windowsPathsNoEscape: true }).sort(), [
+          "a/b/c/test.yaml",
+          "a/d/e/test.yaml",
+          "f/g/h/test.yaml",
+        ]);
+        assert.deepEqual(globSync("**/*.yaml", { cwd, ignore: "a/**" }), ["f/g/h/test.yaml"]);
+        const controller = new AbortController();
+        const reason = new Error("cancel directory traversal");
+        let reads = 0;
+        const countedFs = {
+          ...fs,
+          readdir(...args) {
+            if (++reads === 1) controller.abort(reason);
+            return fs.readdir(...args);
+          },
+        };
+        await assert.rejects(glob("**", { cwd, signal: controller.signal, fs: countedFs }), reason);
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        assert.equal(reads, 1, "Aborted traversal continued reading directories");
+      }
+    } finally {
+      fs.rmSync(cwd, { recursive: true, force: true });
+    }
+  } else {
+    const piRequire = createRequire(import.meta.resolve("@earendil-works/pi-coding-agent"));
+    for (const parentRequire of [piRequire, promptfooRequire, filesystemRequire]) {
+      const { minimatch, Minimatch } = parentRequire("minimatch");
+      // Upstream's preprocessing regression, with a small cap so the old
+      // implementation fails deterministically without an unbounded allocation.
+      const matcher = new Minimatch(Array(8).fill("**/../a/b").join("/"), {
+        optimizationLevel: 2,
+        braceExpandMax: 64,
+      });
+      assert.equal(matcher.set.length, 64);
+      assert.equal(
+        minimatch("anthropic/Claude-Sonnet", "anthropic/claude-*", { nocase: true }),
+        true,
+      );
+      assert.equal(minimatch("src/a.ts", "**/*.{ts,js}"), true);
+      assert.equal(minimatch("src/a.md", "**/*.{ts,js}"), false);
+      assert.equal(minimatch(".git/config", "**/.git/**", { dot: true }), true);
+      assert.equal(minimatch(".env", "**/*"), false);
+      assert.equal(minimatch(".env", "**/*", { dot: true }), true);
+      assert.equal(new Minimatch("**/*.ts").match("src/a.ts"), true);
+    }
+  }
+}
 
 if (mode === "zod") {
   const sdkRequire = createRequire(import.meta.resolve("@github/copilot-sdk"));
@@ -302,6 +370,6 @@ if (mode === "azure") {
   assert.equal(requests.length, 0);
 }
 
-assert.ok(["zod", "undici", "azure"].includes(mode));
+assert.ok(["zod", "undici", "azure", "glob", "minimatch"].includes(mode));
 clearTimeout(deadline);
 console.log(JSON.stringify({ mode, securityInvariant: "passed" }));
