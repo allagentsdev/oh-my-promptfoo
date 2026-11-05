@@ -1,3 +1,4 @@
+import { posix } from "node:path";
 import { CapturedWorkspace, type WorkspaceContext, workspacePath } from "./captured-workspace.js";
 import { closed, object } from "./config.js";
 
@@ -28,7 +29,14 @@ export interface NativeAssertionContext {
   providerResponse?: Record<string, unknown>;
   trace?: { traceId?: string; [key: string]: unknown };
 }
-export type WorkspaceEvidenceOption = boolean | { files?: string[]; maxBytes?: number };
+export type WorkspaceEvidenceOption =
+  | boolean
+  | {
+      files?: string[];
+      maxBytes?: number;
+      /** Relative POSIX globs mapped to WHATWG TextDecoder encoding labels. */
+      encodings?: Record<string, string>;
+    };
 export interface WorkspaceEvidenceMetadata {
   includedPaths: string[];
   omittedPaths: string[];
@@ -54,7 +62,8 @@ export async function workspaceEvidence(
   option: WorkspaceEvidenceOption,
   context?: WorkspaceContext,
 ): Promise<CapturedWorkspaceEvidence> {
-  const config = option === true ? {} : closed(option, ["files", "maxBytes"], "workspaceEvidence");
+  const config =
+    option === true ? {} : closed(option, ["files", "maxBytes", "encodings"], "workspaceEvidence");
   const maxBytes = config.maxBytes ?? 65536;
   if (
     typeof maxBytes !== "number" ||
@@ -70,6 +79,21 @@ export async function workspaceEvidence(
       new Set(config.files).size !== config.files.length)
   )
     throw new Error("workspaceEvidence.files must be a list of unique paths");
+  const encodings =
+    config.encodings === undefined ? {} : object(config.encodings, "workspaceEvidence.encodings");
+  for (const [pattern, encoding] of Object.entries(encodings)) {
+    if (
+      !pattern ||
+      pattern.includes("\\") ||
+      pattern.startsWith("/") ||
+      pattern.split("/").includes("..") ||
+      typeof encoding !== "string"
+    )
+      throw new Error(
+        "workspaceEvidence.encodings requires relative POSIX globs and encoding labels",
+      );
+    new TextDecoder(encoding);
+  }
   const workspace = new CapturedWorkspace(context);
   const paths = (
     config.files === undefined ? Object.keys(workspace.files) : (config.files as string[])
@@ -110,10 +134,18 @@ export async function workspaceEvidence(
     const bytes = await workspace.read(path);
     if (bytes === undefined) throw new Error(`Requested workspace evidence ${path} is absent`);
     let content: string, encoding: string;
+    const selected = Object.entries(encodings).filter(([pattern]) =>
+      posix.matchesGlob(path, pattern),
+    );
+    if (selected.length > 1) throw new Error(`Multiple workspace encodings match ${path}`);
+    const explicit = selected[0]?.[1] as string | undefined;
     try {
-      content = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes);
-      encoding = "utf8";
-    } catch {
+      const decoder = new TextDecoder(explicit ?? "utf-8", { fatal: true, ignoreBOM: true });
+      content = decoder.decode(bytes);
+      encoding = explicit === undefined ? "utf8" : decoder.encoding;
+    } catch (cause) {
+      if (explicit !== undefined)
+        throw new Error(`Cannot decode ${path} as ${explicit}`, { cause });
       content = bytes.toString("base64");
       encoding = "base64";
     }

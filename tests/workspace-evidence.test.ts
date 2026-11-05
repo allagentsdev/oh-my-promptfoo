@@ -5,8 +5,8 @@ import { withAssertions } from "../packages/oh-my-promptfoo/src/assertion-integr
 import { llmAssert } from "../packages/oh-my-promptfoo/src/assertions.js";
 import { workspaceEvidence } from "../packages/oh-my-promptfoo/src/workspace-evidence.js";
 
-function context(content = "captured final bytes") {
-  const bytes = Buffer.from(content);
+function context(content: string | Buffer = "captured final bytes") {
+  const bytes = typeof content === "string" ? Buffer.from(content) : content;
   return {
     providerResponse: {
       metadata: {
@@ -31,6 +31,49 @@ function context(content = "captured final bytes") {
     },
   };
 }
+test("declared encodings decode verified bytes while other files retain UTF-8", async () => {
+  const input = context(Buffer.from([0x93, 0xfa, 0x96, 0x7b]));
+  Object.assign(input.providerResponse.metadata.fileChanges.changedFiles, {
+    "report.json":
+      context('{"label":"日本"}').providerResponse.metadata.fileChanges.changedFiles["file.txt"],
+  });
+  const evidence = await workspaceEvidence({ encodings: { "**/*.txt": "shift_jis" } }, input);
+  const payload = JSON.parse(evidence.block.slice(evidence.block.indexOf("\n") + 1));
+  expect(payload.files).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ path: "file.txt", encoding: "shift_jis", content: "日本" }),
+      expect.objectContaining({
+        path: "report.json",
+        encoding: "utf8",
+        content: '{"label":"日本"}',
+      }),
+    ]),
+  );
+});
+test("declared decoding errors and ambiguous patterns fail rather than providing opaque evidence", async () => {
+  await expect(
+    workspaceEvidence({ encodings: { "*.txt": "shift_jis" } }, context(Buffer.from([0x82]))),
+  ).rejects.toThrow(/Cannot decode file.txt/);
+  await expect(
+    workspaceEvidence({ encodings: { "*.txt": "shift_jis", "file.txt": "utf8" } }, context()),
+  ).rejects.toThrow(/Multiple workspace encodings/);
+  const invalid: Record<string, string>[] = [
+    { "*.txt": "unknown-encoding" },
+    { "../*.txt": "utf8" },
+    { "/file.txt": "utf8" },
+  ];
+  for (const encodings of invalid)
+    await expect(workspaceEvidence({ encodings }, context())).rejects.toThrow();
+});
+test("default binary fallback and captured-byte integrity remain unchanged with encoding selection", async () => {
+  const binary = await workspaceEvidence(true, context(Buffer.from([0xff])));
+  expect(binary.block).toContain('"encoding":"base64"');
+  const corrupt = context(Buffer.from([0x93, 0xfa]));
+  corrupt.providerResponse.metadata.fileChanges.changedFiles["file.txt"].sha256 = "sha256:wrong";
+  await expect(
+    workspaceEvidence({ encodings: { "*.txt": "shift_jis" } }, corrupt),
+  ).rejects.toThrow();
+});
 test("llmAssert judge receives selected captured contents and reports provenance", async () => {
   const prompts: string[] = [];
   const provider = {

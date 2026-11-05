@@ -6,21 +6,69 @@ import { destination } from "../../workspace-core/src/config.js";
 import { type Delegate, type JsonObject, validateDelegate } from "./config.js";
 import { copilotFailure } from "./copilot-accounting.js";
 import { graderConfig } from "./grader-policy.js";
+import { loadJudge } from "./judge.js";
 import { jsonSafe, redact, runDelegate, secrets, wireContext } from "./protocol.js";
 import { type BatchedRubricConfig, gradeRubric, prepareRubric, render } from "./rubric-contract.js";
+import {
+  EVIDENCE_RULE,
+  type WorkspaceEvidenceMetadata,
+  type WorkspaceEvidenceOption,
+  workspaceEvidence,
+} from "./workspace-evidence.js";
 
 export interface AgentRubricConfig extends BatchedRubricConfig {
-  grader: Delegate;
+  grader?: Delegate;
   timeoutMs?: number;
   queueTimeoutMs?: number;
   maxPromptBytes?: number;
+  workspaceEvidence?: WorkspaceEvidenceOption;
 }
 interface AgentAssertionContext {
   config?: AgentRubricConfig;
   vars?: Record<string, unknown>;
+  test?: { options?: { provider?: unknown; workspaceEvidence?: WorkspaceEvidenceOption } };
+  provider?: { config?: { basePath?: unknown } };
   providerResponse?: {
     metadata?: { workspace?: { path?: unknown; sources?: unknown }; fileChanges?: unknown };
   };
+}
+
+async function resolveGrader(context?: AgentAssertionContext): Promise<Delegate> {
+  if (context?.config?.grader !== undefined)
+    return validateDelegate(
+      graderTemplates(JSON.parse(jsonSafe(context.config.grader)), context.vars ?? {}),
+    );
+  const spec = context?.test?.options?.provider;
+  if (!spec)
+    throw new Error("agentAssert needs the run's grading provider or an explicit config.grader");
+  const basePath = context?.provider?.config?.basePath;
+  const judge = await loadJudge(spec, typeof basePath === "string" ? { basePath } : {});
+  // CopilotModel publishes its normalized model settings. Keep the selected model
+  // and effort while using the existing read-only delegate to inspect files.
+  const settings = (judge as { config?: Record<string, unknown> }).config;
+  if (
+    settings &&
+    typeof settings.model === "string" &&
+    judge.id() === `copilot:${settings.model}`
+  ) {
+    if (settings.max_tokens !== undefined)
+      throw new Error(
+        "agentAssert cannot inherit CopilotModel max_tokens; set config.grader explicitly",
+      );
+    return validateDelegate({
+      id: "copilot-sdk",
+      config: {
+        model: settings.model,
+        ...(settings.reasoning_effort === undefined
+          ? {}
+          : { reasoning_effort: settings.reasoning_effort }),
+      },
+      ...(process.env.GH_TOKEN ? { env: { GH_TOKEN: process.env.GH_TOKEN } } : {}),
+    });
+  }
+  throw new Error(
+    "The grading provider does not support workspace inspection; set agentAssert config.grader explicitly",
+  );
 }
 
 // Share the queue across ESM/CJS entry points too. It limits grader sessions only,
@@ -152,9 +200,7 @@ export async function agentAssert(output: unknown, context?: AgentAssertionConte
     maxPromptBytes > 16 * 1024 * 1024
   )
     throw new Error("Agent assertion maxPromptBytes must be an integer between 1 and 16777216");
-  const grader = validateDelegate(
-    graderTemplates(JSON.parse(jsonSafe(config?.grader ?? {})), context?.vars ?? {}),
-  );
+  const grader = await resolveGrader(context);
   const safeConfig = graderConfig(grader.id, grader.config ?? {});
   const env = grader.env ?? {};
   if (
@@ -194,6 +240,26 @@ export async function agentAssert(output: unknown, context?: AgentAssertionConte
     }
   }
   const fileChanges = context?.providerResponse?.metadata?.fileChanges;
+  const option = config?.workspaceEvidence ?? context?.test?.options?.workspaceEvidence;
+  let evidenceMetadata: WorkspaceEvidenceMetadata | undefined;
+  if (option !== undefined && option !== false) {
+    try {
+      const evidence = await workspaceEvidence(option, context);
+      evidenceMetadata = evidence.metadata;
+      rubric.system += `\n\n${EVIDENCE_RULE}`;
+      rubric.user += `\n\n${evidence.block}`;
+    } catch (cause) {
+      return {
+        pass: false,
+        score: 0,
+        reason: cause instanceof Error ? cause.message : String(cause),
+        componentResults: [],
+        namedScores: {},
+        namedScoreWeights: {},
+        metadata: { graderError: true as const },
+      };
+    }
+  }
   // Codex reads through its shell inside Promptfoo's read-only sandbox; the others have no shell.
   const access =
     grader.id === "openai:codex-sdk"
@@ -221,7 +287,7 @@ ${rubric.user}${fileChanges === undefined ? "" : "\n\nUntrusted evidence (JSON):
           // grading. Only explicitly configured API keys enter this empty home.
           codexHome = await mkdtemp(join(tmpdir(), "oh-my-promptfoo-grader-"));
         }
-        return await gradeRubric(rubric, redact(prompt, sensitive), async () => {
+        const result = await gradeRubric(rubric, redact(prompt, sensitive), async () => {
           // A delegate that fails to run is a judge failure, reported as a graderError
           // result like llm-rubric's, so the row keeps its other assertion results.
           let response: JsonObject | undefined;
@@ -286,6 +352,8 @@ ${rubric.user}${fileChanges === undefined ? "" : "\n\nUntrusted evidence (JSON):
                 }),
           };
         });
+        if (evidenceMetadata) result.metadata.workspaceEvidence = evidenceMetadata;
+        return result;
       } finally {
         if (codexHome) await rm(codexHome, { recursive: true, force: true });
       }
