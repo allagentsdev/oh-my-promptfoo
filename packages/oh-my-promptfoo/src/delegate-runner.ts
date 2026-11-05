@@ -2,11 +2,10 @@ import { readFileSync } from "node:fs";
 import { stat } from "node:fs/promises";
 import { isAbsolute } from "node:path";
 import { pathToFileURL } from "node:url";
-import * as bundledTelemetry from "@opentelemetry/api";
+import * as telemetryApi from "@opentelemetry/api";
 import { AsyncLocalStorageContextManager } from "@opentelemetry/context-async-hooks";
 import { W3CTraceContextPropagator } from "@opentelemetry/core";
-import { NodeTracerProvider } from "@opentelemetry/sdk-trace-node";
-import { resolve as resolveImport } from "import-meta-resolve";
+import { TracerProvider } from "@opentelemetry/sdk-trace";
 import { destination } from "../../workspace-core/src/config.js";
 import {
   type CopilotSdkConfig,
@@ -67,11 +66,10 @@ let accepted = false,
   fatal: Error | undefined;
 let sensitive: string[] = [];
 let mcpServers: ResolvedMcpServer[] = [];
-let telemetryApi = bundledTelemetry;
 let nativeInventory: NativeToolInventory | undefined;
 // Native Promptfoo agent spans are collected in this child, then replayed on the
 // host's row trace. No unconfigured exporter or separate root trace is created.
-const tracerProvider = new NodeTracerProvider({
+const tracerProvider = new TracerProvider({
   spanProcessors: [
     {
       onStart(span, parentContext) {
@@ -249,13 +247,9 @@ async function execute(input: JsonObject): Promise<void> {
       frame.delegate === "openai:codex-sdk" || frame.delegate === "anthropic:claude-agent-sdk"
         ? resolvePeer(frame.basePath, "promptfoo")
         : undefined;
-    if (nativePeer) {
-      // Register through the actual consumer peer, not our bundled API: newer
-      // API readers cannot see a global registry created by an older minor.
-      telemetryApi = await import(
-        resolveImport("@opentelemetry/api", pathToFileURL(nativePeer).href)
-      );
-    }
+    // Register through the bundled API 1.10 before importing the native peer.
+    // Both tested consumer APIs (1.9 and 1.10) can read that registry; SDK 3
+    // cannot read a registry created through an older consumer's API 1.9.
     if (nativePeer) nativeInventory = new NativeToolInventory(sensitive, mcpServers);
     tracingRegistered = true;
     telemetryApi.trace.setGlobalTracerProvider(tracerProvider);

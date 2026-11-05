@@ -22,7 +22,7 @@ import { promisify } from "node:util";
 import { context as otelContext, propagation, trace } from "@opentelemetry/api";
 import { AsyncLocalStorageContextManager } from "@opentelemetry/context-async-hooks";
 import { W3CTraceContextPropagator } from "@opentelemetry/core";
-import { NodeTracerProvider, type ReadableSpan } from "@opentelemetry/sdk-trace-node";
+import { type ReadableSpan, TracerProvider } from "@opentelemetry/sdk-trace";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import {
   object,
@@ -2612,13 +2612,22 @@ describe("direct Copilot provider", () => {
   });
 });
 describe("native tracing relay", () => {
+  test("reads the active row from an older Promptfoo host API registry", async () => {
+    const result = await promisify(execFile)(
+      process.execPath,
+      ["--import", "tsx", "tests/fixtures/telemetry-compat.mjs"],
+      { timeout: 20_000 },
+    );
+    expect(result.stdout).toContain("Older Promptfoo host trace propagated");
+  });
+
   for (const [telemetryPackage, minor, decoyPackage] of [
-    ["@opentelemetry/api", "1.9.", "@opentelemetry/api-consumer"],
-    ["@opentelemetry/api-consumer", "1.10.", "@opentelemetry/api"],
+    ["@opentelemetry/api-compat", "1.9.", "@opentelemetry/api"],
+    ["@opentelemetry/api", "1.10.", "@opentelemetry/api-compat"],
   ] as const) {
-    test(`registers the actual Promptfoo API ${minor} peer and preserves native and relayed ancestry`, async () => {
+    test(`preserves native and relayed ancestry with the actual Promptfoo API ${minor} peer`, async () => {
       const completed: ReadableSpan[] = [];
-      const tracerProvider = new NodeTracerProvider({
+      const tracerProvider = new TracerProvider({
         spanProcessors: [
           {
             onStart() {},
@@ -2630,10 +2639,9 @@ describe("native tracing relay", () => {
           },
         ],
       });
-      tracerProvider.register({
-        propagator: new W3CTraceContextPropagator(),
-        contextManager: new AsyncLocalStorageContextManager(),
-      });
+      trace.setGlobalTracerProvider(tracerProvider);
+      otelContext.setGlobalContextManager(new AsyncLocalStorageContextManager().enable());
+      propagation.setGlobalPropagator(new W3CTraceContextPropagator());
       try {
         const path = await project(
           "promptfoo",

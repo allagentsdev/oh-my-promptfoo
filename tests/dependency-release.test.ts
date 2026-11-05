@@ -336,9 +336,11 @@ describe("dependency release intent", () => {
     "import-meta-resolve",
     "jsonc-parser",
     "@opentelemetry/api",
+    "@opentelemetry/api-compat",
     "@opentelemetry/context-async-hooks",
     "@opentelemetry/core",
     "@opentelemetry/sdk-trace-node",
+    "@opentelemetry/sdk-trace",
   ]) {
     for (const { title, status } of [
       { title: "chore(deps-dev): update dependencies", status: 1 },

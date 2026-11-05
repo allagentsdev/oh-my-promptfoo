@@ -58,6 +58,12 @@ TypeScript `7.0.2` no longer exposes the legacy compiler API that `tsup` uses fo
 
 Use `pnpm build`, which invokes `node --import tsx scripts/build.ts`; the explicit loader supports Node builds without native TypeScript stripping. Keep `pnpm typecheck` as a separate gate: native declaration emission uses `--noCheck`, so a successful build does not prove the source typechecks.
 
+### OpenTelemetry compatibility
+
+The bundled worker uses OpenTelemetry SDK `3.0.0` through `@opentelemetry/sdk-trace`, with core/context `3.0.0` and API `1.10.0`. This replaces the removed `sdk-trace-node` package and its `NodeTracerProvider` class with `TracerProvider` and explicit context/propagator registration, following the [SDK 3 migration guide](https://github.com/open-telemetry/opentelemetry-js/blob/v3.0.0/doc/3.x/migration-guide.md). Its Node floor `22.15.0` remains below this package's floor.
+
+Host and worker API roles differ. The host protocol bundles `@opentelemetry/api-compat`, an alias pinned to API `1.9.1`, so it can read active Promptfoo row registries created by either tested API minor, `1.9` or `1.10`. The isolated worker registers its API `1.10` registry before importing native Promptfoo providers; both consumer minors can read that registry, while the SDK 3 implementation cannot read a registry created through API `1.9`. Keep both roles and both versions in the native tracing matrix. A fresh-process regression also initializes the host through real Promptfoo's older API/SDK before loading our protocol, so upgrading the host reader cannot silently lose its parent trace. New API minors require the same ancestry and installed-consumer checks.
+
 ### Reviewed security overrides
 
 The optional SDK peers are Copilot `1.0.28` (bundled CLI `1.0.105`) and Pi `1.4.0`. The [Copilot update](https://github.com/github/copilot-sdk/compare/v1.0.22...v1.0.28) retains the adapter's client/session, permission, event, skill and usage APIs; its completion RPC drains the matching idle event before `sendAndWait` resolves. The [Pi update](https://github.com/earendil-works/pi/compare/v1.3.0...v1.4.0) retains the consumed session, model-runtime, resource-loader and tool APIs. Both Node floors remain below this package's `22.22.0` floor. Keep public peer pins, runtime checks, installed-consumer fixtures and the parent-scoped security overrides aligned when updating them. Compatibility checks include real Pi requests against a loopback model, real Copilot conversations and packed npm/pnpm consumers.
