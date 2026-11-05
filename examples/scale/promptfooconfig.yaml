@@ -1,4 +1,4 @@
-prompts: ['{{task}}']
+prompts: ["{{task}}"]
 providers:
   - id: package:oh-my-promptfoo/providers:Agent
     config:
@@ -7,12 +7,12 @@ providers:
         config:
           sandbox_mode: workspace-write
         env:
-          OPENAI_API_KEY: '{{env.OPENAI_API_KEY}}'
+          OPENAI_API_KEY: "{{env.OPENAI_API_KEY}}"
       workspace:
         sources:
           - type: git
-            repository: '{{env.ALLAGENTS_SCALE_REPOSITORY}}'
-            ref: '{{env.ALLAGENTS_SCALE_COMMIT}}'
+            repository: "{{env.ALLAGENTS_SCALE_REPOSITORY}}"
+            ref: "{{env.ALLAGENTS_SCALE_COMMIT}}"
             destination: project
 tests: file://cases.mjs
 evaluateOptions:

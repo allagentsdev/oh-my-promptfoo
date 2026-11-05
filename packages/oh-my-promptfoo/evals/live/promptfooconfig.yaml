@@ -1,6 +1,6 @@
 # yaml-language-server: $schema=https://promptfoo.dev/config-schema.json
 description: Repository agent skill regression
-prompts: ['{{task}}']
+prompts: ["{{task}}"]
 providers:
   - id: package:oh-my-promptfoo/providers:Agent
     label: Pi / {{env.OPENROUTER_MODEL}}
@@ -10,16 +10,16 @@ providers:
         id: pi-sdk
         config:
           provider: openrouter
-          model: '{{env.OPENROUTER_MODEL}}'
+          model: "{{env.OPENROUTER_MODEL}}"
           thinkingLevel: off
           permissions: { filesystem: write, shell: deny }
         env:
-          OPENROUTER_API_KEY: '{{env.OPENROUTER_API_KEY}}'
+          OPENROUTER_API_KEY: "{{env.OPENROUTER_API_KEY}}"
       workspace:
         sources:
           - type: git
-            repository: '{{env.DOGFOOD_REPOSITORY}}'
-            ref: '{{env.DOGFOOD_REF}}'
+            repository: "{{env.DOGFOOD_REPOSITORY}}"
+            ref: "{{env.DOGFOOD_REF}}"
             destination: project
             permissions: read-only
           - type: local
@@ -50,11 +50,11 @@ defaultTest:
           id: pi-sdk
           config:
             provider: openrouter
-            model: '{{env.OPENROUTER_MODEL}}'
+            model: "{{env.OPENROUTER_MODEL}}"
             thinkingLevel: off
             permissions: { filesystem: read, shell: deny }
           env:
-            OPENROUTER_API_KEY: '{{env.OPENROUTER_API_KEY}}'
+            OPENROUTER_API_KEY: "{{env.OPENROUTER_API_KEY}}"
         components:
           - metric: verified-artifact
             value: >-
@@ -153,9 +153,9 @@ tests:
       format: json
       expected:
         - --filter-sample
-        - '3'
+        - "3"
         - --filter-sample-seed
-        - '42'
+        - "42"
         - --filter-providers
         - ^baseline$
         - --no-cache

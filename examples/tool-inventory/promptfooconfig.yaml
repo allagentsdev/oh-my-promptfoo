@@ -18,14 +18,14 @@ tests:
       - type: javascript
         value: package:oh-my-promptfoo/assertions:tool-called
         config:
-          name: { regex: '^(read|read_file|view)$' }
+          name: { regex: "^(read|read_file|view)$" }
           argumentsMatch: { path: /path, regex: 'README\.md$' }
           before:
-            name: { regex: '^(write|write_file|create)$' }
+            name: { regex: "^(write|write_file|create)$" }
       - type: javascript
         value: package:oh-my-promptfoo/assertions:tool-not-called
         config:
-          name: { regex: '^(bash|shell|powershell)$' }
+          name: { regex: "^(bash|shell|powershell)$" }
       - type: javascript
         value: package:oh-my-promptfoo/assertions:skill-not-loaded
         config:

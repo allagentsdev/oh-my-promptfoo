@@ -19,8 +19,8 @@ jobs:
           ARTIFACT_CANARY_TOKEN: artifact-secret-canary
         with:
           config: tests/fixtures/ci-artifact-failure.yaml
-          upload-results: 'true'
-          artifact-retention-days: '1'
+          upload-results: "true"
+          artifact-retention-days: "1"
           args-json: '["--no-cache"]'
       - name: Assert the Action failed and still uploaded its scored result
         env:

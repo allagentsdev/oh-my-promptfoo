@@ -96,7 +96,7 @@ Readable authored labels are opt-in:
 - uses: allagentsdev/oh-my-promptfoo@<reviewed-commit>
   with:
     config: evals/release.yaml
-    public-labels: 'true'
+    public-labels: "true"
 ```
 
 `public-labels: 'true'` publishes the native config's `description`, each test's
@@ -252,7 +252,7 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         with:
           config: examples/ci/comparison.yaml
-          public-labels: 'true'
+          public-labels: "true"
           args-json: >-
             ["--filter-providers", "^${{ matrix.candidate }}$",
              "--filter-metadata", "suite=required", "--filter-metadata", "language=latin",
@@ -270,13 +270,13 @@ sessions into experimental groups.
 
 ## Inputs and argument ownership
 
-| Input | Meaning |
-| --- | --- |
-| `config` | Required single local file, relative to `working-directory`. No config glob or list. |
-| `working-directory` | Caller directory; default `.`. |
-| `output-directory` | Artifact parent relative to the working directory; default `.promptfoo-ci`. A new `run-*` child prevents stale results. |
-| `args-json` | JSON array of native `promptfoo eval` argument strings; default `[]`. No shell splitting or evaluation. |
-| `args-file` | JSON argument-array file, relative to the working directory (absolute paths also work). Use instead of `args-json` for private values. |
+| Input               | Meaning                                                                                                                                |
+| ------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `config`            | Required single local file, relative to `working-directory`. No config glob or list.                                                   |
+| `working-directory` | Caller directory; default `.`.                                                                                                         |
+| `output-directory`  | Artifact parent relative to the working directory; default `.promptfoo-ci`. A new `run-*` child prevents stale results.                |
+| `args-json`         | JSON array of native `promptfoo eval` argument strings; default `[]`. No shell splitting or evaluation.                                |
+| `args-file`         | JSON argument-array file, relative to the working directory (absolute paths also work). Use instead of `args-json` for private values. |
 
 Examples of native arguments include repeated `--filter-metadata key=value`
 (AND), native comma-separated values (OR), `--filter-pattern` (description regex),
@@ -335,15 +335,15 @@ The runner fixes `PROMPTFOO_FAILED_TEST_EXIT_CODE=100` to distinguish assertion
 failures from execution errors. A failed required assertion must be enforced by
 the authored scoring policy; see [required assertions](grading-guide.md).
 
-| Output | Meaning |
-| --- | --- |
-| `evaluation-status` | `pass`, `fail` or `error`; also represented in `report.json`. |
-| `evaluation-exit-code` | Native exit code, or `unknown` if execution could not finish. |
-| `result-path` | Absolute native JSON path, retained on assertion failures and errors if produced. |
-| `results-available` | `true` if native JSON was produced and parsed; its coverage may still be invalid. |
-| `artifact-directory` | Absolute private run directory containing results, raw logs and reports. |
-| `log-path` | Native stdout/stderr, **potentially sensitive**. |
-| `report-path`, `summary-path` | Sanitized JSON and Markdown reports. |
+| Output                        | Meaning                                                                           |
+| ----------------------------- | --------------------------------------------------------------------------------- |
+| `evaluation-status`           | `pass`, `fail` or `error`; also represented in `report.json`.                     |
+| `evaluation-exit-code`        | Native exit code, or `unknown` if execution could not finish.                     |
+| `result-path`                 | Absolute native JSON path, retained on assertion failures and errors if produced. |
+| `results-available`           | `true` if native JSON was produced and parsed; its coverage may still be invalid. |
+| `artifact-directory`          | Absolute private run directory containing results, raw logs and reports.          |
+| `log-path`                    | Native stdout/stderr, **potentially sensitive**.                                  |
+| `report-path`, `summary-path` | Sanitized JSON and Markdown reports.                                              |
 
 The GitHub step summary contains counts, numbered test references, assertion
 outcomes, native scores/thresholds, latency and measured usage and cost. Test
@@ -367,8 +367,8 @@ off by default. To enable them:
   id: eval
   with:
     config: promptfooconfig.yaml
-    upload-results: 'true'
-    artifact-retention-days: '0'
+    upload-results: "true"
+    artifact-retention-days: "0"
 ```
 
 `0` uses the **calling repository's** default retention. Repository/organization
@@ -405,8 +405,8 @@ Local callers can prepare the same redacted native export for their approved
 storage and render the link after upload:
 
 ```js
-import { prepareResultArtifact, renderResultArtifactLink } from 'oh-my-promptfoo/reporting';
-await prepareResultArtifact('results.json', 'scored-results.json');
+import { prepareResultArtifact, renderResultArtifactLink } from "oh-my-promptfoo/reporting";
+await prepareResultArtifact("results.json", "scored-results.json");
 // Upload scored-results.json using your approved storage, then use its real URL.
 console.log(renderResultArtifactLink(artifactUrl, 14));
 ```
@@ -489,18 +489,22 @@ Source links are also available locally through the same helper. Run this in the
 checkout containing the config and the native result export:
 
 ```js
-import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
-import { addSourceLinks, renderSummary, summarizeEvaluation } from 'oh-my-promptfoo/reporting';
+import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { addSourceLinks, renderSummary, summarizeEvaluation } from "oh-my-promptfoo/reporting";
 
-const native = JSON.parse(readFileSync('.promptfoo-ci/run-ABC123/results.json', 'utf8'));
+const native = JSON.parse(readFileSync(".promptfoo-ci/run-ABC123/results.json", "utf8"));
 const report = summarizeEvaluation(native, undefined, { publicLabels: true });
-const linked = await addSourceLinks(report, {
-  configPath: 'examples/ci/release.yaml',
-  repositoryRoot: process.cwd(),
-  repositoryUrl: 'https://github.com/allagentsdev/oh-my-promptfoo',
-  revision: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(),
-}, native);
+const linked = await addSourceLinks(
+  report,
+  {
+    configPath: "examples/ci/release.yaml",
+    repositoryRoot: process.cwd(),
+    repositoryUrl: "https://github.com/allagentsdev/oh-my-promptfoo",
+    revision: execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim(),
+  },
+  native,
+);
 console.log(renderSummary(linked));
 ```
 

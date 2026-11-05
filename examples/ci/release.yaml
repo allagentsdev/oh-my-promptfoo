@@ -1,6 +1,6 @@
 description: Required name-normalization release regression
 prompts:
-  - '{{input}}'
+  - "{{input}}"
 providers:
   - id: file://normalizer.mjs
     label: Local text normalizer (no model)

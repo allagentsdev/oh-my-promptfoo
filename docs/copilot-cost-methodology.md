@@ -19,11 +19,11 @@ rule and totals defined here; other consumers can use the same methodology throu
 
 Copilot bills in GitHub AI Credits.
 
-| Unit | Value |
-| --- | --- |
+| Unit        | Value                                                                                                 |
+| ----------- | ----------------------------------------------------------------------------------------------------- |
 | 1 AI credit | $0.01 USD ([GitHub](https://docs.github.com/en/copilot/reference/copilot-billing/models-and-pricing)) |
-| 1 AI credit | 1,000,000,000 nano-AIU |
-| 1 USD | 100,000,000,000 nano-AIU |
+| 1 AI credit | 1,000,000,000 nano-AIU                                                                                |
+| 1 USD       | 100,000,000,000 nano-AIU                                                                              |
 
 Premium-request multipliers are not money. `totalPremiumRequestCost`,
 `metadata.copilot.premiumRequestUsage` and the SDK model list's
@@ -109,11 +109,11 @@ every uncached leaf reported one. See
 reported usage. It sends the request through Promptfoo's native provider for the
 API Copilot serves the model on, and names that API in `metadata.copilotEndpoint`:
 
-| Copilot endpoint | `metadata.copilotEndpoint` | Promptfoo provider | Models (measured) |
-| --- | --- | --- | --- |
-| `type: openai`, `wireApi: responses` | `responses` | `openai:responses` | GPT, Codex, Grok, MAI |
-| `type: openai`, `wireApi: completions` | `chat/completions` | `openai:chat` | kimi-k3 |
-| `type: anthropic` | `messages` | `anthropic:messages` | Claude |
+| Copilot endpoint                       | `metadata.copilotEndpoint` | Promptfoo provider   | Models (measured)     |
+| -------------------------------------- | -------------------------- | -------------------- | --------------------- |
+| `type: openai`, `wireApi: responses`   | `responses`                | `openai:responses`   | GPT, Codex, Grok, MAI |
+| `type: openai`, `wireApi: completions` | `chat/completions`         | `openai:chat`        | kimi-k3               |
+| `type: anthropic`                      | `messages`                 | `anthropic:messages` | Claude                |
 
 Those providers would price the reply at OpenAI or Anthropic list prices, which is
 not Copilot billing. `CopilotModel` removes that `cost` on every API and instead
@@ -124,8 +124,20 @@ attaches the model's prices as `metadata.copilotTokenPrices`
 {
   "model": "gpt-6-sol",
   "batchSize": 1000000,
-  "default": { "inputPrice": 200, "cacheReadPrice": 20, "cacheWritePrice": 250, "outputPrice": 1000, "maxPromptTokens": 272000 },
-  "longContext": { "inputPrice": 400, "cacheReadPrice": 40, "cacheWritePrice": 500, "outputPrice": 1500, "maxPromptTokens": 872000 }
+  "default": {
+    "inputPrice": 200,
+    "cacheReadPrice": 20,
+    "cacheWritePrice": 250,
+    "outputPrice": 1000,
+    "maxPromptTokens": 272000
+  },
+  "longContext": {
+    "inputPrice": 400,
+    "cacheReadPrice": 40,
+    "cacheWritePrice": 500,
+    "outputPrice": 1500,
+    "maxPromptTokens": 872000
+  }
 }
 ```
 
@@ -147,11 +159,11 @@ On every endpoint, `tokenUsage.prompt` counts all input tokens, cache reads and
 writes included, and `tokenUsage.completion` the output tokens. Prompt-cache reads
 and writes are in `tokenUsage.completionDetails` when the API reports them:
 
-| `copilotEndpoint` | `prompt` | `cacheReadInputTokens` | `cacheCreationInputTokens` |
-| --- | --- | --- | --- |
-| `responses` | `input_tokens` | `input_tokens_details.cached_tokens`, zero included | `input_tokens_details.cache_write_tokens` |
-| `chat/completions` | `prompt_tokens` | `prompt_tokens_details.cached_tokens` when non-zero | `prompt_tokens_details.cache_write_tokens` or `cache_write_input_tokens` |
-| `messages` | `input_tokens` + `cache_read_input_tokens` + `cache_creation_input_tokens` | `cache_read_input_tokens` | `cache_creation_input_tokens` |
+| `copilotEndpoint`  | `prompt`                                                                   | `cacheReadInputTokens`                              | `cacheCreationInputTokens`                                               |
+| ------------------ | -------------------------------------------------------------------------- | --------------------------------------------------- | ------------------------------------------------------------------------ |
+| `responses`        | `input_tokens`                                                             | `input_tokens_details.cached_tokens`, zero included | `input_tokens_details.cache_write_tokens`                                |
+| `chat/completions` | `prompt_tokens`                                                            | `prompt_tokens_details.cached_tokens` when non-zero | `prompt_tokens_details.cache_write_tokens` or `cache_write_input_tokens` |
+| `messages`         | `input_tokens` + `cache_read_input_tokens` + `cache_creation_input_tokens` | `cache_read_input_tokens`                           | `cache_creation_input_tokens`                                            |
 
 Promptfoo 0.124.1 maps these itself, except that it omits a zero Responses cache
 read; `CopilotModel` copies the reported count from
@@ -201,22 +213,22 @@ compared with its reported `totalNanoAiu` / $10^{11}$. The rule reproduced every
 reported figure to within $0.00001; pricing uncached input at `inputPrice`
 undercounted by 16–17%.
 
-| Model | Prompt | Cached | Uncached | Completion | Reported USD | Formula USD |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| claude-opus-5.5 | 38,875 | 18,117 | 20,758 | 1,075 | 0.1289054 | 0.1289134 |
-| claude-opus-5.5 | 79,135 | 43,003 | 36,132 | 1,131 | 0.2118726 | 0.2118806 |
-| claude-opus-5.5 | 38,920 | 18,121 | 20,799 | 922 | 0.1260512 | 0.1260592 |
-| gpt-6-sol | 38,238 | 23,617 | 14,621 | 411 | 0.0453814 | 0.0453859 |
+| Model           | Prompt | Cached | Uncached | Completion | Reported USD | Formula USD |
+| --------------- | -----: | -----: | -------: | ---------: | -----------: | ----------: |
+| claude-opus-5.5 | 38,875 | 18,117 |   20,758 |      1,075 |    0.1289054 |   0.1289134 |
+| claude-opus-5.5 | 79,135 | 43,003 |   36,132 |      1,131 |    0.2118726 |   0.2118806 |
+| claude-opus-5.5 | 38,920 | 18,121 |   20,799 |        922 |    0.1260512 |   0.1260592 |
+| gpt-6-sol       | 38,238 | 23,617 |   14,621 |        411 |    0.0453814 |   0.0453859 |
 
 Prompt is total input tokens, cached is prompt-cache reads, and uncached is
 prompt − cached. The prices are AI credits per 1,000,000 tokens: Copilot's reported
 read, write and output prices, and `inputPrice` from GitHub's published table
 (used only for the undercount comparison):
 
-| Model | `inputPrice` | `cacheReadPrice` | `cacheWritePrice` | `outputPrice` |
-| --- | ---: | ---: | ---: | ---: |
-| claude-opus-5.5 | 400 | 20 | 500 | 2000 |
-| gpt-6-sol | 200 | 20 | 250 | 1000 |
+| Model           | `inputPrice` | `cacheReadPrice` | `cacheWritePrice` | `outputPrice` |
+| --------------- | -----------: | ---------------: | ----------------: | ------------: |
+| claude-opus-5.5 |          400 |               20 |               500 |          2000 |
+| gpt-6-sol       |          200 |               20 |               250 |          1000 |
 
 The estimate is unavailable when the recorded `model` differs from the model that
 answered, `batchSize` is not a positive integer, or the chosen tier lacks
@@ -237,11 +249,11 @@ answered, `batchSize` is not a positive integer, or the chosen tier lacks
 A consumer may add three kinds of USD into one total, such as a candidate or
 grader cost per run:
 
-| Basis | Source | Nature |
-| --- | --- | --- |
-| Reported session usage | `metadata.copilot.accounting`, `metadata.judgeAccounting` | Copilot's own figure |
-| Token-price estimate | `metadata.copilotTokenPrices` × token usage | Reconstructs billing from published prices |
-| Native Promptfoo cost | `cost` from non-Copilot providers | Provider-defined USD |
+| Basis                  | Source                                                    | Nature                                     |
+| ---------------------- | --------------------------------------------------------- | ------------------------------------------ |
+| Reported session usage | `metadata.copilot.accounting`, `metadata.judgeAccounting` | Copilot's own figure                       |
+| Token-price estimate   | `metadata.copilotTokenPrices` × token usage               | Reconstructs billing from published prices |
+| Native Promptfoo cost  | `cost` from non-Copilot providers                         | Provider-defined USD                       |
 
 Totals follow these rules:
 

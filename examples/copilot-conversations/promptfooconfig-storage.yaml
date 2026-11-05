@@ -2,7 +2,7 @@
 # Promptfoo transforms BEFORE grading/storage; subsequent questions use engine registers.
 # storeOutputAs is not keyed by conversationId: use distinct variable names for separate flows.
 prompts:
-  - '{{ question }}'
+  - "{{ question }}"
 providers: file://providers.yaml
 tests:
   - vars:
@@ -12,10 +12,10 @@ tests:
       storeOutputAs: uppercaseCodename
     assert: [{ type: equals, value: ORCHID }]
   - vars:
-      question: 'Repeat this saved value exactly: {{ uppercaseCodename }}'
+      question: "Repeat this saved value exactly: {{ uppercaseCodename }}"
     options:
       storeOutputAs: echoedCodename
     assert: [{ type: equals, value: ORCHID }]
   - vars:
-      question: 'If these two saved values agree, reply with that value only: {{ uppercaseCodename }} and {{ echoedCodename }}'
+      question: "If these two saved values agree, reply with that value only: {{ uppercaseCodename }} and {{ echoedCodename }}"
     assert: [{ type: equals, value: ORCHID }]

@@ -12,7 +12,7 @@
     suite: required
     language: latin
   vars:
-    input: '  Ada   Lovelace  '
+    input: "  Ada   Lovelace  "
   assert:
     - type: equals
       value: Ada Lovelace
@@ -30,7 +30,7 @@
     suite: required
     language: latin
   vars:
-    input: '   '
+    input: "   "
   assert:
     - type: equals
-      value: ''
+      value: ""

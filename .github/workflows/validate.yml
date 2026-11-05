@@ -16,8 +16,8 @@ jobs:
         id: eval
         with:
           config: examples/ci/release.yaml
-          public-labels: 'true'
-          upload-results: 'true'
+          public-labels: "true"
+          upload-results: "true"
           args-json: '["--filter-metadata", "suite=required", "--filter-metadata", "language=latin", "--no-cache"]'
       - name: Verify the real scored-result upload
         env:
@@ -85,7 +85,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        promptfoo: ['0.122.1', '0.124.1', '0.125.1']
+        promptfoo: ["0.122.1", "0.124.1", "0.125.1"]
     steps:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6
@@ -125,6 +125,6 @@ jobs:
           tar -xzf oras_1.3.0_linux_amd64.tar.gz
       - name: Exercise real HTTPS Git and disposable OCI registry
         env:
-          ALLAGENTS_TEST_GIT_HTTPS: '1'
+          ALLAGENTS_TEST_GIT_HTTPS: "1"
           ALLAGENTS_TEST_ORAS_PATH: ${{ runner.temp }}/oras/oras
         run: pnpm test tests/sources.test.ts tests/sources-git-https.test.ts tests/sources-oci-registry.test.ts tests/workspace.test.ts --reporter=default

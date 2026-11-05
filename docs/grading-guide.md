@@ -108,15 +108,15 @@ defaultTest:
     provider:
       id: package:oh-my-promptfoo/providers:Fallback
       config:
-        providers:                      # tried in order
+        providers: # tried in order
           - id: openai:chat:gpt-6-sol
             label: primary
             config:
-              maxRetries: 1             # fail over fast instead of backing off
+              maxRetries: 1 # fail over fast instead of backing off
           - id: azure:chat:my-deployment
             config: { maxRetries: 1 }
           - anthropic:messages:claude-sonnet-5
-        cooldownMs: 30000               # optional, the default
+        cooldownMs: 30000 # optional, the default
 ```
 
 Each entry in `providers` is written the way you'd write a single judge: an id,
@@ -141,13 +141,13 @@ id, so a chain has to go in `defaultTest`.
 
 The first match wins:
 
-| # | Where | Same as `llm-rubric`? |
-| --- | --- | --- |
-| 1 | the assertion's `config.provider` | Yes, but in `config`: `llm-rubric` reads the assertion's `provider:` |
-| 2 | the test's `options.provider` | Yes |
-| 3 | `--grader` | Yes |
-| 4 | `defaultTest.options.provider` | Yes |
-| — | nothing set: configuration error | No: `llm-rubric` falls back to a credential-based default |
+| #   | Where                             | Same as `llm-rubric`?                                                |
+| --- | --------------------------------- | -------------------------------------------------------------------- |
+| 1   | the assertion's `config.provider` | Yes, but in `config`: `llm-rubric` reads the assertion's `provider:` |
+| 2   | the test's `options.provider`     | Yes                                                                  |
+| 3   | `--grader`                        | Yes                                                                  |
+| 4   | `defaultTest.options.provider`    | Yes                                                                  |
+| —   | nothing set: configuration error  | No: `llm-rubric` falls back to a credential-based default            |
 
 `metadata.judge` in the result names the judge that graded it: its label, or
 its id.
@@ -212,14 +212,14 @@ for why the judge works this way.
 
 `llmAssert` reports judge failures the way `llm-rubric` does:
 
-| What happens | Result |
-| --- | --- |
+| What happens                                                                                           | Result                                                                                                           |
+| ------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------- |
 | The judge returns an error: an HTTP error, a 429 after its own retries, a timeout or a network failure | FAIL: score 0, the error as the reason, `metadata.graderError: true`. The row's other assertion results are kept |
-| The judge returns an empty reply | FAIL with `graderError`, as above |
-| Every judge in a `Fallback` chain fails | FAIL with `graderError`; the reason lists each attempt |
-| The verdict can't be parsed | One retry that bypasses the cache, then FAIL with `graderError` |
-| The judge's provider throws, for example no API key or an unknown provider id | Row ERROR, as for `llm-rubric`, unless a prior Copilot attempt's accounting must be retained (see below) |
-| No judge configured, `provider:` beside `config:`, a list of judges, or invalid `llmAssert` config | Row ERROR |
+| The judge returns an empty reply                                                                       | FAIL with `graderError`, as above                                                                                |
+| Every judge in a `Fallback` chain fails                                                                | FAIL with `graderError`; the reason lists each attempt                                                           |
+| The verdict can't be parsed                                                                            | One retry that bypasses the cache, then FAIL with `graderError`                                                  |
+| The judge's provider throws, for example no API key or an unknown provider id                          | Row ERROR, as for `llm-rubric`, unless a prior Copilot attempt's accounting must be retained (see below)         |
+| No judge configured, `provider:` beside `config:`, a list of judges, or invalid `llmAssert` config     | Row ERROR                                                                                                        |
 
 First-call and native-only configuration throws stay ERROR: missing credentials
 affect every row and should not pass for ordinary failed grades. After a prior
@@ -651,7 +651,7 @@ For other text encodings, map relative POSIX globs to WHATWG TextDecoder labels:
 ```yaml
 workspaceEvidence:
   encodings:
-    '**/*.txt': shift_jis
+    "**/*.txt": shift_jis
 ```
 
 Unmatched files keep the UTF-8/base64 default. Unsupported encodings, overlapping
@@ -760,4 +760,3 @@ capture or a complete retained workspace can prove absence; a missing entry in
 corrupt capture, symlinks, hardlinks, traversal, and unavailable retained files
 are grader errors. Paths cannot enter `.git`. Retained-file reads are bounded
 to 16 MiB and reject files changed while reading. No LLM is involved.
-

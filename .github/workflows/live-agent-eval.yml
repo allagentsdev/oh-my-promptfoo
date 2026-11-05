@@ -34,11 +34,11 @@ jobs:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           DOGFOOD_REPOSITORY: file://${{ github.workspace }}
           DOGFOOD_REF: ${{ github.sha }}
-          PROMPTFOO_CACHE_ENABLED: 'false'
+          PROMPTFOO_CACHE_ENABLED: "false"
           # Retain rate-limit errors promptly instead of retrying the whole agent task.
-          PROMPTFOO_DISABLE_ADAPTIVE_SCHEDULER: 'true'
+          PROMPTFOO_DISABLE_ADAPTIVE_SCHEDULER: "true"
         with:
           config: packages/oh-my-promptfoo/evals/live/promptfooconfig.yaml
-          public-labels: 'true'
-          upload-results: 'true'
+          public-labels: "true"
+          upload-results: "true"
           args-json: '["--no-cache", "--max-concurrency", "1"]'

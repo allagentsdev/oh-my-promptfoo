@@ -9,31 +9,31 @@ inputs:
     required: true
   args-json:
     description: Public JSON array of native argument strings; GitHub may print literal inputs before execution
-    default: '[]'
+    default: "[]"
   args-file:
     description: Private JSON argument-array file relative to working-directory; use for sensitive values instead of args-json
-    default: ''
+    default: ""
   working-directory:
     description: Directory in the caller checkout from which to run Promptfoo
-    default: '.'
+    default: "."
   output-directory:
     description: Local artifact parent directory, relative to working-directory; each invocation creates a fresh child
-    default: '.promptfoo-ci'
+    default: ".promptfoo-ci"
   suite-number:
     description: Legacy JSON suite reference; not displayed in reports or required for separate job cards
-    default: '1'
+    default: "1"
   public-labels:
     description: Publish authored suite/test descriptions, provider labels and assertion metric names; keep false for private labels
-    default: 'false'
+    default: "false"
   upload-results:
     description: Explicitly approve uploading a credential-redacted scored result to this repository's GitHub artifact storage
-    default: 'false'
+    default: "false"
   artifact-retention-days:
     description: Artifact retention override; 0 uses the calling repository's default, within GitHub policy limits
-    default: '0'
+    default: "0"
   artifact-name:
     description: Optional unique artifact name; defaults to a generated name for this invocation
-    default: ''
+    default: ""
 outputs:
   result-artifact-url:
     description: Download URL after an explicitly enabled upload succeeds; empty otherwise
