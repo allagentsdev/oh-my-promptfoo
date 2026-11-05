@@ -8,12 +8,19 @@ import { copilotFailure } from "./copilot-accounting.js";
 import { graderConfig } from "./grader-policy.js";
 import { jsonSafe, redact, runDelegate, secrets, wireContext } from "./protocol.js";
 import { type BatchedRubricConfig, gradeRubric, prepareRubric, render } from "./rubric-contract.js";
+import {
+  EVIDENCE_RULE,
+  type WorkspaceEvidenceMetadata,
+  type WorkspaceEvidenceOption,
+  workspaceEvidence,
+} from "./workspace-evidence.js";
 
 export interface AgentRubricConfig extends BatchedRubricConfig {
   grader: Delegate;
   timeoutMs?: number;
   queueTimeoutMs?: number;
   maxPromptBytes?: number;
+  workspaceEvidence?: WorkspaceEvidenceOption;
 }
 interface AgentAssertionContext {
   config?: AgentRubricConfig;
@@ -194,6 +201,25 @@ export async function agentAssert(output: unknown, context?: AgentAssertionConte
     }
   }
   const fileChanges = context?.providerResponse?.metadata?.fileChanges;
+  let evidenceMetadata: WorkspaceEvidenceMetadata | undefined;
+  if (config?.workspaceEvidence !== undefined && config.workspaceEvidence !== false) {
+    try {
+      const evidence = await workspaceEvidence(config.workspaceEvidence, context);
+      evidenceMetadata = evidence.metadata;
+      rubric.system += `\n\n${EVIDENCE_RULE}`;
+      rubric.user += `\n\n${evidence.block}`;
+    } catch (cause) {
+      return {
+        pass: false,
+        score: 0,
+        reason: cause instanceof Error ? cause.message : String(cause),
+        componentResults: [],
+        namedScores: {},
+        namedScoreWeights: {},
+        metadata: { graderError: true as const },
+      };
+    }
+  }
   // Codex reads through its shell inside Promptfoo's read-only sandbox; the others have no shell.
   const access =
     grader.id === "openai:codex-sdk"
@@ -221,7 +247,7 @@ ${rubric.user}${fileChanges === undefined ? "" : "\n\nUntrusted evidence (JSON):
           // grading. Only explicitly configured API keys enter this empty home.
           codexHome = await mkdtemp(join(tmpdir(), "oh-my-promptfoo-grader-"));
         }
-        return await gradeRubric(rubric, redact(prompt, sensitive), async () => {
+        const result = await gradeRubric(rubric, redact(prompt, sensitive), async () => {
           // A delegate that fails to run is a judge failure, reported as a graderError
           // result like llm-rubric's, so the row keeps its other assertion results.
           let response: JsonObject | undefined;
@@ -286,6 +312,8 @@ ${rubric.user}${fileChanges === undefined ? "" : "\n\nUntrusted evidence (JSON):
                 }),
           };
         });
+        if (evidenceMetadata) result.metadata.workspaceEvidence = evidenceMetadata;
+        return result;
       } finally {
         if (codexHome) await rm(codexHome, { recursive: true, force: true });
       }

@@ -668,6 +668,43 @@ complete; an incomplete capture cannot fall back to disk for missing entries.
 `agentAssert` remains the choice when a read-only judge needs to investigate
 which files matter rather than receive a known set of captured files.
 
+`agentAssert.config.workspaceEvidence` accepts the same options when a read-only grader
+needs decoded captured contents alongside its live-workspace investigation. Those contents
+count toward `maxPromptBytes`, and the grade records their evidence metadata.
+
+### Encodings, complete evidence and diffs
+
+Use `workspaceEvidence.encodings` to select explicit text encodings by relative POSIX glob.
+Supported values are `utf8`, `utf16le`, `ascii`, `latin1` and `shift_jis`. Unmatched files keep
+UTF-8 auto-detection with base64 fallback. Matching rules must agree on an encoding;
+invalid explicit text is a grader error, not a binary fallback.
+
+```yaml
+workspaceEvidence:
+  maxBytes: 524288
+  encodings:
+    '**/*.txt': shift_jis
+  requireComplete: true
+  includeChanges: true
+```
+
+`requireComplete` rejects incomplete capture and any contents omitted or truncated by the
+evidence budget before invoking the judge. It defaults to false, retaining explicit partial
+evidence. `includeChanges` attaches the native baseline diff and deleted-file paths. That
+metadata counts toward the same byte budget; it is never silently omitted to fit.
+
+### Recorded tool evidence
+
+`llmAssert.config.toolEvidence: true` attaches the native `metadata.toolInventory` to the
+judge request, separately from the answer. Use `{ maxBytes: 524288 }` to override its
+65,536-byte default budget (256 bytes through 16 MiB). Missing, invalid or oversized
+inventories fail before invoking the judge; no calls are silently omitted.
+
+The built-in policy distinguishes invocations from claimed actions, failed attempts from
+absence, and complete inventories from incomplete histories. Call success does not certify
+returned content or completed side effects. Overlapping timestamps do not prove sequential
+completion. Native tool assertions remain the cheaper choice for objective call selectors.
+
 ## Shell-aware tool selectors
 
 The package's `tool-called` and `tool-not-called` assertions accept token-aware

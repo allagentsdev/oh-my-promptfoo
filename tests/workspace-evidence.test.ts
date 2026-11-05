@@ -203,3 +203,113 @@ test("byte-boundary budgets never send a nonempty file as an empty truncated pla
     }
   }
 });
+
+test("per-path encodings decode Shift-JIS while preserving UTF-8 JSON", async () => {
+  const source = context();
+  const bytes = Buffer.from([0x93, 0xfa, 0x96, 0x7b]);
+  source.providerResponse.metadata.fileChanges.changedFiles["file.txt"] = {
+    ...source.providerResponse.metadata.fileChanges.changedFiles["file.txt"],
+    content: bytes.toString("base64"),
+    size: bytes.length,
+    sha256: `sha256:${createHash("sha256").update(bytes).digest("hex")}`,
+  };
+  const json =
+    context('{"name":"雪"}').providerResponse.metadata.fileChanges.changedFiles["file.txt"];
+  Object.assign(source.providerResponse.metadata.fileChanges.changedFiles, { "report.json": json });
+  const evidence = await workspaceEvidence({ encodings: { "**/*.txt": "shift_jis" } }, source);
+  const payload = JSON.parse(evidence.block.slice(evidence.block.indexOf("\n") + 1));
+  expect(payload.files).toMatchObject([
+    { path: "file.txt", encoding: "shift_jis", content: "日本" },
+    { path: "report.json", encoding: "utf8", content: '{"name":"雪"}' },
+  ]);
+  await expect(workspaceEvidence({ encodings: { "*.txt": "ascii" } }, source)).rejects.toThrow(
+    /not valid ascii/,
+  );
+  await expect(
+    workspaceEvidence({ encodings: { "*.txt": "shift_jis", "**/*": "utf8" } }, source),
+  ).rejects.toThrow(/Conflicting/);
+});
+
+test("required complete evidence rejects partial capture and budget truncation", async () => {
+  await expect(
+    workspaceEvidence({ requireComplete: true, maxBytes: 256 }, context("x".repeat(1000))),
+  ).rejects.toThrow(/omitted|truncated/);
+  const source = context();
+  Object.assign(source.providerResponse.metadata.fileChanges, {
+    status: "truncated",
+    truncated: true,
+    truncation: { codes: ["FILE_COUNT"], omittedPaths: ["other"] },
+  });
+  await expect(workspaceEvidence({ requireComplete: true }, source)).rejects.toThrow(
+    /complete capture/,
+  );
+});
+
+test("changes evidence retains baseline diff and deletions within the byte budget", async () => {
+  const source = context();
+  Object.assign(source.providerResponse.metadata.fileChanges, {
+    deletedFiles: ["old.txt"],
+    diff: { text: "-old\n+new" },
+  });
+  const evidence = await workspaceEvidence({ includeChanges: true, requireComplete: true }, source);
+  expect(JSON.parse(evidence.block.slice(evidence.block.indexOf("\n") + 1)).changes).toEqual({
+    deletedFiles: ["old.txt"],
+    diff: { text: "-old\n+new" },
+  });
+});
+
+test("tool evidence reaches the judge with unsuccessful attempts and completeness limits", async () => {
+  const inventory = {
+    schemaVersion: 1,
+    status: "complete",
+    incompleteReasons: [],
+    skillInventory: "sdk",
+    loadedSkills: [],
+    calls: [
+      {
+        id: "c1",
+        name: "write_file",
+        arguments: { path: "result.txt" },
+        argumentsTruncated: false,
+        startedAt: "2026-11-01T00:00:00Z",
+        endedAt: "2026-11-01T00:00:01Z",
+        success: false,
+      },
+    ],
+  };
+  const prompts: string[] = [];
+  const provider = {
+    id: () => "tool-evidence-judge",
+    callApi: async (prompt: string) => {
+      prompts.push(prompt);
+      return {
+        output: JSON.stringify({
+          components: [{ metric: "action", score: 0, pass: false, reason: "Attempted write." }],
+        }),
+      };
+    },
+  };
+  const result = await llmAssert("I made no changes", {
+    providerResponse: { metadata: { toolInventory: inventory } },
+    config: {
+      provider,
+      toolEvidence: true,
+      components: [{ metric: "action", value: "Does not invoke write_file" }],
+    },
+  });
+  expect(result).toMatchObject({ pass: false, score: 0 });
+  expect(prompts[0]).toContain("write_file");
+  expect(prompts[0]).toContain("Failed and rejected attempts still count");
+  for (const option of [true, { maxBytes: 256 }]) {
+    const failed = await llmAssert("No changes", {
+      providerResponse: { metadata: { toolInventory: option === true ? {} : inventory } },
+      config: {
+        provider,
+        toolEvidence: option,
+        components: [{ metric: "action", value: "No writes" }],
+      },
+    });
+    expect(failed).toMatchObject({ pass: false, metadata: { graderError: true } });
+  }
+  expect(prompts).toHaveLength(1);
+});

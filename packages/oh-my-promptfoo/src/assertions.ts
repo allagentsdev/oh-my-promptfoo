@@ -1,5 +1,6 @@
 import { JUDGE_LIST_ERROR, judgeName, loadJudge } from "./judge.js";
 import { type BatchedRubricConfig, gradeRubric, prepareRubric } from "./rubric-contract.js";
+import { TOOL_EVIDENCE_RULE, type ToolEvidenceOption, toolEvidence } from "./tool-evidence.js";
 import {
   type CapturedWorkspaceEvidence,
   EVIDENCE_RULE,
@@ -20,8 +21,9 @@ export {
   toolCalled as "tool-called",
   toolNotCalled as "tool-not-called",
 } from "./tool-assertions.js";
+export type { ToolEvidenceOption } from "./tool-evidence.js";
 export type { ToolCall, ToolInventory } from "./tool-inventory.js";
-export type { WorkspaceEvidenceOption } from "./workspace-evidence.js";
+export type { WorkspaceEvidenceOption, WorkspaceTextEncoding } from "./workspace-evidence.js";
 export {
   type WorkspaceFileConfig,
   type WorkspaceFileCriterion,
@@ -33,6 +35,7 @@ export interface LlmAssertConfig extends BatchedRubricConfig {
   /** A judge for this assertion only, in any shape `options.provider` takes. */
   provider?: unknown;
   workspaceEvidence?: WorkspaceEvidenceOption;
+  toolEvidence?: ToolEvidenceOption;
 }
 
 interface LlmAssertionContext {
@@ -112,6 +115,22 @@ export async function llmAssert(output: unknown, context?: LlmAssertionContext) 
     }
     rubric.system += `\n\n${EVIDENCE_RULE}`;
     rubric.user += `\n\n${evidence.block}`;
+  }
+  if (context?.config?.toolEvidence !== undefined && context.config.toolEvidence !== false) {
+    try {
+      rubric.system += `\n\n${TOOL_EVIDENCE_RULE}`;
+      rubric.user += `\n\n${toolEvidence(context.config.toolEvidence, context)}`;
+    } catch (cause) {
+      return {
+        pass: false,
+        score: 0,
+        reason: cause instanceof Error ? cause.message : String(cause),
+        namedScores: {},
+        namedScoreWeights: {},
+        componentResults: [],
+        metadata: { graderError: true as const },
+      };
+    }
   }
   const spec = judgeSpec(context);
   // Promptfoo gives every provider it loads the eval's base path, the directory its own

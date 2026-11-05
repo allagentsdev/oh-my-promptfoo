@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { realpathSync } from "node:fs";
 import { cp, mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
@@ -1302,5 +1303,53 @@ test("agentAssert records a delegate that throws as a grader error without expos
       });
       assert.equal((await calls()).length, 1);
     }
+  });
+});
+
+test("agentAssert attaches decoded workspace evidence before read-only investigation", async () => {
+  await withGrader(async ({ queue, calls, context }) => {
+    const bytes = Buffer.from([0x93, 0xfa, 0x96, 0x7b]);
+    const configured = context("copilot-sdk");
+    const fileChanges = {
+      schemaVersion: 2,
+      status: "complete",
+      truncated: false,
+      deletedFiles: [],
+      changedFiles: {
+        "message.txt": {
+          kind: "file",
+          change: "added",
+          encoding: "base64",
+          content: bytes.toString("base64"),
+          size: bytes.length,
+          sha256: `sha256:${createHash("sha256").update(bytes).digest("hex")}`,
+        },
+      },
+    };
+    const gradingContext = {
+      ...configured,
+      config: {
+        ...configured.config,
+        workspaceEvidence: { encodings: { "*.txt": "shift_jis" as const }, requireComplete: true },
+      },
+      providerResponse: { metadata: { ...configured.providerResponse.metadata, fileChanges } },
+    };
+    await queue([{ output: verdict() }]);
+    const result = await agentAssert("Claimed fix", gradingContext);
+    assert.equal(result.pass, true);
+    assert.deepEqual(result.metadata.workspaceEvidence, {
+      includedPaths: ["message.txt"],
+      omittedPaths: [],
+      truncated: false,
+      captureTruncated: false,
+      maxBytes: 65536,
+    });
+    const recorded = await calls();
+    assert.equal(recorded.length, 1);
+    assert.ok(recorded[0].prompt.includes("日本"));
+    fileChanges.changedFiles["message.txt"].sha256 = "sha256:bad";
+    const rejected = await agentAssert("Claimed fix", gradingContext);
+    assert.equal(rejected.metadata?.graderError, true);
+    assert.equal((await calls()).length, 1);
   });
 });

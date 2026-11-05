@@ -1,3 +1,4 @@
+import { posix } from "node:path";
 import { CapturedWorkspace, type WorkspaceContext, workspacePath } from "./captured-workspace.js";
 import { closed, object } from "./config.js";
 
@@ -28,7 +29,16 @@ export interface NativeAssertionContext {
   providerResponse?: Record<string, unknown>;
   trace?: { traceId?: string; [key: string]: unknown };
 }
-export type WorkspaceEvidenceOption = boolean | { files?: string[]; maxBytes?: number };
+export type WorkspaceTextEncoding = "utf8" | "utf16le" | "ascii" | "latin1" | "shift_jis";
+export type WorkspaceEvidenceOption =
+  | boolean
+  | {
+      files?: string[];
+      maxBytes?: number;
+      encodings?: Record<string, WorkspaceTextEncoding>;
+      requireComplete?: boolean;
+      includeChanges?: boolean;
+    };
 export interface WorkspaceEvidenceMetadata {
   includedPaths: string[];
   omittedPaths: string[];
@@ -54,7 +64,14 @@ export async function workspaceEvidence(
   option: WorkspaceEvidenceOption,
   context?: WorkspaceContext,
 ): Promise<CapturedWorkspaceEvidence> {
-  const config = option === true ? {} : closed(option, ["files", "maxBytes"], "workspaceEvidence");
+  const config =
+    option === true
+      ? {}
+      : closed(
+          option,
+          ["files", "maxBytes", "encodings", "requireComplete", "includeChanges"],
+          "workspaceEvidence",
+        );
   const maxBytes = config.maxBytes ?? 65536;
   if (
     typeof maxBytes !== "number" ||
@@ -70,7 +87,26 @@ export async function workspaceEvidence(
       new Set(config.files).size !== config.files.length)
   )
     throw new Error("workspaceEvidence.files must be a list of unique paths");
+  for (const key of ["requireComplete", "includeChanges"])
+    if (config[key] !== undefined && typeof config[key] !== "boolean")
+      throw new Error(`workspaceEvidence.${key} must be boolean`);
+  const encodings =
+    config.encodings === undefined ? {} : object(config.encodings, "workspaceEvidence.encodings");
+  for (const [pattern, encoding] of Object.entries(encodings)) {
+    if (
+      !pattern ||
+      pattern.includes("\\") ||
+      pattern.startsWith("/") ||
+      pattern.split("/").includes("..") ||
+      !["utf8", "utf16le", "ascii", "latin1", "shift_jis"].includes(String(encoding))
+    )
+      throw new Error(
+        "workspaceEvidence.encodings requires relative POSIX glob patterns and supported encodings",
+      );
+  }
   const workspace = new CapturedWorkspace(context);
+  if (config.requireComplete && workspace.changes.status !== "complete")
+    throw new Error("Workspace evidence requires complete capture");
   const paths = (
     config.files === undefined ? Object.keys(workspace.files) : (config.files as string[])
   )
@@ -99,10 +135,14 @@ export async function workspaceEvidence(
     files: [] as EvidenceFile[],
     omittedPaths: [] as string[],
     omittedCount: paths.length,
+    ...(config.includeChanges
+      ? { changes: { deletedFiles: workspace.deleted, diff: workspace.changes.diff } }
+      : {}),
   };
   const encodedBytes = (value: object | string) => Buffer.byteLength(JSON.stringify(value));
   let usedBytes = Buffer.byteLength(LABEL) + encodedBytes(payload);
-  if (usedBytes > maxBytes) throw new Error("workspaceEvidence.maxBytes cannot fit capture status");
+  if (usedBytes > maxBytes)
+    throw new Error("workspaceEvidence.maxBytes cannot fit capture metadata");
   const includedPaths: string[] = [],
     omittedPaths: string[] = [];
   let truncated = captureTruncated;
@@ -110,10 +150,25 @@ export async function workspaceEvidence(
     const bytes = await workspace.read(path);
     if (bytes === undefined) throw new Error(`Requested workspace evidence ${path} is absent`);
     let content: string, encoding: string;
+    const matching = Object.entries(encodings).filter(([pattern]) =>
+      posix.matchesGlob(path, pattern),
+    );
+    const selectedEncodings = new Set(matching.map(([, value]) => value));
+    if (selectedEncodings.size > 1) throw new Error(`Conflicting workspace encodings for ${path}`);
+    const explicit = matching[0]?.[1] as WorkspaceTextEncoding | undefined;
     try {
-      content = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes);
-      encoding = "utf8";
+      encoding = explicit ?? "utf8";
+      if (encoding === "ascii" && bytes.some((byte) => byte > 127))
+        throw new Error("non-ASCII bytes");
+      content =
+        encoding === "latin1" || encoding === "ascii"
+          ? bytes.toString(encoding)
+          : new TextDecoder(
+              encoding === "utf8" ? "utf-8" : encoding === "utf16le" ? "utf-16le" : encoding,
+              { fatal: true, ignoreBOM: true },
+            ).decode(bytes);
     } catch {
+      if (explicit) throw new Error(`Workspace file ${path} is not valid ${explicit}`);
       content = bytes.toString("base64");
       encoding = "base64";
     }
@@ -172,6 +227,8 @@ export async function workspaceEvidence(
     captureTruncated,
     maxBytes,
   };
+  if (config.requireComplete && truncated)
+    throw new Error("Workspace evidence budget omitted or truncated file contents");
   return { block: LABEL + JSON.stringify(payload), metadata };
 }
 
