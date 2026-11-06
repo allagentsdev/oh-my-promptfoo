@@ -8,6 +8,7 @@ await build({
     index: "packages/oh-my-promptfoo/src/index.ts",
     assertions: "packages/oh-my-promptfoo/src/assertions.ts",
     providers: "packages/oh-my-promptfoo/src/providers.ts",
+    reporting: "packages/oh-my-promptfoo/src/reporting.ts",
   },
   format: ["esm", "cjs"],
   // CJS consumers receive the same named exports and .default as ESM consumers.

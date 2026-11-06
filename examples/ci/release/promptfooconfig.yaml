@@ -1,0 +1,43 @@
+description: Required name-normalization release regression
+prompts:
+  - "{{input}}"
+providers:
+  - id: file://../normalizer.mjs
+    label: Local text normalizer (no model)
+tests:
+  - description: Preserve a single name
+    metadata:
+      suite: required
+      language: latin
+    vars:
+      input: Ada
+    assert:
+      - type: equals
+        value: Ada
+  - description: Collapse internal whitespace
+    metadata:
+      suite: required
+      language: latin
+    vars:
+      input: "  Ada   Lovelace  "
+    assert:
+      - type: equals
+        value: Ada Lovelace
+  - description: Preserve punctuation
+    metadata:
+      suite: required
+      language: latin
+    vars:
+      input: "  O'Neill   Jr. "
+    assert:
+      - type: equals
+        value: "O'Neill Jr."
+  - description: Empty input stays empty
+    metadata:
+      suite: required
+      language: latin
+    vars:
+      input: "   "
+    assert:
+      - type: equals
+        value: ""

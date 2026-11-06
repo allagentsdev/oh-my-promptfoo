@@ -1,0 +1,180 @@
+# yaml-language-server: $schema=https://promptfoo.dev/config-schema.json
+description: Repository agent skill regression
+prompts: ["{{task}}"]
+providers:
+  - id: package:oh-my-promptfoo/providers:Agent
+    label: Pi / {{env.OPENROUTER_MODEL}}
+    config:
+      timeoutMs: 45000
+      delegate:
+        id: pi-sdk
+        config:
+          provider: openrouter
+          model: "{{env.OPENROUTER_MODEL}}"
+          thinkingLevel: off
+          permissions: { filesystem: write, shell: deny }
+        env:
+          OPENROUTER_API_KEY: "{{env.OPENROUTER_API_KEY}}"
+      workspace:
+        sources:
+          - type: git
+            repository: "{{env.DOGFOOD_REPOSITORY}}"
+            ref: "{{env.DOGFOOD_REF}}"
+            destination: project
+            permissions: read-only
+          - type: local
+            path: ../../../../skills
+            destination: .agents/skills
+            # Pi requires contained skill files; protected source views are symlinks.
+            permissions: all
+      fileChanges: true
+defaultTest:
+  options:
+    # Expected argument arrays are assertion data, not a case matrix.
+    disableVarExpansion: true
+  threshold: 1
+  assert:
+    - type: skill-used
+      value: oh-my-promptfoo
+      metric: skill-use
+    - type: javascript
+      value: file://check-artifact.mjs
+      metric: artifact-contract
+    - type: javascript
+      value: package:oh-my-promptfoo/assertions:agentAssert
+      metric: workspace-review
+      config:
+        scoring: binary
+        timeoutMs: 45000
+        grader:
+          id: pi-sdk
+          config:
+            provider: openrouter
+            model: "{{env.OPENROUTER_MODEL}}"
+            thinkingLevel: off
+            permissions: { filesystem: read, shell: deny }
+          env:
+            OPENROUTER_API_KEY: "{{env.OPENROUTER_API_KEY}}"
+        components:
+          - metric: verified-artifact
+            value: >-
+              Read {{artifact}} in the workspace. Verify that its contents meet
+              the candidate's task: {{task}}. Inspect project/README.md and
+              project/docs/provider-guide.md when checking repository facts.
+              A claimed write in the final answer is insufficient evidence.
+tests:
+  - description: Author a native exact-match smoke config using the repository skill
+    metadata: { suite: live-dogfood }
+    vars:
+      task: >-
+        Read .agents/skills/oh-my-promptfoo/SKILL.md. Use this skill to write
+        answer.yaml at the workspace root: a native Promptfoo config sending
+        the literal prompt READY to the echo provider, with one test asserting
+        that the output equals READY. Use exactly the top-level keys prompts,
+        providers and tests, each containing a list. The providers list contains
+        the single string echo, not a provider object. The test contains only
+        assert, whose single entry has type equals and value READY. Write the
+        file with the write tool. Do not change any source files or run commands.
+        Keep your final answer to one sentence.
+      artifact: answer.yaml
+      format: yaml
+      expected:
+        prompts: [READY]
+        providers: [echo]
+        tests:
+          - assert: [{ type: equals, value: READY }]
+  - description: Identify the package's provider and workspace grader from its own docs
+    metadata: { suite: live-dogfood }
+    vars:
+      task: >-
+        Read .agents/skills/oh-my-promptfoo/SKILL.md and project/README.md.
+        Write answer.json at the workspace root with exactly four string fields:
+        package (the npm package name), agentProvider (the package provider ID
+        that creates an isolated workspace), workspaceGrader (the package
+        assertion ID for inspecting that live workspace), and selectionOwner
+        (the lowercase name of the tool that owns native case selection).
+        Derive the values from the files you read. Do not change source files
+        or run commands. Keep your final answer to one sentence.
+      artifact: answer.json
+      format: json
+      expected:
+        package: oh-my-promptfoo
+        agentProvider: package:oh-my-promptfoo/providers:Agent
+        workspaceGrader: package:oh-my-promptfoo/assertions:agentAssert
+        selectionOwner: promptfoo
+  - description: Preserve repeated metadata filters in a CI command
+    metadata: { suite: live-dogfood }
+    vars:
+      task: >-
+        Read .agents/skills/oh-my-promptfoo/SKILL.md and project/docs/ci-action.md.
+        Write filter-args.json at the workspace root containing a JSON array of
+        native Promptfoo CLI argument strings. Select suite=required and
+        language=latin with two separate metadata filters, in that order, then
+        disable response caching. Use separate array entries for each flag and
+        value. Do not include a config or output flag, change source files or
+        run commands. Keep your final answer to one sentence.
+      artifact: filter-args.json
+      format: json
+      expected:
+        - --filter-metadata
+        - suite=required
+        - --filter-metadata
+        - language=latin
+        - --no-cache
+  - description: Give the candidate file access and keep the grader read-only
+    metadata: { suite: live-dogfood }
+    vars:
+      task: >-
+        Read .agents/skills/oh-my-promptfoo/SKILL.md and
+        project/docs/provider-guide.md. Write permissions.json at the workspace
+        root with exactly two keys, candidate and grader. Each value must be a
+        Pi permissions object with exactly filesystem and shell keys. Allow the
+        candidate to write files and the grader only to read them. Deny shell
+        execution for both. Do not change source files or run commands. Keep
+        your final answer to one sentence.
+      artifact: permissions.json
+      format: json
+      expected:
+        candidate: { filesystem: write, shell: deny }
+        grader: { filesystem: read, shell: deny }
+  - description: Author reproducible native sampling arguments for a baseline
+    metadata: { suite: live-dogfood }
+    vars:
+      task: >-
+        Read .agents/skills/oh-my-promptfoo/SKILL.md and project/docs/ci-action.md.
+        Write comparison-args.json at the workspace root containing a JSON array
+        of native Promptfoo CLI argument strings. Sample three tests with seed
+        42, select only the provider labelled baseline using the exact regular
+        expression ^baseline$, then disable response caching. Order the flags
+        as sample size, seed, provider filter, caching. Use separate string
+        entries for flags and values. Do not add config or output flags, change
+        source files or run commands. Keep your final answer to one sentence.
+      artifact: comparison-args.json
+      format: json
+      expected:
+        - --filter-sample
+        - "3"
+        - --filter-sample-seed
+        - "42"
+        - --filter-providers
+        - ^baseline$
+        - --no-cache
+  - description: Require both skill use and valid JSON in an authored test
+    metadata: { suite: live-dogfood }
+    vars:
+      task: >-
+        Read .agents/skills/oh-my-promptfoo/SKILL.md and
+        project/docs/grading-guide.md. Write required-checks.yaml at the
+        workspace root containing a native Promptfoo test object with exactly
+        the keys threshold and assert. Require a threshold of 1. The assert list
+        must contain, in order, a skill-used check with value oh-my-promptfoo,
+        then an is-json check with no other fields. Both checks must pass for
+        the test to pass. Do not change source files or run commands. Keep your
+        final answer to one sentence.
+      artifact: required-checks.yaml
+      format: yaml
+      expected:
+        threshold: 1
+        assert:
+          - { type: skill-used, value: oh-my-promptfoo }
+          - { type: is-json }

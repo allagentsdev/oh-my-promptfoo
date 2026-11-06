@@ -1,0 +1,474 @@
+{
+  "recordedAt": "2026-11-04T08:56:50.459Z",
+  "model": "deepseek/deepseek-v4.1-flash",
+  "workspaceCommit": "4b911a47eb93013e950e6e765b813a1fd21c41b4",
+  "configSha256": "7cb90efc04d64eee17b71653f483382443da64198d088702e35ca082264182f8",
+  "report": {
+    "version": 1,
+    "suite": {
+      "number": 2,
+      "title": "Repository agent skill regression"
+    },
+    "status": "pass",
+    "issues": [],
+    "counts": {
+      "pass": 6,
+      "fail": 0,
+      "error": 0,
+      "unknown": 0
+    },
+    "cases": [
+      {
+        "row": 1,
+        "test": 1,
+        "column": 1,
+        "label": "Author a native exact-match smoke config using the repository skill",
+        "candidate": "Pi / deepseek/deepseek-v4.1-flash",
+        "status": "pass",
+        "score": 1,
+        "latencyMs": 17196,
+        "candidateUsage": {
+          "total": 15653,
+          "prompt": 15444,
+          "completion": 209,
+          "cached": 6656,
+          "requests": 3
+        },
+        "graderUsage": {
+          "total": 4314,
+          "prompt": 4172,
+          "completion": 142,
+          "cached": 2048,
+          "requests": 2
+        },
+        "candidateCost": {
+          "usd": 0.00023704128,
+          "basis": "native"
+        },
+        "graderCost": {
+          "usd": 0.00012553344,
+          "basis": "native"
+        },
+        "assertions": [
+          {
+            "reference": "1",
+            "type": "skill-used",
+            "label": "skill-use",
+            "status": "pass",
+            "score": 1,
+            "threshold": null
+          },
+          {
+            "reference": "2",
+            "type": "javascript",
+            "label": "artifact-contract",
+            "status": "pass",
+            "score": 1,
+            "threshold": null
+          },
+          {
+            "reference": "3",
+            "type": "javascript",
+            "label": "workspace-review",
+            "status": "pass",
+            "score": 1,
+            "threshold": null
+          },
+          {
+            "reference": "3.1",
+            "type": "llm-rubric",
+            "label": "verified-artifact",
+            "status": "pass",
+            "score": 1,
+            "threshold": 1
+          }
+        ],
+        "source": {
+          "url": "https://github.com/allagentsdev/oh-my-promptfoo/blob/4b911a47eb93013e950e6e765b813a1fd21c41b4/packages/oh-my-promptfoo/evals/live/promptfooconfig.yaml#L66-L85",
+          "location": "test"
+        },
+        "threshold": 1
+      },
+      {
+        "row": 2,
+        "test": 2,
+        "column": 1,
+        "label": "Identify the package's provider and workspace grader from its own docs",
+        "candidate": "Pi / deepseek/deepseek-v4.1-flash",
+        "status": "pass",
+        "score": 1,
+        "latencyMs": 8051,
+        "candidateUsage": {
+          "total": 24334,
+          "prompt": 24005,
+          "completion": 329,
+          "cached": 11776,
+          "requests": 3
+        },
+        "graderUsage": {
+          "total": 45523,
+          "prompt": 44718,
+          "completion": 805,
+          "cached": 24704,
+          "requests": 4
+        },
+        "candidateCost": {
+          "usd": 0.00037090943999999997,
+          "basis": "native"
+        },
+        "graderCost": {
+          "usd": 0.00082828224,
+          "basis": "native"
+        },
+        "assertions": [
+          {
+            "reference": "1",
+            "type": "skill-used",
+            "label": "skill-use",
+            "status": "pass",
+            "score": 1,
+            "threshold": null
+          },
+          {
+            "reference": "2",
+            "type": "javascript",
+            "label": "artifact-contract",
+            "status": "pass",
+            "score": 1,
+            "threshold": null
+          },
+          {
+            "reference": "3",
+            "type": "javascript",
+            "label": "workspace-review",
+            "status": "pass",
+            "score": 1,
+            "threshold": null
+          },
+          {
+            "reference": "3.1",
+            "type": "llm-rubric",
+            "label": "verified-artifact",
+            "status": "pass",
+            "score": 1,
+            "threshold": 1
+          }
+        ],
+        "source": {
+          "url": "https://github.com/allagentsdev/oh-my-promptfoo/blob/4b911a47eb93013e950e6e765b813a1fd21c41b4/packages/oh-my-promptfoo/evals/live/promptfooconfig.yaml#L86-L104",
+          "location": "test"
+        },
+        "threshold": 1
+      },
+      {
+        "row": 3,
+        "test": 3,
+        "column": 1,
+        "label": "Preserve repeated metadata filters in a CI command",
+        "candidate": "Pi / deepseek/deepseek-v4.1-flash",
+        "status": "pass",
+        "score": 1,
+        "latencyMs": 9439,
+        "candidateUsage": {
+          "total": 24973,
+          "prompt": 24679,
+          "completion": 294,
+          "cached": 12800,
+          "requests": 3
+        },
+        "graderUsage": {
+          "total": 7708,
+          "prompt": 7407,
+          "completion": 301,
+          "cached": 2816,
+          "requests": 2
+        },
+        "candidateCost": {
+          "usd": 0.00034922304,
+          "basis": "native"
+        },
+        "graderCost": {
+          "usd": 0.00025837056,
+          "basis": "native"
+        },
+        "assertions": [
+          {
+            "reference": "1",
+            "type": "skill-used",
+            "label": "skill-use",
+            "status": "pass",
+            "score": 1,
+            "threshold": null
+          },
+          {
+            "reference": "2",
+            "type": "javascript",
+            "label": "artifact-contract",
+            "status": "pass",
+            "score": 1,
+            "threshold": null
+          },
+          {
+            "reference": "3",
+            "type": "javascript",
+            "label": "workspace-review",
+            "status": "pass",
+            "score": 1,
+            "threshold": null
+          },
+          {
+            "reference": "3.1",
+            "type": "llm-rubric",
+            "label": "verified-artifact",
+            "status": "pass",
+            "score": 1,
+            "threshold": 1
+          }
+        ],
+        "source": {
+          "url": "https://github.com/allagentsdev/oh-my-promptfoo/blob/4b911a47eb93013e950e6e765b813a1fd21c41b4/packages/oh-my-promptfoo/evals/live/promptfooconfig.yaml#L105-L123",
+          "location": "test"
+        },
+        "threshold": 1
+      },
+      {
+        "row": 4,
+        "test": 4,
+        "column": 1,
+        "label": "Give the candidate file access and keep the grader read-only",
+        "candidate": "Pi / deepseek/deepseek-v4.1-flash",
+        "status": "pass",
+        "score": 1,
+        "latencyMs": 4967,
+        "candidateUsage": {
+          "total": 38630,
+          "prompt": 38334,
+          "completion": 296,
+          "cached": 18816,
+          "requests": 3
+        },
+        "graderUsage": {
+          "total": 4368,
+          "prompt": 4212,
+          "completion": 156,
+          "cached": 2688,
+          "requests": 2
+        },
+        "candidateCost": {
+          "usd": 0.00042715007999999995,
+          "basis": "native"
+        },
+        "graderCost": {
+          "usd": 0.00013561344,
+          "basis": "native"
+        },
+        "assertions": [
+          {
+            "reference": "1",
+            "type": "skill-used",
+            "label": "skill-use",
+            "status": "pass",
+            "score": 1,
+            "threshold": null
+          },
+          {
+            "reference": "2",
+            "type": "javascript",
+            "label": "artifact-contract",
+            "status": "pass",
+            "score": 1,
+            "threshold": null
+          },
+          {
+            "reference": "3",
+            "type": "javascript",
+            "label": "workspace-review",
+            "status": "pass",
+            "score": 1,
+            "threshold": null
+          },
+          {
+            "reference": "3.1",
+            "type": "llm-rubric",
+            "label": "verified-artifact",
+            "status": "pass",
+            "score": 1,
+            "threshold": 1
+          }
+        ],
+        "source": {
+          "url": "https://github.com/allagentsdev/oh-my-promptfoo/blob/4b911a47eb93013e950e6e765b813a1fd21c41b4/packages/oh-my-promptfoo/evals/live/promptfooconfig.yaml#L124-L139",
+          "location": "test"
+        },
+        "threshold": 1
+      },
+      {
+        "row": 5,
+        "test": 5,
+        "column": 1,
+        "label": "Author reproducible native sampling arguments for a baseline",
+        "candidate": "Pi / deepseek/deepseek-v4.1-flash",
+        "status": "pass",
+        "score": 1,
+        "latencyMs": 4743,
+        "candidateUsage": {
+          "total": 25089,
+          "prompt": 24761,
+          "completion": 328,
+          "cached": 12032,
+          "requests": 3
+        },
+        "graderUsage": {
+          "total": 9386,
+          "prompt": 9028,
+          "completion": 358,
+          "cached": 4352,
+          "requests": 3
+        },
+        "candidateCost": {
+          "usd": 0.00037445184,
+          "basis": "native"
+        },
+        "graderCost": {
+          "usd": 0.00030819455999999996,
+          "basis": "native"
+        },
+        "assertions": [
+          {
+            "reference": "1",
+            "type": "skill-used",
+            "label": "skill-use",
+            "status": "pass",
+            "score": 1,
+            "threshold": null
+          },
+          {
+            "reference": "2",
+            "type": "javascript",
+            "label": "artifact-contract",
+            "status": "pass",
+            "score": 1,
+            "threshold": null
+          },
+          {
+            "reference": "3",
+            "type": "javascript",
+            "label": "workspace-review",
+            "status": "pass",
+            "score": 1,
+            "threshold": null
+          },
+          {
+            "reference": "3.1",
+            "type": "llm-rubric",
+            "label": "verified-artifact",
+            "status": "pass",
+            "score": 1,
+            "threshold": 1
+          }
+        ],
+        "source": {
+          "url": "https://github.com/allagentsdev/oh-my-promptfoo/blob/4b911a47eb93013e950e6e765b813a1fd21c41b4/packages/oh-my-promptfoo/evals/live/promptfooconfig.yaml#L140-L161",
+          "location": "test"
+        },
+        "threshold": 1
+      },
+      {
+        "row": 6,
+        "test": 6,
+        "column": 1,
+        "label": "Require both skill use and valid JSON in an authored test",
+        "candidate": "Pi / deepseek/deepseek-v4.1-flash",
+        "status": "pass",
+        "score": 1,
+        "latencyMs": 10973,
+        "candidateUsage": {
+          "total": 50017,
+          "prompt": 49555,
+          "completion": 462,
+          "cached": 16768,
+          "requests": 4
+        },
+        "graderUsage": {
+          "total": 4312,
+          "prompt": 4178,
+          "completion": 134,
+          "cached": 2688,
+          "requests": 2
+        },
+        "candidateCost": {
+          "usd": 0.00061204032,
+          "basis": "native"
+        },
+        "graderCost": {
+          "usd": 0.0001195776,
+          "basis": "native"
+        },
+        "assertions": [
+          {
+            "reference": "1",
+            "type": "skill-used",
+            "label": "skill-use",
+            "status": "pass",
+            "score": 1,
+            "threshold": null
+          },
+          {
+            "reference": "2",
+            "type": "javascript",
+            "label": "artifact-contract",
+            "status": "pass",
+            "score": 1,
+            "threshold": null
+          },
+          {
+            "reference": "3",
+            "type": "javascript",
+            "label": "workspace-review",
+            "status": "pass",
+            "score": 1,
+            "threshold": null
+          },
+          {
+            "reference": "3.1",
+            "type": "llm-rubric",
+            "label": "verified-artifact",
+            "status": "pass",
+            "score": 1,
+            "threshold": 1
+          }
+        ],
+        "source": {
+          "url": "https://github.com/allagentsdev/oh-my-promptfoo/blob/4b911a47eb93013e950e6e765b813a1fd21c41b4/packages/oh-my-promptfoo/evals/live/promptfooconfig.yaml#L162-L180",
+          "location": "test"
+        },
+        "threshold": 1
+      }
+    ],
+    "totals": {
+      "latencyMs": 55369,
+      "candidateUsage": {
+        "total": 178696,
+        "prompt": 176778,
+        "completion": 1918,
+        "cached": 78848,
+        "requests": 19
+      },
+      "graderUsage": {
+        "total": 75611,
+        "prompt": 73715,
+        "completion": 1896,
+        "cached": 39296,
+        "requests": 15
+      },
+      "candidateCost": {
+        "usd": 0.002370816,
+        "basis": "native"
+      },
+      "graderCost": {
+        "usd": 0.00177557184,
+        "basis": "native"
+      }
+    }
+  }
+}

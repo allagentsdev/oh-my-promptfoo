@@ -25,6 +25,15 @@ function run(command: string, args: string[], cwd: string) {
 
 async function compileDeclarations(cwd: string) {
   const consumer = `
+const report: Reporting.EvaluationReport = Reporting.summarizeEvaluation(undefined);
+const reportStatus: Reporting.Outcome = report.status;
+const markdown: string = Reporting.renderSummary(report);
+const consoleReport: string = Reporting.renderConsoleSummary(report);
+const progressLine: string = Reporting.renderProgress({test:1,column:1,status:'pass',latencyMs:0},1);
+const sourceReport: Promise<Reporting.EvaluationReport> = Reporting.addSourceLinks(report, {configPath:'suite.yaml',repositoryRoot:'.',repositoryUrl:'https://github.com/example/evals',revision:'0'.repeat(40)});
+const artifactNote: string = Reporting.renderResultArtifactLink('https://github.com/example/evals/actions/runs/1/artifacts/2',14);
+const artifactCopy: Promise<void> = Reporting.prepareResultArtifact('results.json','scored-results.json');
+const estimate: number | undefined = Reporting.estimateCopilotCost({}, {}, 'fixture');
 const agent: Providers.Agent = new Providers.Agent();
 const copilot: Providers.CopilotSdk = new Providers.CopilotSdk();
 const options: Providers.CallOptions = {abortSignal: new AbortController().signal};
@@ -70,13 +79,15 @@ const invalidFallback: Providers.FallbackConfig = {providers: 'invalid'};
       "mts",
       `import * as Root from 'oh-my-promptfoo';
 import * as Assertions from 'oh-my-promptfoo/assertions';
-import * as Providers from 'oh-my-promptfoo/providers';`,
+import * as Providers from 'oh-my-promptfoo/providers';
+import * as Reporting from 'oh-my-promptfoo/reporting';`,
     ],
     [
       "cts",
       `import Root = require('oh-my-promptfoo');
 import Assertions = require('oh-my-promptfoo/assertions');
-import Providers = require('oh-my-promptfoo/providers');`,
+import Providers = require('oh-my-promptfoo/providers');
+import Reporting = require('oh-my-promptfoo/reporting');`,
     ],
   ])
     await writeFile(join(cwd, `consumer.${extension}`), `${imports}\n${consumer}`);
@@ -100,7 +111,7 @@ import Providers = require('oh-my-promptfoo/providers');`,
 }
 // Consumer smokes compare paths with process.cwd(), which is already canonical: macOS
 // tmpdir() is under the /var -> /private/var symlink and Windows may use 8.3 names.
-const temp = await mkdtemp(join(realpathSync.native(tmpdir()), "allagents-pack-"));
+const temp = await mkdtemp(join(realpathSync.native(tmpdir()), "allagents pack-"));
 try {
   const packed = JSON.parse(
     run(
@@ -123,6 +134,10 @@ try {
     "dist/providers.cjs",
     "dist/providers.d.ts",
     "dist/providers.d.cts",
+    "dist/reporting.js",
+    "dist/reporting.cjs",
+    "dist/reporting.d.ts",
+    "dist/reporting.d.cts",
     "dist/delegate-runner.js",
     "dist/mcp-launcher.js",
     "dist/copilot-endpoint-worker.js",
@@ -149,7 +164,7 @@ try {
   const manifest = JSON.parse(await readFile("packages/oh-my-promptfoo/package.json", "utf8"));
   if (
     manifest.dependencies?.["@allagents/workspace-core"] ||
-    Object.keys(manifest.exports).join() !== ".,./assertions,./providers" ||
+    Object.keys(manifest.exports).sort().join() !== ".,./assertions,./providers,./reporting" ||
     Object.keys(manifest.bin).length !== 1
   )
     throw new Error("Public manifest contract mismatch");
@@ -199,9 +214,20 @@ try {
       join(cwd, "smoke.mjs"),
       `import * as Root from 'oh-my-promptfoo';
 import * as Providers from 'oh-my-promptfoo/providers';
+import * as Reporting from 'oh-my-promptfoo/reporting';
+import assert from 'node:assert/strict';
 import{createRequire}from'node:module';
 import{readFileSync,statSync}from'node:fs';
 const require=createRequire(import.meta.url);
+for(const entry of [Reporting,require('oh-my-promptfoo/reporting')]){
+  const report=entry.summarizeEvaluation(undefined);
+  assert.equal(report.status,'error');
+  assert.equal(report.totals.candidateCost.usd,null);
+  assert.equal(report.totals.graderCost.usd,null);
+  assert.ok(entry.renderSummary(report).includes('unknown'));
+  assert.ok(entry.renderResultArtifactLink('https://github.com/example/evals/actions/runs/1/artifacts/2',14).includes('expires in 14 days'));
+  assert.equal(typeof entry.prepareResultArtifact,'function');
+}
 const c=require('oh-my-promptfoo/providers');
 for(const entry of [Providers,c])if(Object.keys(entry).sort().join()!=='Agent,CopilotModel,CopilotSdk,Fallback,createCopilotEndpointClient')throw Error('Provider entry exports '+Object.keys(entry));
 if(Object.keys(Root).length||Object.keys(require('oh-my-promptfoo')).length)throw Error('The package root exports values');
@@ -422,6 +448,57 @@ for(const provider of [judge,{text:judge},fallback])await assert.rejects(grade(p
     run("node", ["smoke.mjs", "without-copilot"], cwd);
     await compileDeclarations(cwd);
     run("node", ["node_modules/oh-my-promptfoo/dist/cli.js", "--help"], cwd);
+    const ciExamples = join(cwd, "ci");
+    await mkdir(join(ciExamples, "release"), { recursive: true });
+    await copyFile(join(repo, "examples/ci/normalizer.mjs"), join(ciExamples, "normalizer.mjs"));
+    await copyFile(
+      join(repo, "examples/ci/release/promptfooconfig.yaml"),
+      join(ciExamples, "release/promptfooconfig.yaml"),
+    );
+    const localEvaluation = run(
+      "node",
+      [
+        "node_modules/oh-my-promptfoo/dist/cli.js",
+        "eval",
+        "--config",
+        "ci/release/promptfooconfig.yaml",
+        "--",
+        "--filter-metadata",
+        "suite=required",
+        "--filter-metadata",
+        "language=latin",
+        "--no-cache",
+      ],
+      cwd,
+    );
+    const paths = JSON.parse(localEvaluation.trim().split("\n").at(-1)!);
+    if (
+      !localEvaluation.includes("Completed 1 · native test") ||
+      !localEvaluation.includes("Test 4") ||
+      !localEvaluation.includes("Grader: 0 tokens · 0 requests; cost: $0.00")
+    )
+      throw new Error(
+        "Installed local CLI did not emit live progress and sanitized final accounting",
+      );
+    const localReport = JSON.parse(await readFile(paths.reportPath, "utf8"));
+    if (
+      localReport.status !== "pass" ||
+      localReport.counts.pass !== 4 ||
+      localReport.totals.candidateCost.usd !== 0 ||
+      localReport.totals.candidateUsage.total !== 0 ||
+      localReport.totals.candidateUsage.requests !== 0 ||
+      localReport.totals.graderCost.usd !== 0 ||
+      localReport.totals.graderUsage.total !== 0 ||
+      localReport.totals.graderUsage.requests !== 0
+    )
+      throw new Error(
+        "Installed local CLI release regression or candidate/grader accounting failed",
+      );
+    run(
+      "node",
+      ["node_modules/oh-my-promptfoo/dist/cli.js", "report", "--results", paths.resultPath],
+      cwd,
+    );
     run("node", ["assertions-smoke.mjs"], cwd);
     run(manager.command, [...manager.args, `@github/copilot-sdk@${copilotVersion}`], cwd);
     run("node", ["smoke.mjs", "with-copilot"], cwd);
