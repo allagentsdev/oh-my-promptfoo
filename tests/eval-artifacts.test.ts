@@ -1,15 +1,12 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import { test } from "vitest";
-import { parse } from "yaml";
 import {
   prepareResultArtifact,
   renderResultArtifactLink,
 } from "../packages/oh-my-promptfoo/src/reporting";
-import { testEntries } from "./global-setup";
 
 const url = "https://github.com/example/evals/actions/runs/1/artifacts/2";
 
@@ -83,90 +80,4 @@ test("artifact notes use confirmed URLs and known retention without assuming fou
     assert.throws(() => renderResultArtifactLink(invalid));
   for (const days of [0, -1, 1.5, Number.NaN])
     assert.throws(() => renderResultArtifactLink(url, days));
-});
-
-test("real Action preparation and footer steps preserve failure summaries and resolve repository or overridden retention", async () => {
-  const root = resolve(import.meta.dirname, "..");
-  const directory = await mkdtemp(join(tmpdir(), "omp artifact action "));
-  try {
-    const action = parse(await readFile(join(root, "action.yml"), "utf8"));
-    const actionRoot = join(directory, "action with spaces"),
-      dist = join(actionRoot, "packages/oh-my-promptfoo/dist");
-    await mkdir(resolve(dist, ".."), { recursive: true });
-    await symlink(testEntries, dist, process.platform === "win32" ? "junction" : "dir");
-    const result = join(directory, "results.json"),
-      outputs = join(directory, "outputs");
-    await writeFile(
-      result,
-      JSON.stringify({
-        config: { env: { API_KEY: "artifact-canary" } },
-        results: {
-          results: [
-            {
-              success: false,
-              response: { output: "READY artifact-canary" },
-              gradingResult: { reason: "Expected something else" },
-            },
-          ],
-        },
-      }),
-    );
-    const env = {
-      ...process.env,
-      OMP_ACTION_PATH: actionRoot,
-      OMP_RESULT_PATH: result,
-      OMP_RESULT_DIRECTORY: directory,
-      OMP_ARTIFACT_RETENTION_DAYS: "0",
-      GITHUB_OUTPUT: outputs,
-    };
-    const prepare = spawnSync(
-      "bash",
-      ["-e", "-c", action.runs.steps.find((step: any) => step.id === "scored").run],
-      { env, encoding: "utf8" },
-    );
-    assert.equal(prepare.status, 0, prepare.stderr);
-    const artifact = await readFile(join(directory, "scored-results.json"), "utf8");
-    assert.ok(artifact.includes("Expected something else") && artifact.includes("READY"));
-    assert.ok(!artifact.includes("artifact-canary"));
-    assert.ok((await readFile(outputs, "utf8")).includes(join(directory, "scored-results.json")));
-    for (const [requested, maximum, expected] of [
-      ["0", "90", "90 days"],
-      ["14", "90", "14 days"],
-      ["180", "90", "90 days"],
-      ["0", "", "repository settings"],
-    ]) {
-      const summary = join(directory, "summary.md"),
-        github = join(directory, "github.md");
-      await writeFile(summary, "## Evals — ❌ FAIL\n");
-      await writeFile(github, "");
-      const footer = spawnSync(
-        "bash",
-        [
-          "-e",
-          "-c",
-          action.runs.steps.find(
-            (step: any) => step.name === "Link the scored result in the suite card",
-          ).run,
-        ],
-        {
-          env: {
-            ...env,
-            OMP_SUMMARY_PATH: summary,
-            GITHUB_STEP_SUMMARY: github,
-            OMP_ARTIFACT_URL: url,
-            OMP_ARTIFACT_RETENTION_DAYS: requested,
-            GITHUB_RETENTION_DAYS: maximum,
-          },
-          encoding: "utf8",
-        },
-      );
-      assert.equal(footer.status, 0, footer.stderr);
-      assert.ok((await readFile(summary, "utf8")).startsWith("## Evals — ❌ FAIL"));
-      const note = await readFile(github, "utf8");
-      assert.ok(note.includes(url) && note.includes(expected));
-      assert.ok(!note.includes("Expected something else") && !note.includes("READY"));
-    }
-  } finally {
-    await rm(directory, { recursive: true, force: true });
-  }
 });

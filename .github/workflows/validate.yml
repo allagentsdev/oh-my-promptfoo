@@ -12,7 +12,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
-      - uses: ./
+      - uses: allagentsdev/oh-my-promptfoo-action@26de8c8bd12948f9ad9b06335fc1fbe4d5b1fe04
         id: eval
         with:
           config: examples/ci/release/promptfooconfig.yaml

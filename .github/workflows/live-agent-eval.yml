@@ -23,13 +23,15 @@ jobs:
           node-version-file: .node-version
           cache: pnpm
       - run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Build the caller's provider and grader package
+        run: pnpm build
       - name: Verify credentials and model availability
         run: node scripts/check-live-agent-eval.mjs
         env:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
       - name: Run the fixed live agent suite and summarize
         id: eval
-        uses: ./
+        uses: allagentsdev/oh-my-promptfoo-action@26de8c8bd12948f9ad9b06335fc1fbe4d5b1fe04
         env:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           DOGFOOD_REPOSITORY: file://${{ github.workspace }}

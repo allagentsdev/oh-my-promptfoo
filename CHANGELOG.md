@@ -4,6 +4,8 @@
 
 ### Features
 
+- Move the reusable GitHub wrapper to `allagentsdev/oh-my-promptfoo-action`. Keep the native eval/report CLI and reporting helpers in this package, and preserve the repository-root Action as a pinned compatibility entry.
+
 - Offer an explicitly enabled scored-result artifact download in suite cards, including assertion failures. Keep native answers and judge reasons in the credential-redacted artifact, preserve private originals, and inherit the calling repository's retention policy unless overridden. Export the artifact preparation and link helpers for local use.
 
 - Give each evaluation suite its own `Run Evals - <suite name>` GitHub job card with an `Evals` status heading, without displayed suite numbers. Link numbered tests to full committed YAML/JSON blocks and preserve file-level links when an exact case location is unavailable; expose the same source-link helper for local reporting. Always show native score vs authored threshold, and round costs to four decimal places unless more precision is needed to avoid displaying positive spend as zero.
@@ -14,7 +16,7 @@
 
 - Add manually triggered live dogfooding of the repository's skill, workspace Agent and read-only agentAssert through OpenRouter. Select both candidate and grader with the `OPENROUTER_MODEL` repository variable; keep the API key in a secret. Keep fixed native cases, exact artifact checks, model-availability preflight and sanitized Action reporting.
 
-- Add a reusable repository-root GitHub Action and local `eval`/`report` CLI with native argument arrays, pinned frozen tooling, private retained results and sanitized case/assertion, latency, candidate/grader usage and cost reports. Missing/error/zero-coverage runs fail closed; native scoring policy stays authoritative. Export the reusable reporter through `oh-my-promptfoo/reporting`.
+- Add native CI support through the shared GitHub Action and local `eval`/`report` CLI with native argument arrays, pinned frozen tooling, private retained results and sanitized case/assertion, latency, candidate/grader usage and cost reports. Missing/error/zero-coverage runs fail closed; native scoring policy stays authoritative. Export the reusable reporter through `oh-my-promptfoo/reporting`.
 
 - Add `pi-sdk` workspace and read-only agent-grader delegates using the maintained optional `@earendil-works/pi-coding-agent@1.3.0` peer, explicit model/credentials and local endpoint support. Isolated in-memory sessions report successful skill-file reads to stock `skill-used` without changing skill authoring.
 - Add adapter-owned schema-version-1 tool inventories with bounded/redacted arguments, explicit completeness and SDK skill-loading names. Copilot includes subagent streams and certifies only clean matched bounded execution; native/Pi retain observations without claiming unsupported completeness.

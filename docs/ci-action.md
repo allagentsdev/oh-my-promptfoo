@@ -1,16 +1,24 @@
 # Native Promptfoo CI and local reporting
 
-The repository-root Action evaluates **one authored config per invocation**. Use a
-workflow matrix for separate suites. Promptfoo loads the config and its supported
-YAML, CSV, JavaScript and other resources, selects cases, invokes providers and
-evaluates assertions. The Action does not rewrite cases or thresholds.
+The reusable root-level Action lives in
+[`allagentsdev/oh-my-promptfoo-action`](https://github.com/allagentsdev/oh-my-promptfoo-action).
+This package owns its public local `eval`/`report` CLI, providers, graders and
+reporting/accounting helpers. The Action evaluates **one authored config per
+invocation**; use separate named jobs or a matrix for separate suites. Promptfoo
+loads native resources, selects cases, invokes providers and evaluates assertions.
+Cases and thresholds stay in the caller's checked-in config.
 
-The Action installs this checkout's frozen pnpm lockfile (dependency scripts are
-disabled), builds the package and runs its pinned **Promptfoo 0.125.1** public CLI.
-Node comes from `.node-version`; pnpm comes from `packageManager`. The nested setup
-Actions use commit pins. Pin this Action to a reviewed commit too; stable `vX.Y.Z`
-tags follow the package's [release process](releasing.md). There is no automatic
-major-version Action tag or floating-toolchain option.
+The Action pins an immutable public package source commit and its frozen pnpm
+lockfile, including **Promptfoo 0.125.1**. Dependency scripts are disabled. The
+source build is explicit because the published npm package does not yet include
+the new CLI/reporting exports. Node, pnpm and nested setup Actions are pinned in
+the Action repository. Pin the Action itself to a reviewed commit. Action releases
+are independent of this package's [release process](releasing.md); no Action tag
+has been published yet. There is no floating-toolchain fallback.
+
+This repository's root `action.yml` remains a compatibility entry that forwards
+all existing inputs and outputs to the pinned standalone Action. New callers
+should reference `allagentsdev/oh-my-promptfoo-action` directly.
 
 ## Suite cards and test links
 
@@ -93,7 +101,7 @@ callers. They do not control card titles or display numbering.
 Readable authored labels are opt-in:
 
 ```yaml
-- uses: allagentsdev/oh-my-promptfoo@<reviewed-commit>
+- uses: allagentsdev/oh-my-promptfoo-action@<reviewed-commit>
   with:
     config: evals/release/promptfooconfig.yaml
     public-labels: "true"
@@ -139,29 +147,34 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
-      - uses: ./
+      - uses: allagentsdev/oh-my-promptfoo-action@26de8c8bd12948f9ad9b06335fc1fbe4d5b1fe04
         id: eval
         with:
           config: examples/ci/release/promptfooconfig.yaml
           args-json: '["--filter-metadata", "suite=required", "--no-cache", "--max-concurrency", "2"]'
 ```
 
-In another repository, use `allagentsdev/oh-my-promptfoo@<reviewed-commit>` in
-place of `./` and a path to **that repository's** authored config. If it references
+In another repository, use `allagentsdev/oh-my-promptfoo-action@<reviewed-commit>`
+and a path to **that repository's** authored config. If it references
 `package:oh-my-promptfoo/...` or other npm packages, install the caller's pinned
-dependencies using its checked-in lockfile before invoking the Action. Package
+dependencies using its checked-in lockfile and build any local workspace packages
+before invoking the Action. Package
 and `file://` references resolve normally from the config directory; the Action
 does not inject packages or rewrite the caller's `node_modules`. Install any
 required coding-agent runtimes and workspace helper as described in the
 [provider guide](provider-guide.md). The package's release build is available in
-the Action checkout, but it is not automatically a dependency of the caller.
+the Action's private toolchain directory, but it is not automatically a dependency
+of the caller.
 
 ## Manually triggered live dogfood
 
 The **Live agent dogfood** workflow runs only through `workflow_dispatch`.
 After the workflow lands on the default branch, choose **Actions → Live agent
 dogfood → Run workflow** and select the reviewed ref to evaluate. It uses this
-checkout's Action and built package, not an older registry release.
+checkout's built provider/grader package through the pinned standalone Action,
+so the live suite evaluates the reviewed implementation instead of an older
+registry release. The workflow explicitly builds the caller after installing its
+locked dependencies; the Action builds its own toolchain separately.
 
 The fixed suite in `packages/oh-my-promptfoo/evals/live/promptfooconfig.yaml`
 runs the real Pi SDK through OpenRouter. Both the candidate and read-only
@@ -246,7 +259,7 @@ jobs:
         candidate: [baseline, candidate]
     steps:
       - uses: actions/checkout@v7
-      - uses: ./
+      - uses: allagentsdev/oh-my-promptfoo-action@26de8c8bd12948f9ad9b06335fc1fbe4d5b1fe04
         id: eval
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
@@ -309,7 +322,7 @@ For example, prepare a private native argument array without printing its conten
       JSON.stringify(['--var', `private_value=${process.env.PRIVATE_VALUE}`, '--no-cache']),
       { mode: 0o600 });
     NODE
-- uses: ./
+- uses: allagentsdev/oh-my-promptfoo-action@26de8c8bd12948f9ad9b06335fc1fbe4d5b1fe04
   with:
     config: examples/ci/release/promptfooconfig.yaml
     args-file: ${{ runner.temp }}/native-args.json
@@ -363,7 +376,7 @@ answers, judge reasons and generated content. The reusable Action leaves uploads
 off by default. To enable them:
 
 ```yaml
-- uses: allagentsdev/oh-my-promptfoo@<reviewed-commit>
+- uses: allagentsdev/oh-my-promptfoo-action@<reviewed-commit>
   id: eval
   with:
     config: promptfooconfig.yaml

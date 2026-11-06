@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { test, vi } from "vitest";
-import { parse, stringify } from "yaml";
+import { stringify } from "yaml";
 import { runEvaluation } from "../packages/oh-my-promptfoo/src/eval-run";
 import { testEntries } from "./global-setup";
 
@@ -56,7 +56,7 @@ test("native required values that look like flags keep their original argument p
   }
 }, 120_000);
 
-test("private argument files reach native evaluation without entering Action inputs, env preamble or public output", async () => {
+test("private argument files reach the public CLI without entering public output", async () => {
   const directory = await mkdtemp(join(tmpdir(), "omp-private-args-"));
   try {
     const secret = "PRIVATE_ARGUMENT_AND_ANSWER";
@@ -81,39 +81,30 @@ test("private argument files reach native evaluation without entering Action inp
       ]),
       { mode: 0o600 },
     );
-    const action = parse(await readFile(join(root, "action.yml"), "utf8"));
-    const step = action.runs.steps.find((value: any) => value.id === "evaluate");
-    const actionRoot = join(directory, "action");
-    const dist = join(actionRoot, "packages", "oh-my-promptfoo", "dist");
-    await mkdir(resolve(dist, ".."), { recursive: true });
-    await symlink(testEntries, dist, process.platform === "win32" ? "junction" : "dir");
     const outputs = join(directory, "outputs"),
       summary = join(directory, "summary");
-    const input = {
-      config,
-      "args-json": "[]",
-      "args-file": argsFile,
-      "working-directory": directory,
-      "output-directory": "out",
-      "suite-number": "1",
-      "public-labels": "false",
-    };
-    const actionEnv: Record<string, string> = Object.fromEntries(
-      Object.entries(step.env).map(([key, expression]) => [
-        key,
-        String(expression)
-          .replace(/\$\{\{ inputs\.([\w-]+) \}\}/g, (_, name: keyof typeof input) => input[name])
-          .replace(/\$\{\{ github\.action_path \}\}/g, actionRoot),
-      ]),
+    const child = spawnSync(
+      process.execPath,
+      [
+        join(testEntries, "cli.js"),
+        "eval",
+        "--config",
+        config,
+        "--args-file",
+        argsFile,
+        "--working-directory",
+        directory,
+        "--output-dir",
+        "out",
+        "--github",
+      ],
+      {
+        cwd: root,
+        encoding: "utf8",
+        timeout: 60_000,
+        env: { ...process.env, GITHUB_OUTPUT: outputs, GITHUB_STEP_SUMMARY: summary },
+      },
     );
-    // The runner prints these input/env values before the script can mask anything.
-    assert.ok(!JSON.stringify({ input, actionEnv }).includes(secret));
-    const child = spawnSync("bash", ["-e", "-c", step.run], {
-      cwd: root,
-      encoding: "utf8",
-      timeout: 60_000,
-      env: { ...process.env, ...actionEnv, GITHUB_OUTPUT: outputs, GITHUB_STEP_SUMMARY: summary },
-    });
     assert.equal(child.status, 0, child.stdout + child.stderr);
     assert.ok(!(child.stdout + child.stderr + (await readFile(summary, "utf8"))).includes(secret));
     const lines = (await readFile(outputs, "utf8")).trim().split("\n");

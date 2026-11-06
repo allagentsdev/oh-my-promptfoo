@@ -5,7 +5,7 @@ import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promis
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { test } from "vitest";
-import { parse, stringify } from "yaml";
+import { stringify } from "yaml";
 import {
   reportEvaluation,
   runEvaluation,
@@ -191,39 +191,6 @@ test("native comparison assertions remain pending in live progress until the fin
     await rm(directory, { recursive: true, force: true });
   }
 }, 120_000);
-
-test("Action setup resolves its own manifest and Node pin from a different caller checkout", async () => {
-  const directory = await fixture();
-  try {
-    const action = parse(await readFile(join(root, "action.yml"), "utf8"));
-    const step = action.runs.steps.find((item: any) => item.id === "toolchain");
-    const output = join(directory, "toolchain-outputs");
-    const child = spawnSync("bash", ["-e", "-c", step.run], {
-      cwd: directory,
-      encoding: "utf8",
-      env: {
-        ...process.env,
-        GITHUB_WORKSPACE: directory,
-        GITHUB_OUTPUT: output,
-        OMP_ACTION_PATH: root,
-      },
-    });
-    assert.equal(child.status, 0, child.stderr);
-    const values = Object.fromEntries(
-      (await readFile(output, "utf8"))
-        .trim()
-        .split("\n")
-        .map((line) => line.split("=")),
-    );
-    assert.equal((await json(resolve(directory, values.manifest))).packageManager, "pnpm@10.34.7");
-    assert.equal(
-      (await readFile(resolve(directory, values["node-version-file"]), "utf8")).trim(),
-      "22.22.1",
-    );
-  } finally {
-    await rm(directory, { recursive: true, force: true });
-  }
-});
 
 test("native argument boundaries reserve config, output and execution ownership", () => {
   validateNativeArgs([
@@ -546,13 +513,10 @@ test("real native failures/errors retain exports, and reporting/missing coverage
   }
 }, 120_000);
 
-test("the actual Action shell step runs native CLI, sets outputs on failure and publishes only sanitized summary", async () => {
+test("the public CLI sets outputs on native assertion failure and publishes only sanitized summary", async () => {
   const directory = await fixture();
   try {
-    // Use exactly the same bundled CLI as the shipped Action; the global setup
-    // builds it separately so tests never depend on a pre-existing dist directory.
-    const action = parse(await readFile(join(root, "action.yml"), "utf8"));
-    const step = action.runs.steps.find((item: any) => item.id === "evaluate");
+    // Exercise the bundled public CLI without depending on a pre-existing dist directory.
     const actionRoot = join(directory, "action with spaces");
     const dist = join(actionRoot, "packages", "oh-my-promptfoo", "dist");
     await mkdir(resolve(dist, ".."), { recursive: true });
@@ -576,26 +540,39 @@ test("the actual Action shell step runs native CLI, sets outputs on failure and 
     );
     const outputs = join(directory, "outputs"),
       summary = join(directory, "summary");
-    const result = spawnSync("bash", ["-e", "-c", step.run], {
-      cwd: root,
-      encoding: "utf8",
-      timeout: 60_000,
-      env: {
-        ...process.env,
-        OMP_ACTION_PATH: actionRoot,
-        OMP_CONFIG: config,
-        OMP_ARGS: '["--no-cache"]',
-        OMP_WORKING_DIRECTORY: directory,
-        OMP_OUTPUT_DIRECTORY: "private outputs",
-        OMP_SUITE_NUMBER: "7",
-        OMP_PUBLIC_LABELS: "true",
-        GITHUB_OUTPUT: outputs,
-        GITHUB_STEP_SUMMARY: summary,
-        LOG_LEVEL: "debug",
-        PROMPTFOO_DISABLE_TELEMETRY: "1",
-        PROMPTFOO_DISABLE_UPDATE: "1",
+    const result = spawnSync(
+      process.execPath,
+      [
+        join(dist, "cli.js"),
+        "eval",
+        "--config",
+        config,
+        "--args-json",
+        '["--no-cache"]',
+        "--working-directory",
+        directory,
+        "--output-dir",
+        "private outputs",
+        "--suite-number",
+        "7",
+        "--public-labels",
+        "true",
+        "--github",
+      ],
+      {
+        cwd: root,
+        encoding: "utf8",
+        timeout: 60_000,
+        env: {
+          ...process.env,
+          GITHUB_OUTPUT: outputs,
+          GITHUB_STEP_SUMMARY: summary,
+          LOG_LEVEL: "debug",
+          PROMPTFOO_DISABLE_TELEMETRY: "1",
+          PROMPTFOO_DISABLE_UPDATE: "1",
+        },
       },
-    });
+    );
     assert.equal(result.status, 1, result.stdout + result.stderr);
     assert.match(result.stdout, /Completed 1 · native test 1, column 1 · FAIL/);
     assert.match(result.stdout, /Test 1 · Reject a wrong answer · FAIL/);

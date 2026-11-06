@@ -1,5 +1,6 @@
+# Compatibility entry. The GitHub wrapper is maintained in oh-my-promptfoo-action.
 name: Native Promptfoo evaluation
-description: Run one authored Promptfoo config with pinned tooling and private local artifacts
+description: Compatibility entry for the standalone oh-my-promptfoo-action
 branding:
   icon: check-circle
   color: purple
@@ -8,159 +9,86 @@ inputs:
     description: One local Promptfoo config file, relative to working-directory
     required: true
   args-json:
-    description: Public JSON array of native argument strings; GitHub may print literal inputs before execution
+    description: Public JSON array of native argument strings; GitHub may print
+      literal inputs before execution
     default: "[]"
   args-file:
-    description: Private JSON argument-array file relative to working-directory; use for sensitive values instead of args-json
+    description: Private JSON argument-array file relative to working-directory; use
+      for sensitive values instead of args-json
     default: ""
   working-directory:
     description: Directory in the caller checkout from which to run Promptfoo
-    default: "."
+    default: .
   output-directory:
-    description: Local artifact parent directory, relative to working-directory; each invocation creates a fresh child
-    default: ".promptfoo-ci"
+    description: Local artifact parent directory, relative to working-directory;
+      each invocation creates a fresh child
+    default: .promptfoo-ci
   suite-number:
-    description: Legacy JSON suite reference; not displayed in reports or required for separate job cards
+    description: Legacy JSON suite reference; not displayed in reports or required
+      for separate job cards
     default: "1"
   public-labels:
-    description: Publish authored suite/test descriptions, provider labels and assertion metric names; keep false for private labels
+    description: Publish authored suite/test descriptions, provider labels and
+      assertion metric names; keep false for private labels
     default: "false"
   upload-results:
-    description: Explicitly approve uploading a credential-redacted scored result to this repository's GitHub artifact storage
+    description: Explicitly approve uploading a credential-redacted scored result to
+      this repository's GitHub artifact storage
     default: "false"
   artifact-retention-days:
-    description: Artifact retention override; 0 uses the calling repository's default, within GitHub policy limits
+    description: Artifact retention override; 0 uses the calling repository's
+      default, within GitHub policy limits
     default: "0"
   artifact-name:
-    description: Optional unique artifact name; defaults to a generated name for this invocation
+    description: Optional unique artifact name; defaults to a generated name for
+      this invocation
     default: ""
 outputs:
   result-artifact-url:
     description: Download URL after an explicitly enabled upload succeeds; empty otherwise
-    value: ${{ steps.upload.outputs.artifact-url }}
+    value: ${{ steps.eval.outputs.result-artifact-url }}
   result-artifact-id:
     description: Uploaded GitHub artifact ID; empty when no upload succeeded
-    value: ${{ steps.upload.outputs.artifact-id }}
+    value: ${{ steps.eval.outputs.result-artifact-id }}
   result-path:
     description: Absolute native JSON path; check results-available before reading
-    value: ${{ steps.evaluate.outputs.result-path }}
+    value: ${{ steps.eval.outputs.result-path }}
   results-available:
-    description: Whether the native JSON was produced and parsed (coverage can still be invalid)
-    value: ${{ steps.evaluate.outputs.results-available }}
+    description: Whether the native JSON was produced and parsed (coverage can still
+      be invalid)
+    value: ${{ steps.eval.outputs.results-available }}
   artifact-directory:
-    description: Absolute run directory with private raw results, logs and sanitized reports; retained on failure
-    value: ${{ steps.evaluate.outputs.artifact-directory }}
+    description: Absolute run directory with private raw results, logs and sanitized
+      reports; retained on failure
+    value: ${{ steps.eval.outputs.artifact-directory }}
   log-path:
     description: Absolute private native stdout/stderr log path
-    value: ${{ steps.evaluate.outputs.log-path }}
+    value: ${{ steps.eval.outputs.log-path }}
   report-path:
     description: Absolute sanitized report JSON path
-    value: ${{ steps.evaluate.outputs.report-path }}
+    value: ${{ steps.eval.outputs.report-path }}
   summary-path:
     description: Absolute sanitized Markdown summary path
-    value: ${{ steps.evaluate.outputs.summary-path }}
+    value: ${{ steps.eval.outputs.summary-path }}
   evaluation-status:
     description: pass, fail or error; incomplete results and zero coverage are errors
-    value: ${{ steps.evaluate.outputs.evaluation-status }}
+    value: ${{ steps.eval.outputs.evaluation-status }}
   evaluation-exit-code:
     description: Native CLI exit code, or unknown when it could not finish
-    value: ${{ steps.evaluate.outputs.evaluation-exit-code }}
+    value: ${{ steps.eval.outputs.evaluation-exit-code }}
 runs:
   using: composite
   steps:
-    - name: Resolve Action toolchain paths
-      id: toolchain
-      shell: bash
-      env:
-        OMP_ACTION_PATH: ${{ github.action_path }}
-      run: |
-        node --input-type=module <<'NODE'
-        import { randomUUID } from 'node:crypto';
-        import { appendFileSync } from 'node:fs';
-        import { join, relative } from 'node:path';
-        const fromWorkspace = (file) => relative(process.env.GITHUB_WORKSPACE, join(process.env.OMP_ACTION_PATH, file));
-        appendFileSync(process.env.GITHUB_OUTPUT, `manifest=${fromWorkspace('package.json')}\nnode-version-file=${fromWorkspace('.node-version')}\n`);
-        appendFileSync(process.env.GITHUB_OUTPUT, `artifact-name=promptfoo-results-${randomUUID()}\n`);
-        NODE
-    - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+    - id: eval
+      uses: allagentsdev/oh-my-promptfoo-action@26de8c8bd12948f9ad9b06335fc1fbe4d5b1fe04
       with:
-        node-version-file: ${{ steps.toolchain.outputs.node-version-file }}
-    - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
-      with:
-        package_json_file: ${{ steps.toolchain.outputs.manifest }}
-        run_install: false
-    - name: Prepare reviewed evaluation toolchain
-      shell: bash
-      env:
-        OMP_ACTION_PATH: ${{ github.action_path }}
-      run: |
-        pnpm --dir "$OMP_ACTION_PATH" install --frozen-lockfile --ignore-scripts
-        pnpm --dir "$OMP_ACTION_PATH" build
-    - name: Evaluate and report
-      id: evaluate
-      shell: bash
-      env:
-        OMP_ACTION_PATH: ${{ github.action_path }}
-        OMP_CONFIG: ${{ inputs.config }}
-        OMP_ARGS: ${{ inputs.args-json }}
-        OMP_ARGS_FILE: ${{ inputs.args-file }}
-        OMP_WORKING_DIRECTORY: ${{ inputs.working-directory }}
-        OMP_OUTPUT_DIRECTORY: ${{ inputs.output-directory }}
-        OMP_SUITE_NUMBER: ${{ inputs.suite-number }}
-        OMP_PUBLIC_LABELS: ${{ inputs.public-labels }}
-      run: |
-        node "$OMP_ACTION_PATH/packages/oh-my-promptfoo/dist/cli.js" eval \
-          --config "$OMP_CONFIG" --args-json "$OMP_ARGS" --args-file "$OMP_ARGS_FILE" \
-          --working-directory "$OMP_WORKING_DIRECTORY" --output-dir "$OMP_OUTPUT_DIRECTORY" \
-          --suite-number "${OMP_SUITE_NUMBER:-1}" --public-labels "${OMP_PUBLIC_LABELS:-false}" --github
-    - name: Prepare the approved scored result
-      id: scored
-      if: ${{ !cancelled() && inputs.upload-results == 'true' && steps.evaluate.outputs.results-available == 'true' }}
-      shell: bash
-      env:
-        OMP_ACTION_PATH: ${{ github.action_path }}
-        OMP_RESULT_PATH: ${{ steps.evaluate.outputs.result-path }}
-        OMP_RESULT_DIRECTORY: ${{ steps.evaluate.outputs.artifact-directory }}
-        OMP_ARTIFACT_RETENTION_DAYS: ${{ inputs.artifact-retention-days }}
-      run: |
-        node --input-type=module <<'NODE'
-        import { appendFile } from 'node:fs/promises';
-        import { join } from 'node:path';
-        import { pathToFileURL } from 'node:url';
-        const retention = Number(process.env.OMP_ARTIFACT_RETENTION_DAYS);
-        if (!Number.isSafeInteger(retention) || retention < 0) throw new Error('Artifact retention must be a non-negative whole number of days');
-        const { prepareResultArtifact } = await import(pathToFileURL(join(process.env.OMP_ACTION_PATH, 'packages/oh-my-promptfoo/dist/reporting.js')));
-        const path = join(process.env.OMP_RESULT_DIRECTORY, 'scored-results.json');
-        await prepareResultArtifact(process.env.OMP_RESULT_PATH, path);
-        const delimiter = crypto.randomUUID();
-        await appendFile(process.env.GITHUB_OUTPUT, `path<<${delimiter}\n${path}\n${delimiter}\n`);
-        NODE
-    - name: Upload the approved scored result
-      id: upload
-      if: ${{ !cancelled() && inputs.upload-results == 'true' && steps.scored.outputs.path != '' }}
-      uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
-      with:
-        name: ${{ inputs.artifact-name || steps.toolchain.outputs.artifact-name }}
-        path: ${{ steps.scored.outputs.path }}
-        retention-days: ${{ inputs.artifact-retention-days }}
-        if-no-files-found: error
-    - name: Link the scored result in the suite card
-      if: ${{ !cancelled() && steps.upload.outputs.artifact-url != '' }}
-      shell: bash
-      env:
-        OMP_ACTION_PATH: ${{ github.action_path }}
-        OMP_SUMMARY_PATH: ${{ steps.evaluate.outputs.summary-path }}
-        OMP_ARTIFACT_URL: ${{ steps.upload.outputs.artifact-url }}
-        OMP_ARTIFACT_RETENTION_DAYS: ${{ inputs.artifact-retention-days }}
-      run: |
-        node --input-type=module <<'NODE'
-        import { appendFile } from 'node:fs/promises';
-        import { join } from 'node:path';
-        import { pathToFileURL } from 'node:url';
-        const { renderResultArtifactLink } = await import(pathToFileURL(join(process.env.OMP_ACTION_PATH, 'packages/oh-my-promptfoo/dist/reporting.js')));
-        const requested = Number(process.env.OMP_ARTIFACT_RETENTION_DAYS);
-        const maximum = Number(process.env.GITHUB_RETENTION_DAYS);
-        const days = maximum > 0 ? Math.min(requested || maximum, maximum) : requested || undefined;
-        const note = renderResultArtifactLink(process.env.OMP_ARTIFACT_URL, days);
-        for (const path of new Set([process.env.OMP_SUMMARY_PATH, process.env.GITHUB_STEP_SUMMARY].filter(Boolean))) await appendFile(path, note);
-        NODE
+        config: ${{ inputs.config }}
+        args-json: ${{ inputs.args-json }}
+        args-file: ${{ inputs.args-file }}
+        working-directory: ${{ inputs.working-directory }}
+        output-directory: ${{ inputs.output-directory }}
+        suite-number: ${{ inputs.suite-number }}
+        public-labels: ${{ inputs.public-labels }}
+        upload-results: ${{ inputs.upload-results }}
+        artifact-retention-days: ${{ inputs.artifact-retention-days }}
+        artifact-name: ${{ inputs.artifact-name }}
