@@ -26,6 +26,38 @@ ran. Native per-case failures, grader/provider errors, invalid files and zero
 coverage still produce a failing replay status. For exports without their
 original process exit code, the existing conservative report-only gate applies.
 
+### Select replay in GitHub Actions
+
+The shared Action accepts the same capture at runtime:
+
+```yaml
+- uses: allagentsdev/oh-my-promptfoo-action@<reviewed-commit>
+  with:
+    execution-mode: replay
+    replay-results: .recording/scored-results.json
+    config: evals/release/promptfooconfig.yaml
+    public-labels: "true"
+```
+
+Download the capture from the calling repository's approved storage before this
+step. Replay renders the complete export: leave `args-json` as `[]` and omit
+`args-file`. Invalid inputs or missing captures fail without falling back to live
+calls. Result uploads remain opt-in.
+
+For this repository, open **Actions → Live agent dogfood → Run workflow**, choose
+`replay`, and enter the original completed live run ID in `recording-run-id`.
+For example, `42458802204` is a six-case live agent evaluation. The workflow reads
+that run's scored-result artifact using the caller's `actions: read` permission,
+checks out its original suite revision, and renders it without passing the
+OpenRouter secret or installing the caller's provider/grader package. It links
+the original artifact rather than uploading another copy. The capture must still
+exist within its original retention period.
+
+Choose `live` with an empty recording ID to run the fixed agent suite again.
+Live runs require the `OPENROUTER_API_KEY` repository secret and the
+`OPENROUTER_MODEL` repository variable and can incur model charges. Replay's
+historical accounting is not new spend or savings.
+
 ## Native evaluation
 
 The reusable root-level Action lives in

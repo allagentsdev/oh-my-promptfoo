@@ -1,8 +1,19 @@
 name: Live agent dogfood
 on:
   workflow_dispatch:
+    inputs:
+      execution-mode:
+        description: Live calls the candidate/grader; replay renders a saved scored result
+        type: choice
+        options: [live, replay]
+        default: live
+      recording-run-id:
+        description: Completed live run to replay; leave empty for live evaluation
+        type: string
+        default: ""
 permissions:
   contents: read
+  actions: read
 concurrency:
   group: live-agent-dogfood
   cancel-in-progress: false
@@ -17,30 +28,90 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
+      - name: Resolve the approved recording
+        id: recording
+        if: ${{ inputs.execution-mode == 'replay' || inputs.recording-run-id != '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPLAY_MODE: ${{ inputs.execution-mode }}
+          REPLAY_RUN_ID: ${{ inputs.recording-run-id }}
+        run: |
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import {execFileSync} from 'node:child_process';
+          import {appendFileSync} from 'node:fs';
+          const id = process.env.REPLAY_RUN_ID;
+          assert.equal(process.env.REPLAY_MODE, 'replay', 'recording-run-id requires replay mode');
+          assert.match(id || '', /^[1-9]\d*$/, 'Replay requires a completed live recording-run-id');
+          assert.ok(process.env.GH_TOKEN, 'A repository-scoped token is required to read its artifacts');
+          const repo = process.env.GITHUB_REPOSITORY;
+          const read = path => JSON.parse(execFileSync('gh', ['api', `repos/${repo}/${path}`], {encoding:'utf8'}));
+          const run = read(`actions/runs/${id}`);
+          assert.equal(run.status, 'completed', 'The source live run must be complete');
+          assert.equal(run.path, '.github/workflows/live-agent-eval.yml', 'Select a live agent dogfood run');
+          assert.match(run.head_sha, /^[a-f0-9]{40}$/);
+          const artifacts = read(`actions/runs/${id}/artifacts`);
+          assert.equal(artifacts.total_count, 1, 'The source run must contain exactly one scored-result artifact');
+          const artifact = artifacts.artifacts[0];
+          assert.ok(artifact && !artifact.expired, 'The scored-result artifact is missing or expired');
+          const url = `${process.env.GITHUB_SERVER_URL}/${repo}/actions/runs/${id}/artifacts/${artifact.id}`;
+          appendFileSync(process.env.GITHUB_OUTPUT, `source-ref=${run.head_sha}\nartifact-id=${artifact.id}\nartifact-url=${url}\n`);
+          NODE
+      - name: Check out the evaluated suite revision
+        if: ${{ inputs.execution-mode == 'replay' }}
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ steps.recording.outputs.source-ref }}
+          persist-credentials: false
+      - name: Download the recorded scored result
+        if: ${{ inputs.execution-mode == 'replay' }}
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
+        with:
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.recording-run-id }}
+          artifact-ids: ${{ steps.recording.outputs.artifact-id }}
+          merge-multiple: true
+          path: .promptfoo-ci/replay-input
       - uses: pnpm/action-setup@v6
+        if: ${{ inputs.execution-mode != 'replay' }}
       - uses: actions/setup-node@v7
+        if: ${{ inputs.execution-mode != 'replay' }}
         with:
           node-version-file: .node-version
           cache: pnpm
       - run: pnpm install --frozen-lockfile --ignore-scripts
+        if: ${{ inputs.execution-mode != 'replay' }}
       - name: Build the caller's provider and grader package
+        if: ${{ inputs.execution-mode != 'replay' }}
         run: pnpm build
       - name: Verify credentials and model availability
+        if: ${{ inputs.execution-mode != 'replay' }}
         run: node scripts/check-live-agent-eval.mjs
         env:
-          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          OPENROUTER_API_KEY: ${{ inputs.execution-mode != 'replay' && secrets.OPENROUTER_API_KEY || '' }}
       - name: Run the fixed live agent suite and summarize
         id: eval
-        uses: allagentsdev/oh-my-promptfoo-action@26de8c8bd12948f9ad9b06335fc1fbe4d5b1fe04
+        uses: allagentsdev/oh-my-promptfoo-action@1d83ead4e597f1067500540a1936c5d2d6a8a70f
         env:
-          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          OPENROUTER_API_KEY: ${{ inputs.execution-mode != 'replay' && secrets.OPENROUTER_API_KEY || '' }}
           DOGFOOD_REPOSITORY: file://${{ github.workspace }}
           DOGFOOD_REF: ${{ github.sha }}
           PROMPTFOO_CACHE_ENABLED: "false"
           # Retain rate-limit errors promptly instead of retrying the whole agent task.
           PROMPTFOO_DISABLE_ADAPTIVE_SCHEDULER: "true"
         with:
+          execution-mode: ${{ inputs.execution-mode || 'live' }}
+          replay-results: ${{ inputs.execution-mode == 'replay' && '.promptfoo-ci/replay-input/scored-results.json' || '' }}
           config: packages/oh-my-promptfoo/evals/live/promptfooconfig.yaml
           public-labels: "true"
-          upload-results: "true"
-          args-json: '["--no-cache", "--max-concurrency", "1"]'
+          upload-results: ${{ inputs.execution-mode == 'replay' && 'false' || 'true' }}
+          args-json: ${{ inputs.execution-mode == 'replay' && '[]' || '["--no-cache", "--max-concurrency", "1"]' }}
+      - name: Link the original scored result
+        if: ${{ !cancelled() && inputs.execution-mode == 'replay' && steps.recording.outputs.artifact-url != '' }}
+        env:
+          ORIGINAL_ARTIFACT_URL: ${{ steps.recording.outputs.artifact-url }}
+        run: |
+          node --input-type=module <<'NODE'
+          import {appendFileSync} from 'node:fs';
+          appendFileSync(process.env.GITHUB_STEP_SUMMARY, `\nRecorded agent output and judge reasons: [download the original scored result](<${process.env.ORIGINAL_ARTIFACT_URL}>). Its original retention policy applies.\n`);
+          NODE
