@@ -4,6 +4,8 @@
 
 ### Features
 
+- Replay saved native scored results for formatting checks through `allagents-promptfoo report --replay`, including GitHub summaries and failure outputs. Reuse recorded outcomes and measurements without loading candidate or grader providers; label all replay reports as historical.
+
 - Move the reusable GitHub wrapper to `allagentsdev/oh-my-promptfoo-action`. Keep the native eval/report CLI and reporting helpers in this package, and preserve the repository-root Action as a pinned compatibility entry.
 
 - Offer an explicitly enabled scored-result artifact download in suite cards, including assertion failures. Keep native answers and judge reasons in the credential-redacted artifact, preserve private originals, and inherit the calling repository's retention policy unless overridden. Export the artifact preparation and link helpers for local use.

@@ -1,5 +1,33 @@
 # Native Promptfoo CI and local reporting
 
+## Replay a recorded result locally
+
+Use the scored-result JSON downloaded from an approved live run to check reporting
+without making candidate or grader calls:
+
+```sh
+allagents-promptfoo report --replay --results /private/scored-results.json --output-dir .promptfoo-ci
+```
+
+Replay reads the saved native export and uses the same reporting/accounting
+helpers as a live evaluation. It does not load the config, rerun assertions,
+invoke providers or reconstruct a workspace. Scores, assertion outcomes, latency,
+usage and costs describe the recorded run, including unknown measurements. Each
+summary and console report identifies the run as **Replay — recorded evaluation**.
+It is a formatting check, not a fresh release gate. Preserve the original capture
+in the calling repository's approved storage; raw captures are not committed to
+this public repository.
+
+The CLI can also publish a replay summary and outputs in GitHub with `--github`.
+Pass `--config` and `--working-directory` for source links, and check out the
+recorded suite revision so links describe the evaluated definitions. Replay
+returns `replayed=true` and an unknown native CLI exit code because no native CLI
+ran. Native per-case failures, grader/provider errors, invalid files and zero
+coverage still produce a failing replay status. For exports without their
+original process exit code, the existing conservative report-only gate applies.
+
+## Native evaluation
+
 The reusable root-level Action lives in
 [`allagentsdev/oh-my-promptfoo-action`](https://github.com/allagentsdev/oh-my-promptfoo-action).
 This package owns its public local `eval`/`report` CLI, providers, graders and
