@@ -1,5 +1,8 @@
 # oh-my-promptfoo
 
+Run authored native Promptfoo configs in CI with the reusable [GitHub Action and local reporter](docs/ci-action.md).
+It preserves native selection/scoring, retains private results on failure and reports outcomes, latency, usage and known cost without publishing raw answers.
+
 **An opinionated way to evaluate coding agents and their skills with Promptfoo.**
 
 <p>

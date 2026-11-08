@@ -1,0 +1,12 @@
+description: Intentional assertion failure for scored-result retention
+prompts: [READY]
+providers: [echo]
+env:
+  ARTIFACT_CANARY_TOKEN: artifact-secret-canary
+tests:
+  - description: Retain the answer and judge reason when the assertion fails
+    vars:
+      artifactCanary: artifact-secret-canary
+    assert:
+      - type: equals
+        value: EXPECTED_DIFFERENT_ANSWER

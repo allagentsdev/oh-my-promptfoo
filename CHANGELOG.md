@@ -4,6 +4,20 @@
 
 ### Features
 
+- Move the reusable GitHub wrapper to `allagentsdev/oh-my-promptfoo-action`. Keep the native eval/report CLI and reporting helpers in this package, and preserve the repository-root Action as a pinned compatibility entry.
+
+- Offer an explicitly enabled scored-result artifact download in suite cards, including assertion failures. Keep native answers and judge reasons in the credential-redacted artifact, preserve private originals, and inherit the calling repository's retention policy unless overridden. Export the artifact preparation and link helpers for local use.
+
+- Give each evaluation suite its own `Run Evals - <suite name>` GitHub job card with an `Evals` status heading, without displayed suite numbers. Link numbered tests to full committed YAML/JSON blocks and preserve file-level links when an exact case location is unavailable; expose the same source-link helper for local reporting. Always show native score vs authored threshold, and round costs to four decimal places unless more precision is needed to avoid displaying positive spend as zero.
+
+- Stream numeric native test completions to CI/local consoles through Promptfoo's public hooks, preserving authored extensions and private logs. Print final sanitized assertion/accounting reports locally and in Actions; show authored overall score thresholds without changing native verdicts.
+
+- Make CI summaries readable with numbered tests within each suite, opt-in public authored labels, compact metrics/results tables and expandable assertions. Add a recorded six-task real agent example for reviewing the format before merge; preserve native scores and unknown measurements.
+
+- Add manually triggered live dogfooding of the repository's skill, workspace Agent and read-only agentAssert through OpenRouter. Select both candidate and grader with the `OPENROUTER_MODEL` repository variable; keep the API key in a secret. Keep fixed native cases, exact artifact checks, model-availability preflight and sanitized Action reporting.
+
+- Add native CI support through the shared GitHub Action and local `eval`/`report` CLI with native argument arrays, pinned frozen tooling, private retained results and sanitized case/assertion, latency, candidate/grader usage and cost reports. Missing/error/zero-coverage runs fail closed; native scoring policy stays authoritative. Export the reusable reporter through `oh-my-promptfoo/reporting`.
+
 - Add `pi-sdk` workspace and read-only agent-grader delegates using the maintained optional `@earendil-works/pi-coding-agent@1.3.0` peer, explicit model/credentials and local endpoint support. Isolated in-memory sessions report successful skill-file reads to stock `skill-used` without changing skill authoring.
 - Add adapter-owned schema-version-1 tool inventories with bounded/redacted arguments, explicit completeness and SDK skill-loading names. Copilot includes subagent streams and certifies only clean matched bounded execution; native/Pi retain observations without claiming unsupported completeness.
 - Publish stock Promptfoo JavaScript package assertions `tool-called`, `tool-not-called` and `skill-not-loaded`, with exact/regex names, MCP identity, argument paths and invocation chronology. Missing, malformed or incomplete evidence is a grader error, never a successful absence assertion.
@@ -11,6 +25,16 @@
 - **copilot:** accept rendered Promptfoo chat arrays in `CopilotSdk` and the Copilot `Agent` delegate, including native JSON/YAML prompt-file authoring. Add `inputFormat: auto | text | chat` in direct/delegate config and existing prompt overrides, conservative complete-intent detection, ordered consolidation of multiple/later systems, and string names on all supported roles. Replay string-only history as delimited user-channel JSON, not native role hydration; keep fresh sessions/workspaces and current-turn-only tool evidence.
 
 ### Bug Fixes
+
+- Put the required release regression and its tests in `examples/ci/release/promptfooconfig.yaml`, so numbered test links open the complete test block in the suite configuration.
+
+- Publish the local release suite and saved live preview sequentially in separate named jobs so the required suite card appears first, including when its evaluation fails.
+
+- Number tests from 1 within each suite card. Make the local name-normalization example report its known zero model usage and cost instead of leaving measurements absent.
+
+- Give eval previews their own Evals job instead of appending them beneath Vitest's summary. Show latency, combined reported tokens/cost and assertion outcomes in the results table; distinguish unauthored thresholds from missing measurements. Preserve measured workspace-grader accounting alongside stock skill checks and the zero-call artifact checker.
+
+- **dependencies:** pin reviewed Glob `14.0.3` and Minimatch `11.0.2` workspace overrides for cancellation and pattern-expansion advisories while retaining Promptfoo `0.125.1` and Pi `1.3.0`. Add behavioral security and matching regressions.
 
 - **promptfoo:** leave version selection to consumers through an unrestricted required peer, including vendor-suffixed builds, without changing grading behavior.
 - **workspace:** canonicalize declared protected source link targets in the workspace reader so Windows 8.3 short temp paths (`RUNNER~1`) are accepted; undeclared, mismatched and non-symlink sources are still refused.
@@ -24,9 +48,9 @@
 - **inventory:** bind SDK lifecycle child `agentId` and spawning `toolCallId` bidirectionally, allowing zero-tool and agentId-only child streams while rejecting contradictory starts/completions/failures without closing the wrong child or overwriting sibling identity.
 - **inventory:** preserve configured MCP identity across spans and summaries, retaining malformed SDK fields as incomplete evidence instead of successful server-absence proofs. Verify installed ESM/CJS MCP inventories and strict assertions alongside stock Promptfoo's positive skill evidence.
 
-- **workspace:** remove a half-made runtime root when initialization fails after creating it, so later runs no longer refuse it. Recovery now names an unmarked runtime root and says it is a leftover from an interrupted run that is safe to delete when no eval is running, instead of a bare `ENOENT` ([#95](https://github.com/allagentsdev/oh-my-promptfoo/issues/95)).
-- **dependencies:** update the development Promptfoo peer to `0.124.1`, override get-uri's FTP client to patched `6.2.3`, and pin Forge's canonical RSA DigestInfo fix by immutable source commit. Add real-dependency rejection regressions to daily audits; document the Git audit coverage limit and intentional separate-host PASV restriction.
-- **protocol:** on Windows, stopping a delegate for cancellation or timeout no longer terminates the runner before it reports; the abort frame requests shutdown and the runner is force-killed only after the shutdown grace, so captured Copilot accounting survives ([#128](https://github.com/allagentsdev/oh-my-promptfoo/issues/128)).
+* **workspace:** remove a half-made runtime root when initialization fails after creating it, so later runs no longer refuse it. Recovery now names an unmarked runtime root and says it is a leftover from an interrupted run that is safe to delete when no eval is running, instead of a bare `ENOENT` ([#95](https://github.com/allagentsdev/oh-my-promptfoo/issues/95)).
+* **dependencies:** update the development Promptfoo peer to `0.124.1`, override get-uri's FTP client to patched `6.2.3`, and pin Forge's canonical RSA DigestInfo fix by immutable source commit. Add real-dependency rejection regressions to daily audits; document the Git audit coverage limit and intentional separate-host PASV restriction.
+* **protocol:** on Windows, stopping a delegate for cancellation or timeout no longer terminates the runner before it reports; the abort frame requests shutdown and the runner is force-killed only after the shutdown grace, so captured Copilot accounting survives ([#128](https://github.com/allagentsdev/oh-my-promptfoo/issues/128)).
 
 ### Tests and documentation
 

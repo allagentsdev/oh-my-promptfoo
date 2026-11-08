@@ -1,0 +1,94 @@
+# Compatibility entry. The GitHub wrapper is maintained in oh-my-promptfoo-action.
+name: Native Promptfoo evaluation
+description: Compatibility entry for the standalone oh-my-promptfoo-action
+branding:
+  icon: check-circle
+  color: purple
+inputs:
+  config:
+    description: One local Promptfoo config file, relative to working-directory
+    required: true
+  args-json:
+    description: Public JSON array of native argument strings; GitHub may print
+      literal inputs before execution
+    default: "[]"
+  args-file:
+    description: Private JSON argument-array file relative to working-directory; use
+      for sensitive values instead of args-json
+    default: ""
+  working-directory:
+    description: Directory in the caller checkout from which to run Promptfoo
+    default: .
+  output-directory:
+    description: Local artifact parent directory, relative to working-directory;
+      each invocation creates a fresh child
+    default: .promptfoo-ci
+  suite-number:
+    description: Legacy JSON suite reference; not displayed in reports or required
+      for separate job cards
+    default: "1"
+  public-labels:
+    description: Publish authored suite/test descriptions, provider labels and
+      assertion metric names; keep false for private labels
+    default: "false"
+  upload-results:
+    description: Explicitly approve uploading a credential-redacted scored result to
+      this repository's GitHub artifact storage
+    default: "false"
+  artifact-retention-days:
+    description: Artifact retention override; 0 uses the calling repository's
+      default, within GitHub policy limits
+    default: "0"
+  artifact-name:
+    description: Optional unique artifact name; defaults to a generated name for
+      this invocation
+    default: ""
+outputs:
+  result-artifact-url:
+    description: Download URL after an explicitly enabled upload succeeds; empty otherwise
+    value: ${{ steps.eval.outputs.result-artifact-url }}
+  result-artifact-id:
+    description: Uploaded GitHub artifact ID; empty when no upload succeeded
+    value: ${{ steps.eval.outputs.result-artifact-id }}
+  result-path:
+    description: Absolute native JSON path; check results-available before reading
+    value: ${{ steps.eval.outputs.result-path }}
+  results-available:
+    description: Whether the native JSON was produced and parsed (coverage can still
+      be invalid)
+    value: ${{ steps.eval.outputs.results-available }}
+  artifact-directory:
+    description: Absolute run directory with private raw results, logs and sanitized
+      reports; retained on failure
+    value: ${{ steps.eval.outputs.artifact-directory }}
+  log-path:
+    description: Absolute private native stdout/stderr log path
+    value: ${{ steps.eval.outputs.log-path }}
+  report-path:
+    description: Absolute sanitized report JSON path
+    value: ${{ steps.eval.outputs.report-path }}
+  summary-path:
+    description: Absolute sanitized Markdown summary path
+    value: ${{ steps.eval.outputs.summary-path }}
+  evaluation-status:
+    description: pass, fail or error; incomplete results and zero coverage are errors
+    value: ${{ steps.eval.outputs.evaluation-status }}
+  evaluation-exit-code:
+    description: Native CLI exit code, or unknown when it could not finish
+    value: ${{ steps.eval.outputs.evaluation-exit-code }}
+runs:
+  using: composite
+  steps:
+    - id: eval
+      uses: allagentsdev/oh-my-promptfoo-action@26de8c8bd12948f9ad9b06335fc1fbe4d5b1fe04
+      with:
+        config: ${{ inputs.config }}
+        args-json: ${{ inputs.args-json }}
+        args-file: ${{ inputs.args-file }}
+        working-directory: ${{ inputs.working-directory }}
+        output-directory: ${{ inputs.output-directory }}
+        suite-number: ${{ inputs.suite-number }}
+        public-labels: ${{ inputs.public-labels }}
+        upload-results: ${{ inputs.upload-results }}
+        artifact-retention-days: ${{ inputs.artifact-retention-days }}
+        artifact-name: ${{ inputs.artifact-name }}

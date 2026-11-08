@@ -27,6 +27,7 @@ export const processEntries = {
     "mcp-launcher": "packages/oh-my-promptfoo/src/mcp-launcher.ts",
     "copilot-endpoint-worker": "packages/oh-my-promptfoo/src/copilot-endpoint-worker.ts",
     cli: "packages/oh-my-promptfoo/src/cli.ts",
+    "eval-progress": "packages/oh-my-promptfoo/src/eval-progress.ts",
   },
   format: ["esm"],
   dts: false,

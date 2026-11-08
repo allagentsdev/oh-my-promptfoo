@@ -108,8 +108,11 @@ for (const [mode, invariant] of [
   ["zod", "SDK Zod rejects oversized collections before visiting their elements"],
   ["undici", "Pi undici rejects malicious encoding and integrity responses without crashing"],
   ["azure", "Azure credentials retain trusted redemption and confidential-client guards"],
-  ["glob", "Promptfoo and filesystem glob walks stop reading directories after cancellation"],
-  ["minimatch", "Pi and Promptfoo matchers bound pattern amplification and retain consumed APIs"],
+  ["minimatch", "Locked matchers respect expansion budgets and preserve model/resource matching"],
+  [
+    "glob",
+    "Promptfoo glob stops filesystem traversal after cancellation and loads dataset patterns",
+  ],
 ] as const) {
   test(invariant, () => {
     const env: NodeJS.ProcessEnv = { CI: "1" };

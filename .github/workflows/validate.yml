@@ -6,6 +6,40 @@ on:
 permissions:
   contents: read
 jobs:
+  native-eval-action:
+    name: Run Evals - Required name-normalization release regression
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: allagentsdev/oh-my-promptfoo-action@26de8c8bd12948f9ad9b06335fc1fbe4d5b1fe04
+        id: eval
+        with:
+          config: examples/ci/release/promptfooconfig.yaml
+          public-labels: "true"
+          upload-results: "true"
+          args-json: '["--filter-metadata", "suite=required", "--filter-metadata", "language=latin", "--no-cache"]'
+      - name: Verify the real scored-result upload
+        env:
+          ARTIFACT_URL: ${{ steps.eval.outputs.result-artifact-url }}
+        run: test -n "$ARTIFACT_URL"
+  recorded-agent-eval:
+    name: Run Evals - Repository agent skill regression
+    needs: native-eval-action
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - run: pnpm build
+      - name: Preview a recorded live agent evaluation
+        run: node packages/oh-my-promptfoo/evals/live/preview.mjs
   validate:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -19,7 +53,8 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
       - run: pnpm lint
-      - run: pnpm test
+      # Unit-test output stays in logs; evals own the workflow summary.
+      - run: pnpm test --reporter=default
       - run: pnpm build
       - run: pnpm pack:check
   # Runs beside `validate`: it installs the packed package and stock Promptfoo into a
@@ -44,6 +79,7 @@ jobs:
       - run: pnpm build
       - run: pnpm e2e
   copilot-conversations:
+    name: Copilot compatibility · Promptfoo ${{ matrix.promptfoo }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     strategy:
@@ -91,4 +127,4 @@ jobs:
         env:
           ALLAGENTS_TEST_GIT_HTTPS: "1"
           ALLAGENTS_TEST_ORAS_PATH: ${{ runner.temp }}/oras/oras
-        run: pnpm test tests/sources.test.ts tests/sources-git-https.test.ts tests/sources-oci-registry.test.ts tests/workspace.test.ts
+        run: pnpm test tests/sources.test.ts tests/sources-git-https.test.ts tests/sources-oci-registry.test.ts tests/workspace.test.ts --reporter=default
