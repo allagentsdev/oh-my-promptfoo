@@ -73,10 +73,9 @@
 
 ## [1.30.2](https://github.com/allagentsdev/oh-my-promptfoo/compare/v1.30.1...v1.30.2) (2026-11-09)
 
-
 ### Bug Fixes
 
-* label unnamed skill checks with their target ([#195](https://github.com/allagentsdev/oh-my-promptfoo/issues/195)) ([b189c9f](https://github.com/allagentsdev/oh-my-promptfoo/commit/b189c9fde3a21182bd6a29a5f7583d954a4b06d3))
+- label unnamed skill checks with their target ([#195](https://github.com/allagentsdev/oh-my-promptfoo/issues/195)) ([b189c9f](https://github.com/allagentsdev/oh-my-promptfoo/commit/b189c9fde3a21182bd6a29a5f7583d954a4b06d3))
 
 ## [1.30.1](https://github.com/allagentsdev/oh-my-promptfoo/compare/v1.30.0...v1.30.1) (2026-11-09)
 
