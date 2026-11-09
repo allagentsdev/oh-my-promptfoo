@@ -15,6 +15,7 @@ export default async function setup() {
       ...processEntries.entry,
       assertions: "packages/oh-my-promptfoo/src/assertions.ts",
       reporting: "packages/oh-my-promptfoo/src/reporting.ts",
+      providers: "packages/oh-my-promptfoo/src/providers.ts",
     },
     outDir: testEntries,
     clean: true,

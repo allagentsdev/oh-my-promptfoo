@@ -2,6 +2,11 @@ name: Live agent dogfood
 on:
   workflow_dispatch:
     inputs:
+      suite:
+        description: Fixed authored suite; use the original suite when replaying
+        type: choice
+        options: [code-review, repository-skill]
+        default: code-review
       execution-mode:
         description: Live calls the candidate/grader; replay renders a saved scored result
         type: choice
@@ -19,11 +24,12 @@ concurrency:
   cancel-in-progress: false
 jobs:
   evaluate:
-    name: Run Evals - Repository agent skill regression
+    name: Run Evals - ${{ inputs.suite == 'code-review' && 'Invoice authorization code review' || 'Repository agent skill regression' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
       OPENROUTER_MODEL: ${{ vars.OPENROUTER_MODEL }}
+      DOGFOOD_CONFIG: ${{ inputs.suite == 'code-review' && 'packages/oh-my-promptfoo/evals/code-review/promptfooconfig.yaml' || 'packages/oh-my-promptfoo/evals/live/promptfooconfig.yaml' }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -84,9 +90,20 @@ jobs:
       - name: Build the caller's provider and grader package
         if: ${{ inputs.execution-mode != 'replay' }}
         run: pnpm build
+      - name: Verify the selected recording's suite
+        if: ${{ inputs.execution-mode == 'replay' }}
+        run: |
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import {readFileSync} from 'node:fs';
+          const native = JSON.parse(readFileSync('.promptfoo-ci/replay-input/scored-results.json', 'utf8'));
+          const expected = process.env.DOGFOOD_CONFIG.includes('/code-review/')
+            ? 'Invoice authorization code review' : 'Repository agent skill regression';
+          assert.equal(native.config.description, expected, 'Select the suite used by the original recording');
+          NODE
       - name: Verify credentials and model availability
         if: ${{ inputs.execution-mode != 'replay' }}
-        run: node scripts/check-live-agent-eval.mjs
+        run: node scripts/check-live-agent-eval.mjs "$DOGFOOD_CONFIG"
         env:
           OPENROUTER_API_KEY: ${{ inputs.execution-mode != 'replay' && secrets.OPENROUTER_API_KEY || '' }}
       - name: Run the fixed live agent suite and summarize
@@ -102,7 +119,7 @@ jobs:
         with:
           execution-mode: ${{ inputs.execution-mode || 'live' }}
           replay-results: ${{ inputs.execution-mode == 'replay' && '.promptfoo-ci/replay-input/scored-results.json' || '' }}
-          config: packages/oh-my-promptfoo/evals/live/promptfooconfig.yaml
+          config: ${{ env.DOGFOOD_CONFIG }}
           public-labels: "true"
           upload-results: ${{ inputs.execution-mode == 'replay' && 'false' || 'true' }}
           args-json: ${{ inputs.execution-mode == 'replay' && '[]' || '["--no-cache", "--max-concurrency", "1"]' }}

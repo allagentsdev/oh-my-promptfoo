@@ -640,3 +640,41 @@ test("display rounding preserves native scores and never rounds a positive spend
     assert.equal(report.cases[0].candidateCost.usd, usd);
   }
 });
+
+test("unavailable measurement notes explain missing data, failed graders and pricing without revealing raw reasons", () => {
+  const missing = summarizeEvaluation(document([row()]), 0);
+  assert.deepEqual(missing.cases[0].candidateCost.unavailableReasons, ["not-reported"]);
+  assert.equal(missing.cases[0].candidateCost.usd, null);
+  const markdown = renderSummary(missing);
+  assert.ok(markdown.includes("Agent cost: not reported"));
+  assert.ok(markdown.indexOf("Agent cost: not reported") > markdown.indexOf("<details>"));
+  const failed = summarizeEvaluation(
+    document([
+      row({
+        gradingResult: {
+          pass: false,
+          score: 0,
+          reason: "PRIVATE_GRADER_REASON",
+          metadata: { graderError: true },
+          tokensUsed: { total: 0, cost: 0 },
+        },
+      }),
+    ]),
+    0,
+  );
+  assert.equal(failed.status, "error");
+  assert.equal(failed.totals.graderCost.usd, null);
+  assert.deepEqual(failed.cases[0].graderCost.unavailableReasons, ["grader-error"]);
+  const rendered = renderSummary(failed) + renderConsoleSummary(failed);
+  assert.ok(rendered.includes("grader error; spend may have occurred"));
+  assert.ok(!rendered.includes("PRIVATE_"));
+  assert.deepEqual(
+    responseCost({ metadata: { copilotTokenPrices: {} } }, "mismatch").unavailableReasons,
+    ["pricing-unavailable"],
+  );
+  assert.deepEqual(
+    responseCost({ metadata: { copilot: { accounting: {} } } }, "fixture").unavailableReasons,
+    ["incomplete-accounting"],
+  );
+  assert.deepEqual(responseCost({ cost: 0 }, undefined), { usd: 0, basis: "native" });
+});

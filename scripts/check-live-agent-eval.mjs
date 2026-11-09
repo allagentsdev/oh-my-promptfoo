@@ -75,7 +75,7 @@ export async function checkLiveAgentEval({
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   try {
-    const models = await checkLiveAgentEval();
+    const models = await checkLiveAgentEval({ configPath: process.argv[2] || liveConfig });
     console.log(`Live dogfood preflight passed: ${models.join(", ")}`);
   } catch (error) {
     console.error(error instanceof Error ? error.message : "Live dogfood preflight failed");

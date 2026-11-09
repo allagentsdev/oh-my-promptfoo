@@ -1,7 +1,14 @@
 import { safeCount, safeMultiplier } from "./copilot-accounting.js";
 import { type SourceOptions, sourceUrl } from "./eval-sources.js";
 import { redact, secrets } from "./redaction.js";
-import { type ResultCost, record, responseCost, sumCosts } from "./result-cost.js";
+import {
+  type MeasurementUnavailableReason,
+  type ResultCost,
+  record,
+  responseCost,
+  sumCosts,
+  unknownCost,
+} from "./result-cost.js";
 
 export { prepareResultArtifact, renderResultArtifactLink } from "./eval-artifacts.js";
 export { addSourceLinks, type SourceOptions } from "./eval-sources.js";
@@ -14,6 +21,15 @@ export interface Usage {
   completion: number | null;
   cached: number | null;
   requests: number | null;
+  unavailableReasons?: MeasurementUnavailableReason[];
+}
+
+export interface RunTimings {
+  toolchainMs?: number;
+  setupMs?: number;
+  nativeEvaluationMs?: number;
+  workspacePreparationMs?: number | null;
+  reportingMs?: number;
 }
 export interface AssertionReport {
   reference: string;
@@ -43,6 +59,8 @@ export interface CaseReport {
 export interface EvaluationReport {
   version: 1;
   replayed?: true;
+  /** Current invocation timings; replay timings never describe the recorded model run. */
+  timings?: RunTimings;
   suite?: { number: number; title?: string };
   status: Outcome;
   issues: string[];
@@ -73,11 +91,11 @@ const count = (value: unknown) => (safeCount(value) ? value : null);
 const score = (value: unknown) =>
   typeof value === "number" && Number.isFinite(value) ? value : null;
 
-function usage(value: unknown): Usage {
+function usage(value: unknown, reason: MeasurementUnavailableReason = "not-reported"): Usage {
   const source = record(value);
   const prompt = count(source.prompt),
     completion = count(source.completion);
-  return {
+  const result: Usage = {
     total:
       count(source.total) ??
       (prompt !== null && completion !== null ? count(prompt + completion) : null),
@@ -86,14 +104,21 @@ function usage(value: unknown): Usage {
     cached: count(source.cached),
     requests: count(source.numRequests),
   };
+  if (result.total === null || result.requests === null) result.unavailableReasons = [reason];
+  return result;
 }
 
 function sumUsage(values: Usage[]): Usage {
   const result = usage(undefined);
-  for (const key of Object.keys(result) as (keyof Usage)[]) {
+  for (const key of ["total", "prompt", "completion", "cached", "requests"] as const) {
     if (values.length && values.every((item) => item[key] !== null))
       result[key] = count(values.reduce((sum, item) => sum + item[key]!, 0));
   }
+  delete result.unavailableReasons;
+  if (result.total === null || result.requests === null)
+    result.unavailableReasons = values.length
+      ? [...new Set(values.flatMap((item) => item.unavailableReasons ?? []))]
+      : ["incomplete-accounting"];
   return result;
 }
 
@@ -204,7 +229,10 @@ function assertionStatus(component: Record<string, any>): Outcome {
 function graderMeasurements(grade: unknown, failed: boolean): { cost: ResultCost; usage: Usage } {
   const value = record(grade);
   // Do not treat the zero tokens substituted after a failed judge as a free call.
-  if (failed) return { cost: sumCosts([]), usage: usage(undefined) };
+  if (failed) {
+    const reason = graderError(grade) ? "grader-error" : "evaluation-error";
+    return { cost: unknownCost(reason), usage: usage(undefined, reason) };
+  }
   const collect = (components: Record<string, any>[]): { cost: ResultCost; usage: Usage }[] =>
     components.flatMap((component) => {
       const metadata = record(component.metadata);
@@ -245,7 +273,7 @@ function graderMeasurements(grade: unknown, failed: boolean): { cost: ResultCost
               usage: usage({ total: 0, prompt: 0, completion: 0, cached: 0, numRequests: 0 }),
             },
           ]
-        : [{ cost: sumCosts([]), usage: usage(undefined) }];
+        : [{ cost: unknownCost("not-reported"), usage: usage(undefined) }];
     });
   // Root assertions own measurements; aggregate tokens can contain synthetic
   // zeroes and diagnostic criterion children do not own extra spend.
@@ -323,7 +351,7 @@ export function summarizeEvaluation(
       score: score(row.score),
       ...(score(test.threshold) !== null ? { threshold: score(test.threshold)! } : {}),
       latencyMs: measured(row.latencyMs),
-      candidateUsage: usage(reply.tokenUsage),
+      candidateUsage: usage(reply.tokenUsage, reply.error ? "provider-error" : "not-reported"),
       graderUsage: grader.usage,
       candidateCost: responseCost(
         reply,
@@ -408,6 +436,58 @@ function reportFormats() {
 
 const formats = reportFormats();
 
+const measurementReasons: Record<MeasurementUnavailableReason, string> = {
+  "not-reported": "not reported",
+  "provider-error": "provider error; measurements unavailable",
+  "grader-error": "grader error; spend may have occurred",
+  "evaluation-error": "evaluation error; measurements unavailable",
+  "incomplete-accounting": "accounting is incomplete",
+  "pricing-unavailable": "recorded prices or matching usage unavailable",
+};
+
+function measurementNotes(item: CaseReport): string {
+  const measurements: [string, MeasurementUnavailableReason[] | undefined][] = [
+    [
+      item.candidateUsage.total === null ? "Agent usage" : "Agent requests",
+      item.candidateUsage.unavailableReasons,
+    ],
+    [
+      "Agent cost",
+      item.candidateCost.usd === null ? item.candidateCost.unavailableReasons : undefined,
+    ],
+    [
+      item.graderUsage.total === null ? "Grader usage" : "Grader requests",
+      item.graderUsage.unavailableReasons,
+    ],
+    ["Grader cost", item.graderCost.usd === null ? item.graderCost.unavailableReasons : undefined],
+  ];
+  return measurements
+    .flatMap(([name, reasons]) =>
+      reasons?.length
+        ? [
+            `${name}: ${reasons
+              .map((reason) => measurementReasons[reason])
+              .filter(Boolean)
+              .join("; ")}`,
+          ]
+        : [],
+    )
+    .join(". ");
+}
+
+/** Durations overlap: native evaluation includes workspace preparation and grader calls. */
+function renderTimings(timings: RunTimings, replayed = false): string {
+  const rows = [
+    ["Toolchain preparation", timings.toolchainMs],
+    ["CLI preparation", timings.setupMs],
+    ["Native evaluation (includes workspace and grading)", timings.nativeEvaluationMs],
+    ["Workspace preparation (sum of observed workspaces)", timings.workspacePreparationMs],
+    [replayed ? "Replay rendering (this invocation)" : "Reporting", timings.reportingMs],
+  ].filter(([, value]) => value !== undefined);
+  if (!rows.length) return "";
+  return `<details><summary>${replayed ? "Replay timing" : "Run timing"}</summary>\n\n| Phase | Duration |\n| --- | ---: |\n${rows.map(([name, value]) => `| ${name} | ${formats.time(value as number | null)} |`).join("\n")}\n\nDurations overlap; workspace time is included in native evaluation. They must not be added together.\n\n</details>\n`;
+}
+
 /** Render only normalized outcomes and explicitly public, redacted labels. */
 export function renderSummary(report: EvaluationReport): string {
   const { number, score, time, money, escapeMarkup, badge, usageSummary } = formats;
@@ -484,6 +564,7 @@ export function renderSummary(report: EvaluationReport): string {
   add("\n### Test details\n");
   for (const item of report.cases) {
     const thresholds = item.assertions.some((check) => check.threshold !== null);
+    const notes = measurementNotes(item);
     const names = new Map<string, number>();
     for (const check of item.assertions)
       if (check.label) names.set(check.label, (names.get(check.label) ?? 0) + 1);
@@ -497,6 +578,7 @@ export function renderSummary(report: EvaluationReport): string {
       `| Agent | ${number(item.candidateUsage.total)} | ${number(item.candidateUsage.requests)} | ${money(item.candidateCost)} |`,
       `| Grader | ${number(item.graderUsage.total)} | ${number(item.graderUsage.requests)} | ${money(item.graderCost)} |`,
       "",
+      ...(notes ? [`${notes}.`, ""] : []),
       `| Check | Type | Result | Score |${thresholds ? " Threshold |" : ""}`,
       `| --- | --- | --- | ---: |${thresholds ? " ---: |" : ""}`,
       ...item.assertions.map((check, index) => {
@@ -516,6 +598,7 @@ export function renderSummary(report: EvaluationReport): string {
   }
   if (truncated)
     lines.push("", "Summary truncated. The local report.json retains every reported outcome.");
+  if (report.timings) lines.push("", renderTimings(report.timings, report.replayed));
   lines.push(
     "",
     "Tests are numbered from 1 within each suite. Each candidate/repeat has its own result number.",
@@ -554,9 +637,11 @@ export function renderConsoleSummary(report: EvaluationReport): string {
     `Grader: ${usageSummary(report.totals.graderUsage)}; cost: ${money(report.totals.graderCost)}`,
   ];
   for (const item of report.cases) {
+    const notes = measurementNotes(item);
     lines.push(
       `Test ${item.row}${item.label ? ` · ${consoleLabel(item.label)}` : ""}${item.candidate ? ` (${consoleLabel(item.candidate)})` : ""} · ${item.status.toUpperCase()} · ${time(item.latencyMs)} · score ${score(item.score)}${item.threshold === undefined ? "" : ` / threshold ${score(item.threshold)}`}`,
       `  Agent: ${number(item.candidateUsage.total)} tokens; ${number(item.candidateUsage.requests)} requests; ${money(item.candidateCost)}. Grader: ${number(item.graderUsage.total)} tokens; ${number(item.graderUsage.requests)} requests; ${money(item.graderCost)}.`,
+      ...(notes ? [`  ${notes}.`] : []),
     );
     const names = new Map<string, number>();
     for (const check of item.assertions)

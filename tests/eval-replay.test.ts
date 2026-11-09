@@ -86,7 +86,11 @@ test("replay uses recorded native outcomes and measurements without loading a co
     const report = await json(values["report-path"]);
     assert.equal(report.replayed, true);
     delete report.replayed;
-    assert.deepEqual(report, captured.report);
+    assert.ok(report.timings.reportingMs >= 0);
+    assert.equal(report.timings.nativeEvaluationMs, undefined);
+    delete report.timings;
+    const { timings: _liveTimings, ...recordedReport } = captured.report;
+    assert.deepEqual(report, recordedReport);
     const markdown = await readFile(summary, "utf8");
     assert.ok(markdown.includes("Replay — recorded evaluation") && markdown.includes("$0.2500"));
     assert.ok(!markdown.includes("PRIVATE_ANSWER"));

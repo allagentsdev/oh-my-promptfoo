@@ -4,6 +4,10 @@
 
 ### Features
 
+- Explain unavailable usage and cost with safe diagnostic categories inside test details. Add collapsed, measured invocation timing without changing native scores, accounting values or the results table. Replay distinguishes current rendering time from historical model measurements.
+
+- Add a three-case invoice authorization code-review dogfood with a safe control, native skill/artifact checks and nested workspace grading. Select it in the manual live/replay workflow using the configurable OpenRouter model.
+
 - Replay saved native scored results for formatting checks through `allagents-promptfoo report --replay`, including GitHub summaries and failure outputs. Reuse recorded outcomes and measurements without loading candidate or grader providers; label all replay reports as historical.
 
 - Select live or replay at runtime in the manually triggered agent workflow and the compatibility Action. Replay an approved original artifact at its evaluated suite revision without passing model credentials, and retain its original download link and retention policy.

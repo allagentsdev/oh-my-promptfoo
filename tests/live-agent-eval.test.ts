@@ -142,3 +142,108 @@ test("authored artifact checks accept correct files and reject wrong content, na
     assert.equal(checkArtifact(content, { vars }).pass, false);
   }
 });
+
+test("invoice review grades captured findings, rejects false positives and preserves the three authored cases", async () => {
+  const suiteUrl = new URL(
+    "../packages/oh-my-promptfoo/evals/code-review/promptfooconfig.yaml",
+    import.meta.url,
+  );
+  const config = parse(await readFile(suiteUrl, "utf8"));
+  const { default: check } = await import(
+    new URL("../packages/oh-my-promptfoo/evals/code-review/check-findings.mjs", import.meta.url)
+      .href
+  );
+  for (const { vars } of config.tests) {
+    const findings = vars.expectedFindings.map((item: any) => ({
+      ...item,
+      summary: "The access rule is incomplete",
+      reproduction: "An unauthorized user can read an invoice",
+      fix: "Require tenant equality and the billing role",
+    }));
+    const context = {
+      vars,
+      providerResponse: {
+        metadata: {
+          fileChanges: {
+            status: "complete",
+            deletedFiles: [] as string[],
+            changedFiles: {
+              "review.json": {
+                kind: "file",
+                content: Buffer.from(JSON.stringify({ findings })).toString("base64"),
+              },
+            },
+          },
+        },
+      },
+    };
+    assert.equal(check("Narration is not evidence", context).pass, true);
+    context.providerResponse.metadata.fileChanges.deletedFiles.push("source/other-fixture.mjs");
+    assert.equal(check("I left the source unchanged", context).pass, false);
+    context.providerResponse.metadata.fileChanges.deletedFiles.length = 0;
+    context.providerResponse.metadata.fileChanges.changedFiles["review.json"].content = Buffer.from(
+      JSON.stringify({
+        findings: [
+          {
+            line: 99,
+            severity: "low",
+            summary: "A claimed defect",
+            reproduction: "A concrete but unrelated example",
+            fix: "A proposed change",
+          },
+        ],
+      }),
+    ).toString("base64");
+    assert.equal(check("Looks good", context).pass, false);
+    if (vars.expectedFindings.length === 0) {
+      context.providerResponse.metadata.fileChanges.changedFiles["review.json"].content =
+        Buffer.from(
+          JSON.stringify({
+            findings: [
+              {
+                line: 2,
+                severity: "high",
+                summary: "Missing tenant check",
+                reproduction: "An invoice in another tenant is readable",
+                fix: "Require tenant equality",
+              },
+            ],
+          }),
+        ).toString("base64");
+      assert.equal(check("A plausible false positive", context).pass, false);
+    }
+    assert.equal(check("I wrote a review", { vars }).pass, false);
+  }
+  assert.deepEqual(
+    await checkLiveAgentEval({
+      configPath: suiteUrl,
+      env,
+      fetcher: async () => Response.json({ data: [entry] }),
+    }),
+    [model],
+  );
+  const directory = await mkdtemp(join(tmpdir(), "omp-review-cardinality-"));
+  try {
+    config.providers = ["echo"];
+    config.defaultTest.assert = [
+      { type: "javascript", value: "Array.isArray(context.vars.expectedFindings)" },
+    ];
+    config.prompts = ["Offline case expansion"];
+    const path = join(directory, "suite.yaml");
+    await writeFile(path, stringify(config));
+    const run = await runEvaluation({
+      config: path,
+      outputDirectory: join(directory, "out"),
+      args: ["--no-cache"],
+    });
+    assert.equal(run.report.status, "pass");
+    assert.equal(run.report.cases.length, 3);
+    const rows = JSON.parse(await readFile(run.resultPath, "utf8")).results.results;
+    assert.deepEqual(
+      rows.map((item: any) => item.testCase.vars.expectedFindings),
+      config.tests.map((item: any) => item.vars.expectedFindings),
+    );
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+}, 120_000);

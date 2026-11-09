@@ -12,7 +12,22 @@ export const record = (value: unknown): Record<string, any> =>
 export interface ResultCost {
   usd: number | null;
   basis: "native" | "session" | "estimate" | "cache" | null;
+  unavailableReasons?: MeasurementUnavailableReason[];
 }
+
+export type MeasurementUnavailableReason =
+  | "not-reported"
+  | "provider-error"
+  | "grader-error"
+  | "evaluation-error"
+  | "incomplete-accounting"
+  | "pricing-unavailable";
+
+export const unknownCost = (reason: MeasurementUnavailableReason): ResultCost => ({
+  usd: null,
+  basis: null,
+  unavailableReasons: [reason],
+});
 
 /** Implements docs/copilot-cost-methodology.md using only prices recorded with a reply. */
 export function estimateCopilotCost(
@@ -75,7 +90,9 @@ export function estimateCopilotCost(
 export function responseCost(value: unknown, model: unknown, failed = false): ResultCost {
   const reply = record(value);
   const metadata = record(reply.metadata);
-  const unknown: ResultCost = { usd: null, basis: null };
+  const unknown = unknownCost(
+    failed ? "grader-error" : reply.error ? "provider-error" : "not-reported",
+  );
   if (failed) return unknown;
   // An authoritative attempt ledger takes precedence over the answering snapshot.
   if (metadata.judgeAccounting !== undefined) {
@@ -106,25 +123,37 @@ export function responseCost(value: unknown, model: unknown, failed = false): Re
           record(attempt).cached !== false || record(attempt).accounting !== undefined,
       )
     )
-      return unknown;
+      return unknownCost("incomplete-accounting");
   } else if (metadata.copilot !== undefined) {
     const accounting = readCopilotAccounting(record(metadata.copilot).accounting);
     const usd = accounting && copilotUsageValue(accounting);
     if (reply.cached === true) return { usd: 0, basis: "cache" };
-    return usd === undefined ? unknown : { usd, basis: "session" };
+    return usd === undefined ? unknownCost("incomplete-accounting") : { usd, basis: "session" };
   }
   if (reply.cached === true) return { usd: 0, basis: "cache" };
   if (metadata.copilotTokenPrices !== undefined) {
     const usd = estimateCopilotCost(reply.tokenUsage, metadata.copilotTokenPrices, model);
-    return usd === undefined ? unknown : { usd, basis: "estimate" };
+    return usd === undefined ? unknownCost("pricing-unavailable") : { usd, basis: "estimate" };
   }
   return safeMultiplier(reply.cost) ? { usd: reply.cost, basis: "native" } : unknown;
 }
 
 export function sumCosts(costs: ResultCost[]): ResultCost {
-  if (!costs.length || costs.some((cost) => cost.usd === null)) return { usd: null, basis: null };
+  if (!costs.length) return unknownCost("incomplete-accounting");
+  if (costs.some((cost) => cost.usd === null))
+    return {
+      usd: null,
+      basis: null,
+      unavailableReasons: [
+        ...new Set(
+          costs
+            .filter((cost) => cost.usd === null)
+            .flatMap((cost) => cost.unavailableReasons ?? ["not-reported" as const]),
+        ),
+      ],
+    };
   const usd = costs.reduce((sum, cost) => sum + cost.usd!, 0);
   return safeMultiplier(usd)
     ? { usd, basis: costs.some((cost) => cost.basis === "estimate") ? "estimate" : "native" }
-    : { usd: null, basis: null };
+    : unknownCost("incomplete-accounting");
 }

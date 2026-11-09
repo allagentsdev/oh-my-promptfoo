@@ -596,3 +596,56 @@ were inspected for this integration. They expose specific switches rather than a
 arbitrary native argument array, and remove the per-run JSON after their reporting.
 This Action therefore uses the public native CLI/JSON boundary directly; it
 does not import Promptfoo's evaluator, server or database internals.
+
+
+## Measurement notes and timing
+
+Unknown measurements remain unknown. Each test's expanded details explain whether
+usage/cost was not reported, the provider or grader errored, an accounting ledger
+was incomplete, or recorded pricing could not be matched. These are fixed diagnostic
+categories; raw provider errors and judge reasons remain private. A failed grader
+may have incurred spend even when its result contains synthetic zero tokens.
+Known deterministic checks still establish zero grader cost.
+
+The main results table is unchanged. A collapsed **Run timing** section reports
+CLI preparation, the native evaluation and reporting. When the public workspace
+progress channel is available, it also reports the sum of observed workspace
+preparation times, from provider case admission to workspace readiness (including
+queue waits). These phases overlap: native evaluation includes workspace
+preparation and grading. Do not add them together or compare the workspace sum to
+wall time under concurrency. Missing or unfinished workspace observations remain
+unknown. Caller preparation outside the Action is not included.
+
+The Action supplies its measured toolchain-preparation duration through
+`ALLAGENTS_EVAL_TOOLCHAIN_MS`; local runs omit that row unless the caller supplies
+an actual measured duration. This measures runtime preparation, including source
+checkout/install/build or installed-package verification; separate Node/pnpm setup
+steps and caller-owned installation are excluded. Replay reports its current
+runtime preparation and rendering duration in
+**Replay timing**. Recorded row latency, usage and costs remain historical; an old
+capture does not establish original toolchain or phase durations.
+
+### Realistic invoice-review dogfood
+
+The [invoice authorization suite](../packages/oh-my-promptfoo/evals/code-review/promptfooconfig.yaml)
+reviews two authorization regressions and a safe control. It stages only public,
+checked-in fixtures and a small review skill. Native skill-use and artifact checks
+are required alongside three workspace-grader criteria: diagnosis, reproduction
+and minimal fix. The authored threshold is 1. Source files must remain unchanged.
+
+Select `code-review` in the **Live agent dogfood** manual workflow. Both candidate
+and read-only grader use the `OPENROUTER_MODEL` repository variable (currently
+`deepseek/deepseek-v4.1-flash`) and the `OPENROUTER_API_KEY` secret. This is paid live
+evaluation; model availability and prices can change. No model is hardcoded in the
+shared Action. To inspect formatting later, choose replay, the same suite and the
+original completed run ID. The workflow checks out the evaluated revision and
+rejects a recording from another suite. Replay receives no model credentials.
+
+For local use with the pinned packages installed:
+
+```sh
+allagents-promptfoo eval --config packages/oh-my-promptfoo/evals/code-review/promptfooconfig.yaml --public-labels true -- --no-cache --max-concurrency 1
+```
+
+Keep scored answers and judge reasons in approved artifact storage. Only the
+sanitized report belongs in a public formatting preview.
