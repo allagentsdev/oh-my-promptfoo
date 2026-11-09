@@ -97,6 +97,70 @@ test("console and Markdown show authored score thresholds without overriding nat
   assert.ok(!privateText.includes("A required check") && !privateText.includes("PRIVATE_"));
 });
 
+test("public skill checks use target values after explicit metrics in Markdown and console", () => {
+  const checks = [
+    { type: "skill-used", value: "review-skill" },
+    { type: "not-skill-used", value: "unrelated-skill", metric: "  " },
+    { type: "skill-used", value: "hidden-by-metric", metric: "explicit-label" },
+    { type: "contains", value: "PRIVATE_EXPECTED" },
+    { type: "llm-rubric", value: "PRIVATE_RUBRIC" },
+    { type: "skill-used", value: ["PRIVATE_ARRAY"] },
+  ];
+  const input = document([
+    row({
+      gradingResult: {
+        pass: true,
+        score: 1,
+        componentResults: checks.map((check) => ({ pass: true, score: 1, assertion: check })),
+      },
+    }),
+    row({ testIdx: 1, testCase: { assert: checks }, gradingResult: undefined }),
+  ]);
+  const report = summarizeEvaluation(input, 0, { publicLabels: true });
+  for (const item of report.cases)
+    assert.deepEqual(
+      item.assertions.map((check) => check.label),
+      ["review-skill", "unrelated-skill", "explicit-label", undefined, undefined, undefined],
+    );
+  for (const text of [renderSummary(report), renderConsoleSummary(report)]) {
+    for (const name of [
+      "review-skill",
+      "unrelated-skill",
+      "explicit-label",
+      "Check 4",
+      "Check 5",
+      "Check 6",
+    ])
+      assert.ok(text.includes(name), name);
+    for (const value of ["hidden-by-metric", "PRIVATE_EXPECTED", "PRIVATE_RUBRIC", "PRIVATE_ARRAY"])
+      assert.ok(!text.includes(value), value);
+  }
+  assert.ok(!JSON.stringify(summarizeEvaluation(input, 0)).includes("review-skill"));
+});
+
+test("skill target labels use the existing credential redaction and output escaping", () => {
+  const input = document([
+    row({
+      gradingResult: {
+        pass: true,
+        score: 1,
+        componentResults: [
+          {
+            pass: true,
+            score: 1,
+            assertion: { type: "skill-used", value: "[review]|PRIVATE_CREDENTIAL" },
+          },
+        ],
+      },
+    }),
+  ]);
+  const report = summarizeEvaluation(input, 0, { publicLabels: true });
+  assert.ok(report.cases[0].assertions[0].label?.includes("[review]"));
+  assert.ok(!JSON.stringify(report).includes("PRIVATE_CREDENTIAL"));
+  assert.ok(renderSummary(report).includes("&#124;"));
+  assert.ok(!renderSummary(report).includes("| [review]|"));
+});
+
 test("console labels cannot emit modern or legacy workflow commands or terminal controls", () => {
   const input = document([
     row({ testCase: { description: "::error::unsafe ##[error] \u001b[31m" } }),

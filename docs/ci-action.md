@@ -132,8 +132,9 @@ labels it as recorded; it does not replay fabricated live-completion events.
 Tests restart at **1** in each suite card: **Test 6** is that
 suite's sixth evaluated result row. The same number appears in the results table
 and its expandable details. Checks use
-their authored metric names; only unnamed or duplicate metrics need a numbered
-fallback within that test. Separate candidates and repeats each get their own
+their authored metric names. When a metric is empty, `skill-used` and
+`not-skill-used` use their string skill target as the label; other unnamed checks
+use a numbered fallback within that test. Duplicate labels include a check number. Separate candidates and repeats each get their own
 result number. The JSON retains the native row/test/column mapping. These are
 report references, not case IDs or a selection language.
 
@@ -424,7 +425,8 @@ outcomes, native scores/thresholds, latency and measured usage and cost. Test
 numbers restart at 1 within each suite and use the one-based result row. Native
 row 1 is `results.results[0]`; the detailed test/column references are
 `testIdx + 1`/`promptIdx + 1`. Authored labels are omitted unless `public-labels`
-is enabled as described above. Other metadata, assertion values, answers, grader
+is enabled as described above. Public skill-check labels may use the authored
+skill target when no metric is set. Other metadata, assertion values, answers, grader
 reasons, generated files, provider IDs and credentials are omitted.
 Long summaries are bounded; `report.json` retains all sanitized outcomes. No public
 share, comment or artifact upload occurs by default. Only numeric progress and the sanitized

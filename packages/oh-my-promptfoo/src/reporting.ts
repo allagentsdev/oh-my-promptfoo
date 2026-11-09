@@ -149,11 +149,20 @@ function assertionReports(
   authored: unknown,
   label: (value: unknown) => string | undefined,
 ): AssertionReport[] {
+  const assertionLabel = (input: unknown): string | undefined => {
+    const assertion = record(input);
+    return (
+      label(assertion.metric) ??
+      (["skill-used", "not-skill-used"].includes(assertion.type)
+        ? label(assertion.value)
+        : undefined)
+    );
+  };
   const result: AssertionReport[] = [];
   const visit = (components: Record<string, any>[], prefix: string) => {
     components.forEach((component, index) => {
       const reference = `${prefix}${index + 1}`;
-      const metricLabel = label(record(component.assertion).metric);
+      const metricLabel = assertionLabel(component.assertion);
       result.push({
         reference,
         type: assertionType(label(record(component.assertion).type)),
@@ -169,7 +178,7 @@ function assertionReports(
   if (components.length) visit(components, "");
   else if (Array.isArray(authored))
     authored.forEach((input: unknown, index: number) => {
-      const metricLabel = label(record(input).metric);
+      const metricLabel = assertionLabel(input);
       result.push({
         reference: String(index + 1),
         type: assertionType(label(record(input).type)),
