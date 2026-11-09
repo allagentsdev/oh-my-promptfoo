@@ -242,8 +242,9 @@ parity with `llm-rubric`.
 
 ## Grading an agent's answer
 
-`llmAssert` sees only the final answer, never tool calls, commands or the
-workspace, and adds no rule of its own about narrated work. When the answer
+`llmAssert` defaults to `config.mode: rubric`: it grades the answer and any
+explicitly selected workspace evidence, without tool calls or commands.
+It adds no rule of its own about narrated work. When the answer
 comes from an agent, state the rule visibly in the suite's `rubricPrompt`:
 
 ```yaml
@@ -261,6 +262,18 @@ assert:
 Omit the rule when narrated actions are the expected output, such as a support
 bot replying "I've cancelled your order". To grade real edits, use `agentAssert`
 below or a JavaScript assertion that reads the workspace path.
+
+For semantic checks of the recorded run and answer together, set
+`llmAssert`'s `config.mode: trajectory` and suite `tracing.enabled: true`.
+All named criteria still share one judge request. For Copilot shell commands,
+add `tracing.commandToolNames: [bash, powershell]`. The separate untrusted
+trajectory summary contains names and available status, excludes arguments
+and returned content, and can omit middle steps. Use native skill checks and
+deterministic action checks for facts they establish; a trace cannot certify
+absence. Missing or empty traces fail before judging. `scoring` remains
+independent and binary by default. For summary limits, case-score normalization
+and a configuration example, read the
+[trajectory grading guide](../../docs/grading-guide.md#grade-a-recorded-trajectory).
 
 ## Grade workspace outcomes with an agent
 

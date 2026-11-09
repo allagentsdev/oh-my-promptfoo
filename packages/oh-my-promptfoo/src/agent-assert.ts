@@ -185,7 +185,7 @@ function boundedPrompt(
 /** Grade the retained case workspace with one read-only supported agent delegate. */
 export async function agentAssert(output: unknown, context?: AgentAssertionContext) {
   // Validate and render the same component contract before any workspace or paid work.
-  const rubric = prepareRubric(output, context, true);
+  const rubric = prepareRubric(output, context, { workspace: true });
   const config = context?.config;
   const timeoutMs = config?.timeoutMs ?? 120_000;
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0 || timeoutMs > 3_600_000)

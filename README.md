@@ -102,6 +102,11 @@ pinned Git and OCI sources, and larger runs.
   `llm-rubric`, but scores a whole list of named criteria at once, and each
   one shows up as its own score. Both rubric assertions default to binary
   scoring; set `config.scoring: graded` for partial credit or thresholds below 1.
+- **Grade recorded actions and the answer together.** Set `llmAssert`'s
+  `config.mode: trajectory` and enable tracing. It includes a separate tool-activity
+  summary while keeping one judge request for the whole batch. See the
+  [trajectory grading guide](https://github.com/allagentsdev/oh-my-promptfoo/blob/main/docs/grading-guide.md#grade-a-recorded-trajectory)
+  for evidence limits and configuration.
 - **Grade what the agent did, not what it says it did.** `agentAssert` sends a
   read-only agent into the workspace to check the changes. Turn on
   `fileChanges` to read them in your own JavaScript assertions.

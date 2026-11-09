@@ -74,34 +74,40 @@ test("default binary fallback and captured-byte integrity remain unchanged with 
     workspaceEvidence({ encodings: { "*.txt": "shift_jis" } }, corrupt),
   ).rejects.toThrow();
 });
-test("llmAssert judge receives selected captured contents and reports provenance", async () => {
-  const prompts: string[] = [];
-  const provider = {
-    id: () => "evidence-judge",
-    callApi: async (prompt: string) => {
-      prompts.push(prompt);
-      return {
-        output: JSON.stringify({
-          components: [{ metric: "file", score: 1, reason: "Captured text verified" }],
-        }),
-      };
-    },
-  };
-  const result = await llmAssert("claimed answer", {
-    ...context(),
-    config: {
-      provider,
-      workspaceEvidence: { files: ["file.txt"] },
-      components: [{ metric: "file", value: "File has the expected content" }],
-    },
-  });
-  expect(result).toMatchObject({
-    pass: true,
-    metadata: { workspaceEvidence: { includedPaths: ["file.txt"], truncated: false } },
-  });
-  expect(prompts[0]).toContain("captured final bytes");
-  expect(prompts[0]).toContain("Untrusted captured workspace evidence");
-});
+test.each(["rubric", "trajectory"] as const)(
+  "llmAssert %s judge receives selected captured contents and reports provenance",
+  async (mode) => {
+    const prompts: string[] = [];
+    const provider = {
+      id: () => "evidence-judge",
+      callApi: async (prompt: string) => {
+        prompts.push(prompt);
+        return {
+          output: JSON.stringify({
+            components: [{ metric: "file", score: 1, reason: "Captured text verified" }],
+          }),
+        };
+      },
+    };
+    const result = await llmAssert("claimed answer", {
+      ...context(),
+      trace: { traceId: "workspace-case", spans: [{ name: "execute_tool edit", startTime: 1 }] },
+      config: {
+        mode,
+        provider,
+        workspaceEvidence: { files: ["file.txt"] },
+        components: [{ metric: "file", value: "File has the expected content" }],
+      },
+    });
+    expect(result).toMatchObject({
+      pass: true,
+      metadata: { workspaceEvidence: { includedPaths: ["file.txt"], truncated: false } },
+    });
+    expect(prompts[0]).toContain("captured final bytes");
+    expect(prompts[0]).toContain("Untrusted captured workspace evidence");
+    expect(prompts[0].includes("<Trajectory>")).toBe(mode === "trajectory");
+  },
+);
 test("evidence budgets bound UTF-8 JSON, record omissions, and never split text unsafely", async () => {
   const evidence = await workspaceEvidence({ maxBytes: 512 }, context("雪".repeat(1000)));
   expect(Buffer.byteLength(evidence.block)).toBeLessThanOrEqual(512);

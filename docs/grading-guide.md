@@ -5,6 +5,8 @@ oh-my-promptfoo ships batched and workspace-aware Promptfoo assertions. `llmAsse
 criterion gets its own score in the results. `agentAssert` uses the same
 criteria format, but a read-only agent judge inspects the test's workspace,
 so it can grade what the agent changed rather than what it said.
+For batched grading of recorded tool activity and the answer together,
+use [`llmAssert` with `config.mode: trajectory`](#grade-a-recorded-trajectory).
 
 Both are referenced as JavaScript assertions:
 `package:oh-my-promptfoo/assertions:llmAssert` and
@@ -475,8 +477,9 @@ failure returned as a result is marked `metadata.graderError: true`.
 
 ## Grading an agent's answer
 
-`llmAssert` sees only the final answer, never the agent's tool calls, commands
-or workspace, and it adds no rule of its own about narrated work. When the
+With the default `config.mode: rubric`, `llmAssert` grades the final answer
+and any explicitly selected workspace evidence; it does not include tool calls
+or commands. It adds no rule of its own about narrated work. When the
 answer comes from an agent, state that rule in the suite's `rubricPrompt`,
 where anyone reading the config can see it:
 
@@ -495,6 +498,65 @@ assert:
 Leave the rule out when narrated actions are the expected output, such as a
 support bot replying "I've cancelled your order". To grade real edits, use
 `agentAssert` below or a JavaScript assertion that reads the workspace.
+
+## Grade a recorded trajectory
+
+Set `config.mode: trajectory` on `llmAssert` to grade each named criterion
+against the recorded run and final answer, using the same end-to-end-success
+approach as native `trajectory:goal-success`. All criteria still share one
+judge request and retain their individual verdicts, weights and thresholds.
+The default mode is `rubric`; existing configurations need no changes.
+
+Enable Promptfoo tracing in the suite and keep the existing grading provider:
+
+```yaml
+tracing:
+  enabled: true
+  commandToolNames: [bash, powershell] # include Copilot shell command text
+tests:
+  - vars:
+      task: Investigate the failing build by running npm test and explain the result.
+    assert:
+      - type: javascript
+        value: package:oh-my-promptfoo/assertions:llmAssert
+        config:
+          mode: trajectory
+          components:
+            - metric: test-invoked
+              value: Runs npm test during the investigation.
+            - metric: failure-reported
+              value: The answer acknowledges the recorded test-command failure.
+```
+
+The judge receives the unchanged answer in `<Output>`, named criteria in
+`<Rubric>`, and a separate untrusted summary in `<Trajectory>`. The system
+prompt asks for evidence of each outcome rather than accepting narrated
+execution claims. `config.rubricPrompt` remains additional instructions.
+Native-style summary extraction runs locally; it makes no extra judge request
+and uses no private Promptfoo imports. The summary is recorded in
+`metadata.renderedGradingPrompt` with the rest of the request.
+
+The summary includes step names, types and available status, with command text
+when the provider records it. It excludes tool arguments, returned results,
+message bodies and file contents. Consecutive equal steps collapse. Beyond
+24 compacted steps, it retains the first 12 and last 12 and an `omittedCount`
+marker. The summary covers the row trace, without selecting a subtree.
+Missing, empty or malformed traces return score 0 with
+`metadata.graderError: true` before calling a judge. A nonempty trace can still
+be incomplete: omitted or unrecorded steps never prove absence, and a tool
+invocation alone does not prove returned content or a final workspace state.
+
+`mode` and `scoring` are independent. Binary scoring remains the default;
+set `config.scoring: graded` for partial credit. Like existing rubric grading,
+a failed full-score bar retains any fractional score returned by the judge.
+Case thresholds still aggregate those scores; this mode does not normalize
+them into binary votes. Use Promptfoo's `assertScoringFunction` for a case
+policy that needs deterministic normalization.
+
+Use native skill checks for skill loads, deterministic tool/trajectory checks
+for exact recorded actions, and `workspaceEvidence` or `agentAssert` for file
+outcomes. `workspaceEvidence` can accompany trajectory mode. `agentAssert`
+retains its existing workspace-grading interface; `mode` is an `llmAssert` option.
 
 ## agentAssert: grade workspace changes with an agent
 

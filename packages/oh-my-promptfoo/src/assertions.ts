@@ -1,5 +1,6 @@
 import { JUDGE_LIST_ERROR, judgeName, loadJudge } from "./judge.js";
 import { type BatchedRubricConfig, gradeRubric, prepareRubric } from "./rubric-contract.js";
+import { summarizeTrajectory } from "./trajectory.js";
 import {
   type CapturedWorkspaceEvidence,
   EVIDENCE_RULE,
@@ -30,6 +31,8 @@ export {
 
 /** llmAssert's config: the rubric, and optionally this assertion's own judge. */
 export interface LlmAssertConfig extends BatchedRubricConfig {
+  /** Defaults to rubric; trajectory grades the recorded run and answer in one batch. */
+  mode?: "rubric" | "trajectory";
   /** A judge for this assertion only, in any shape `options.provider` takes. */
   provider?: unknown;
   workspaceEvidence?: WorkspaceEvidenceOption;
@@ -44,6 +47,8 @@ interface LlmAssertionContext {
     assert?: unknown;
   };
   providerResponse?: { metadata?: unknown };
+  /** Populated by Promptfoo when tracing is enabled, independently of candidate metadata. */
+  trace?: unknown;
   /** The provider under test; Promptfoo loads it with the eval's `config.basePath`. */
   provider?: { config?: { basePath?: unknown } };
 }
@@ -93,25 +98,30 @@ function judgeSpec(context: LlmAssertionContext | undefined): unknown {
 
 /** Score all named criteria with one judge request; every criterion must pass. */
 export async function llmAssert(output: unknown, context?: LlmAssertionContext) {
-  const rubric = prepareRubric(output, context);
+  const mode = context?.config?.mode;
+  if (mode !== undefined && mode !== "rubric" && mode !== "trajectory")
+    throw new Error("llmAssert config.mode must be 'rubric' or 'trajectory'");
+  const rubric = prepareRubric(output, context, { trajectory: mode === "trajectory" });
   const option = context?.config?.workspaceEvidence ?? context?.test?.options?.workspaceEvidence;
   let evidence: CapturedWorkspaceEvidence | undefined;
-  if (option !== undefined && option !== false) {
-    try {
+  try {
+    if (mode === "trajectory")
+      rubric.user += `\n<Trajectory>\n${summarizeTrajectory(context?.trace)}\n</Trajectory>`;
+    if (option !== undefined && option !== false) {
       evidence = await workspaceEvidence(option, context);
-    } catch (cause) {
-      return {
-        pass: false,
-        score: 0,
-        reason: cause instanceof Error ? cause.message : String(cause),
-        namedScores: {},
-        namedScoreWeights: {},
-        componentResults: [],
-        metadata: { graderError: true as const },
-      };
+      rubric.system += `\n\n${EVIDENCE_RULE}`;
+      rubric.user += `\n\n${evidence.block}`;
     }
-    rubric.system += `\n\n${EVIDENCE_RULE}`;
-    rubric.user += `\n\n${evidence.block}`;
+  } catch (cause) {
+    return {
+      pass: false,
+      score: 0,
+      reason: cause instanceof Error ? cause.message : String(cause),
+      namedScores: {},
+      namedScoreWeights: {},
+      componentResults: [],
+      metadata: { graderError: true as const },
+    };
   }
   const spec = judgeSpec(context);
   // Promptfoo gives every provider it loads the eval's base path, the directory its own

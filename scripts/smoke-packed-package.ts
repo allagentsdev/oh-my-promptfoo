@@ -33,7 +33,7 @@ const copilotConfig: Providers.CopilotSdkConfig = {working_dir: '.', inputFormat
 const agentId: string = agent.id();
 const reply: Promise<unknown> = agent.callApi('prompt', undefined, options);
 const copilotReply: Promise<unknown> = copilot.callApi('prompt', undefined, options);
-const rubric: Assertions.LlmAssertConfig = {components: [{metric: 'quality', value: 'Check answer'}]};
+const rubric: Assertions.LlmAssertConfig = {mode: 'trajectory', components: [{metric: 'quality', value: 'Check run and answer'}]};
 const assertion: Promise<unknown> = Assertions.llmAssert('answer', {config: rubric});
 const agentAssertion: Promise<unknown> = Assertions.agentAssert('answer');
 const selector: Assertions.ToolAssertionConfig = {name: {regex: '^read$'}, argumentsMatch: {path: '/path', regex: 'README'}, before: {name: 'write'}};
@@ -62,6 +62,8 @@ const invalidChatFormat: Providers.CopilotSdkConfig = {working_dir: '.', inputFo
 const invalidDelegateFormat: Providers.AgentConfig = {delegate: {id: 'copilot-sdk', config: {inputFormat: 'yaml'}}, workspace: {sources: []}};
 // @ts-expect-error A rubric metric must be named with a string.
 const invalidComponent: Assertions.RubricComponent = {metric: 42, value: 'Check answer'};
+// @ts-expect-error llmAssert modes are rubric or trajectory.
+const invalidMode: Assertions.LlmAssertConfig = {mode: 'goal-success', components: []};
 // @ts-expect-error The fallback chain must be a list.
 const invalidFallback: Providers.FallbackConfig = {providers: 'invalid'};
 `;
@@ -253,6 +255,23 @@ for(const entry of [InventoryAssertions,c]){
     const grade=entry[name]('answer',{...context,providerResponse:{metadata:{toolInventory:{...complete,status:'incomplete',incompleteReasons:['missing-tool-completion']}}}});
     assert.equal(grade.pass,false);assert.equal(grade.metadata.graderError,true);
   }
+  const trajectoryPrompts=[];
+  const trajectoryJudge={id:()=>'packed-trajectory',callApi:async prompt=>{
+    trajectoryPrompts.push(JSON.parse(prompt));
+    return {output:JSON.stringify({components:[{metric:'run',score:1,reason:'Observed test command'}]})};
+  }};
+  const traceId='a'.repeat(32);
+  const trace={traceId,evaluationId:'packed',testCaseId:'case',spans:[{spanId:'b'.repeat(16),name:'exec npm test',startTime:1,attributes:{'codex.command':'npm test'}}]};
+  const trajectoryConfig={mode:'trajectory',components:[{metric:'run',value:'Runs npm test'}]};
+  const trajectoryGrade=await entry.llmAssert('candidate answer',{config:trajectoryConfig,trace,test:{options:{provider:trajectoryJudge}}});
+  assert.equal(trajectoryGrade.pass,true);
+  assert.equal(trajectoryPrompts.length,1);
+  assert.match(trajectoryPrompts[0][0].content,/end-to-end success/);
+  assert.match(trajectoryPrompts[0][1].content,/<Trajectory>/);
+  const packageGrade=await nativeAssertions.runAssertion({assertion:{type:'javascript',value:'package:oh-my-promptfoo/assertions:llmAssert',config:trajectoryConfig},test:{options:{provider:trajectoryJudge}},providerResponse:{output:'candidate answer'},traceId,traceData:trace});
+  assert.equal(packageGrade.pass,true);
+  assert.equal(trajectoryPrompts.length,2);
+  assert.match(trajectoryPrompts[1][1].content,/<Trajectory>/);
 }
 const invalidAgent={config:{components:[],grader:{id:'copilot-sdk'}}};
 for(const assertion of [agentAssert,c.agentAssert])await assert.rejects(assertion('answer',invalidAgent),/unique named components/);
