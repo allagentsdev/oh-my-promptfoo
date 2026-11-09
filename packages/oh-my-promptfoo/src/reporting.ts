@@ -62,7 +62,7 @@ export interface ReportOptions {
   suiteNumber?: number;
   /** Checked-in source context for links; only used with publicLabels. */
   source?: SourceOptions;
-  /** Publish authored descriptions, provider labels and assertion metrics/types. Defaults to false. */
+  /** Publish authored case IDs/descriptions, provider labels and assertion metrics/types. Defaults to false. */
   publicLabels?: boolean;
   /** Additional credential values to redact from explicitly public labels. */
   sensitiveValues?: string[];
@@ -219,7 +219,7 @@ function graderMeasurements(grade: unknown, failed: boolean): { cost: ResultCost
               },
               typeof judge === "string" && judge.startsWith("copilot:")
                 ? judge.slice(8)
-                : undefined,
+                : metadata.model,
             ),
             usage: usage(component.tokensUsed),
           },
@@ -302,7 +302,7 @@ export function summarizeEvaluation(
     counts[status]++;
     const grader = graderMeasurements(row.gradingResult, hasError);
     const provider = record(row.provider).id;
-    const testLabel = label(test.description);
+    const testLabel = label(record(test.metadata).id) ?? label(test.description);
     const candidateLabel = label(record(row.provider).label);
     return {
       row: index + 1,
@@ -458,7 +458,10 @@ export function renderSummary(report: EvaluationReport): string {
   };
   let truncated = false;
   for (const item of report.cases) {
-    const checks = item.assertions.filter((check) => !check.reference.includes("."));
+    const parents = new Set(
+      item.assertions.map((check) => check.reference.split(".").slice(0, -1).join(".")),
+    );
+    const checks = item.assertions.filter((check) => !parents.has(check.reference));
     const tokens = sumUsage([item.candidateUsage, item.graderUsage]).total;
     if (
       !add(
