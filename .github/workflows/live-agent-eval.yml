@@ -108,7 +108,7 @@ jobs:
           OPENROUTER_API_KEY: ${{ inputs.execution-mode != 'replay' && secrets.OPENROUTER_API_KEY || '' }}
       - name: Run the fixed live agent suite and summarize
         id: eval
-        uses: allagentsdev/oh-my-promptfoo-action@1d83ead4e597f1067500540a1936c5d2d6a8a70f
+        uses: allagentsdev/oh-my-promptfoo-action@94394f530ac4baef73035c6ea064d7b78388afb4
         env:
           OPENROUTER_API_KEY: ${{ inputs.execution-mode != 'replay' && secrets.OPENROUTER_API_KEY || '' }}
           DOGFOOD_REPOSITORY: file://${{ github.workspace }}
