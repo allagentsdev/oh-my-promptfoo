@@ -168,7 +168,8 @@ Readable authored labels are opt-in:
 ```
 
 `public-labels: 'true'` publishes the native config's `description`, each test's
-`description`, provider `label`, assertion `metric` and assertion `type`. Enable
+`metadata.id` (falling back to its `description`), provider `label`, assertion `metric`
+and assertion `type`. Enable
 it only for labels approved for the summary's audience. Labels are bounded, escaped and redacted
 using known config/environment credential values. The default is `false`; raw
 answers, assertion values, grader reasons, generated files and provider IDs are

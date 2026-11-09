@@ -30,6 +30,8 @@
 
 ### Bug Fixes
 
+- Count nested assertion criteria in summary pass counts while retaining aggregate outcomes in the details. Prefer approved stable test IDs in numbered links, and use native rubric response model metadata with the existing recorded-price helper for grader cost estimates; absent or mismatched measurements remain unknown.
+
 - Put the required release regression and its tests in `examples/ci/release/promptfooconfig.yaml`, so numbered test links open the complete test block in the suite configuration.
 
 - Publish the local release suite and saved live preview sequentially in separate named jobs so the required suite card appears first, including when its evaluation fails.

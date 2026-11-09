@@ -311,6 +311,7 @@ test("batch diagnostic children are shown once and do not duplicate judge spend"
   assert.equal(report.cases[0].assertions.length, 3);
   assert.equal(report.totals.graderCost.usd, 0.2);
   assert.equal(report.totals.graderUsage.total, 110);
+  assert.ok(renderSummary(report).includes("| 1 / 2 |"));
   const unknown = summarizeEvaluation(
     document([
       row({
@@ -328,6 +329,55 @@ test("batch diagnostic children are shown once and do not duplicate judge spend"
     ]),
   );
   assert.equal(unknown.totals.graderCost.usd, null);
+});
+
+test("native rubric prices use the recorded response model and keep mismatches unknown", () => {
+  const input = document([
+    row({
+      gradingResult: {
+        pass: true,
+        score: 1,
+        componentResults: [
+          {
+            ...assertion(),
+            assertion: { type: "llm-rubric", metric: "answer-quality" },
+            tokensUsed: usage,
+            metadata: { model: "fixture", copilotTokenPrices: prices },
+          },
+        ],
+      },
+    }),
+  ]);
+  const report = summarizeEvaluation(input, 0, { publicLabels: true });
+  assert.equal(report.totals.graderCost.usd, estimateCopilotCost(usage, prices, "fixture"));
+  assert.equal(report.totals.graderCost.basis, "estimate");
+  assert.ok(renderSummary(report).includes("~$0.0001"));
+  input.results.results[0].gradingResult.componentResults[0].metadata.model = "another-model";
+  assert.equal(summarizeEvaluation(input, 0).totals.graderCost.usd, null);
+  delete input.results.results[0].gradingResult.componentResults[0].metadata.model;
+  assert.equal(summarizeEvaluation(input, 0).totals.graderCost.usd, null);
+});
+
+test("public case IDs label numbered links while private reports omit them", () => {
+  const input = document([
+    row({
+      testCase: { description: "A longer human description", metadata: { id: "release-case-7" } },
+    }),
+  ]);
+  const report = summarizeEvaluation(input, 0, { publicLabels: true });
+  report.cases[0].source = {
+    url: "https://github.com/ExampleOrg/example/blob/abc/evals/suite.yaml#L4-L12",
+    location: "test",
+  };
+  assert.ok(renderSummary(report).includes("[Test 1 · release-case-7]"));
+  assert.ok(renderConsoleSummary(report).includes("Test 1 · release-case-7"));
+  assert.ok(!JSON.stringify(summarizeEvaluation(input, 0)).includes("release-case-7"));
+  input.results.results[0].testCase.metadata.id = "PRIVATE_CREDENTIAL";
+  assert.ok(
+    !JSON.stringify(summarizeEvaluation(input, 0, { publicLabels: true })).includes(
+      "PRIVATE_CREDENTIAL",
+    ),
+  );
 });
 
 test("large summaries are bounded while normalized outcomes stay complete", () => {
