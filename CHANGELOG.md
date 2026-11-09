@@ -71,6 +71,12 @@
 - Exercise MCP candidate execution and packed consumers with pinned Git fixtures on all platforms; retain the Linux-specific protected local-source case.
 - Extend native-authoring Copilot examples and packed-consumer coverage with three generated turns, interleaved conversation IDs, JSON/YAML files, simplified/shared fixtures, full-prompt versus input/output replay, embedded/literal JSON, `storeOutputAs`, and transform-before-storage variable use on both public providers. Verify the real SDK/CLI local-fixture matrix on stock Promptfoo `0.122.1`, `0.124.1` and `0.125.1`; distinguish engine/provider/SDK provenance, preserve returned-error workspace retention, and isolate the native renderer's literal-block-tag limitation. Deterministic SDK receipts alone do not claim runtime/model proof.
 
+## [1.30.2](https://github.com/allagentsdev/oh-my-promptfoo/compare/v1.30.1...v1.30.2) (2026-11-09)
+
+### Bug Fixes
+
+- label unnamed skill checks with their target ([#195](https://github.com/allagentsdev/oh-my-promptfoo/issues/195)) ([b189c9f](https://github.com/allagentsdev/oh-my-promptfoo/commit/b189c9fde3a21182bd6a29a5f7583d954a4b06d3))
+
 ## [1.30.1](https://github.com/allagentsdev/oh-my-promptfoo/compare/v1.30.0...v1.30.1) (2026-11-09)
 
 ### Bug Fixes
