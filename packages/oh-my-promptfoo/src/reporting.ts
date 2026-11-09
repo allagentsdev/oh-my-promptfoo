@@ -42,6 +42,7 @@ export interface CaseReport {
 }
 export interface EvaluationReport {
   version: 1;
+  replayed?: true;
   suite?: { number: number; title?: string };
   status: Outcome;
   issues: string[];
@@ -421,6 +422,12 @@ export function renderSummary(report: EvaluationReport): string {
   const lines = [
     `## Evals — ${badge(report.status)}`,
     "",
+    ...(report.replayed
+      ? [
+          "**Replay — recorded evaluation.** No candidate or grader calls were made. Scores, latency, usage and cost describe the recorded run.",
+          "",
+        ]
+      : []),
     "| Metric | Value |",
     "| --- | --- |",
     ...(sharedCandidate ? [`| Candidate | ${escapeMarkup(candidate)} |`] : []),
@@ -524,6 +531,11 @@ export function renderConsoleSummary(report: EvaluationReport): string {
   const { number, score, time, usageSummary } = formats;
   const money = (cost: ResultCost) => formats.money(cost).replace("&lt;", "<");
   const lines = [
+    ...(report.replayed
+      ? [
+          "Replay: recorded evaluation; no candidate or grader calls. Scores, latency, usage and cost are historical.",
+        ]
+      : []),
     `${consoleLabel(report.suite?.title ?? "Promptfoo evaluation")} · ${report.status.toUpperCase()}`,
     `Tests: ${report.cases.length}; passed: ${report.counts.pass}; failed: ${report.counts.fail}; errors: ${report.counts.error}; unknown outcomes: ${report.counts.unknown}`,
     `Agent: ${usageSummary(report.totals.candidateUsage)}; cost: ${money(report.totals.candidateCost)}; total agent time: ${time(report.totals.latencyMs)}`,

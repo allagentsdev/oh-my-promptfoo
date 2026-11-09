@@ -228,6 +228,7 @@ async function finish(run: EvaluationRun, github: boolean): Promise<EvaluationRu
         "summary-path": run.summaryPath,
         "evaluation-status": run.report.status,
         "evaluation-exit-code": run.exitCode === null ? "unknown" : String(run.exitCode),
+        replayed: String(run.report.replayed === true),
       };
       for (const [name, value] of Object.entries(outputs)) {
         const delimiter = randomUUID();
@@ -243,6 +244,37 @@ async function finish(run: EvaluationRun, github: boolean): Promise<EvaluationRu
   return run;
 }
 
+async function discoverSource(
+  config: string | undefined,
+  cwd: string,
+  reporting: ReportOptions,
+  github: boolean,
+): Promise<void> {
+  if (
+    !config ||
+    !github ||
+    !reporting.publicLabels ||
+    reporting.source ||
+    !process.env.GITHUB_REPOSITORY
+  )
+    return;
+  try {
+    const repositoryRoot = process.env.GITHUB_WORKSPACE || cwd;
+    const { stdout } = await promisify(execFile)("git", [
+      "-C",
+      repositoryRoot,
+      "rev-parse",
+      "HEAD",
+    ]);
+    reporting.source = {
+      configPath: resolve(cwd, config),
+      repositoryRoot,
+      repositoryUrl: `${process.env.GITHUB_SERVER_URL || "https://github.com"}/${process.env.GITHUB_REPOSITORY}`,
+      revision: stdout.trim(),
+    };
+  } catch {}
+}
+
 /** Run one authored config through the installed peer's native CLI, retaining output on failure. */
 export async function runEvaluation(options: EvaluationOptions): Promise<EvaluationRun> {
   const cwd = resolve(options.workingDirectory || process.cwd());
@@ -253,28 +285,7 @@ export async function runEvaluation(options: EvaluationOptions): Promise<Evaluat
     const args = options.args === undefined ? [] : options.args;
     const config = resolve(cwd, options.config);
     if (!(await stat(config)).isFile()) throw new Error("One local config file is required");
-    if (
-      options.github &&
-      options.publicLabels &&
-      !reporting.source &&
-      process.env.GITHUB_REPOSITORY
-    ) {
-      try {
-        const repositoryRoot = process.env.GITHUB_WORKSPACE || cwd;
-        const { stdout } = await promisify(execFile)("git", [
-          "-C",
-          repositoryRoot,
-          "rev-parse",
-          "HEAD",
-        ]);
-        reporting.source = {
-          configPath: config,
-          repositoryRoot,
-          repositoryUrl: `${process.env.GITHUB_SERVER_URL || "https://github.com"}/${process.env.GITHUB_REPOSITORY}`,
-          revision: stdout.trim(),
-        };
-      } catch {}
-    }
+    await discoverSource(config, cwd, reporting, options.github === true);
     const executable = await promptfooExecutable();
     const environment = {
       ...process.env,
@@ -356,13 +367,28 @@ export async function runEvaluation(options: EvaluationOptions): Promise<Evaluat
 export async function reportEvaluation(
   resultPath: string,
   outputDirectory: string,
-  options: ReportOptions = {},
+  options: ReportOptions & {
+    replay?: boolean;
+    github?: boolean;
+    config?: string;
+    workingDirectory?: string;
+  } = {},
 ): Promise<EvaluationRun> {
+  const cwd = resolve(options.workingDirectory || process.cwd());
   const reporting = reportingOptions(options);
-  const run = await files(resolve(outputDirectory), reporting);
-  run.resultPath = resolve(resultPath);
+  const run = await files(resolve(cwd, outputDirectory), reporting);
+  run.resultPath = resolve(cwd, resultPath);
+  await writeFile(
+    run.logPath,
+    options.replay
+      ? "Replayed a recorded native result; no candidate or grader calls.\n"
+      : "Rendered a native result export.\n",
+    { mode: 0o600 },
+  );
+  await discoverSource(options.config, cwd, reporting, options.github === true);
   await readResults(run, reporting);
-  return finish(run, false);
+  if (options.replay) run.report.replayed = true;
+  return finish(run, options.github === true);
 }
 
 export async function evaluationCommand(command: "eval" | "report", args: string[]): Promise<void> {
@@ -371,16 +397,21 @@ export async function evaluationCommand(command: "eval" | "report", args: string
   const native = separator < 0 ? [] : args.slice(separator + 1);
   const values = new Map<string, string>();
   let github = false;
+  let replay = false;
   const valid =
     command === "eval"
       ? new Set(["--config", "--output-dir", "--working-directory", "--args-json", "--args-file"])
-      : new Set(["--results", "--output-dir"]);
+      : new Set(["--results", "--output-dir", "--config", "--working-directory"]);
   valid.add("--suite-number");
   valid.add("--public-labels");
   for (let i = 0; i < own.length; i++) {
     const option = own[i];
-    if (option === "--github" && command === "eval") {
+    if (option === "--github") {
       github = true;
+      continue;
+    }
+    if (option === "--replay" && command === "report") {
+      replay = true;
       continue;
     }
     if (!valid.has(option) || values.has(option) || own[i + 1] === undefined)
@@ -434,7 +465,13 @@ export async function evaluationCommand(command: "eval" | "report", args: string
   } else {
     const results = values.get("--results");
     if (!results || native.length) throw new Error("One native result is required");
-    run = await reportEvaluation(results, output, reporting);
+    run = await reportEvaluation(results, output, {
+      ...reporting,
+      replay,
+      github,
+      config: values.get("--config"),
+      workingDirectory: values.get("--working-directory"),
+    });
   }
   console.log(renderConsoleSummary(run.report));
   console.log(

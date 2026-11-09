@@ -1,5 +1,65 @@
 # Native Promptfoo CI and local reporting
 
+## Replay a recorded result locally
+
+Use the scored-result JSON downloaded from an approved live run to check reporting
+without making candidate or grader calls:
+
+```sh
+allagents-promptfoo report --replay --results /private/scored-results.json --output-dir .promptfoo-ci
+```
+
+Replay reads the saved native export and uses the same reporting/accounting
+helpers as a live evaluation. It does not load the config, rerun assertions,
+invoke providers or reconstruct a workspace. Scores, assertion outcomes, latency,
+usage and costs describe the recorded run, including unknown measurements. Each
+summary and console report identifies the run as **Replay — recorded evaluation**.
+It is a formatting check, not a fresh release gate. Preserve the original capture
+in the calling repository's approved storage; raw captures are not committed to
+this public repository.
+
+The CLI can also publish a replay summary and outputs in GitHub with `--github`.
+Pass `--config` and `--working-directory` for source links, and check out the
+recorded suite revision so links describe the evaluated definitions. Replay
+returns `replayed=true` and an unknown native CLI exit code because no native CLI
+ran. Native per-case failures, grader/provider errors, invalid files and zero
+coverage still produce a failing replay status. For exports without their
+original process exit code, the existing conservative report-only gate applies.
+
+### Select replay in GitHub Actions
+
+The shared Action accepts the same capture at runtime:
+
+```yaml
+- uses: allagentsdev/oh-my-promptfoo-action@<reviewed-commit>
+  with:
+    execution-mode: replay
+    replay-results: .recording/scored-results.json
+    config: evals/release/promptfooconfig.yaml
+    public-labels: "true"
+```
+
+Download the capture from the calling repository's approved storage before this
+step. Replay renders the complete export: leave `args-json` as `[]` and omit
+`args-file`. Invalid inputs or missing captures fail without falling back to live
+calls. Result uploads remain opt-in.
+
+For this repository, open **Actions → Live agent dogfood → Run workflow**, choose
+`replay`, and enter the original completed live run ID in `recording-run-id`.
+For example, `42458802204` is a six-case live agent evaluation. The workflow reads
+that run's scored-result artifact using the caller's `actions: read` permission,
+checks out its original suite revision, and renders it without passing the
+OpenRouter secret or installing the caller's provider/grader package. It links
+the original artifact rather than uploading another copy. The capture must still
+exist within its original retention period.
+
+Choose `live` with an empty recording ID to run the fixed agent suite again.
+Live runs require the `OPENROUTER_API_KEY` repository secret and the
+`OPENROUTER_MODEL` repository variable and can incur model charges. Replay's
+historical accounting is not new spend or savings.
+
+## Native evaluation
+
 The reusable root-level Action lives in
 [`allagentsdev/oh-my-promptfoo-action`](https://github.com/allagentsdev/oh-my-promptfoo-action).
 This package owns its public local `eval`/`report` CLI, providers, graders and

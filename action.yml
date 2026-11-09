@@ -8,6 +8,12 @@ inputs:
   config:
     description: One local Promptfoo config file, relative to working-directory
     required: true
+  execution-mode:
+    description: live evaluates; replay renders a saved scored result without model calls
+    default: live
+  replay-results:
+    description: Native scored-result JSON relative to working-directory; required only for replay
+    default: ""
   args-json:
     description: Public JSON array of native argument strings; GitHub may print
       literal inputs before execution
@@ -44,6 +50,9 @@ inputs:
       this invocation
     default: ""
 outputs:
+  replayed:
+    description: Whether this report uses a recorded evaluation instead of new model calls
+    value: ${{ steps.eval.outputs.replayed }}
   result-artifact-url:
     description: Download URL after an explicitly enabled upload succeeds; empty otherwise
     value: ${{ steps.eval.outputs.result-artifact-url }}
@@ -80,9 +89,11 @@ runs:
   using: composite
   steps:
     - id: eval
-      uses: allagentsdev/oh-my-promptfoo-action@26de8c8bd12948f9ad9b06335fc1fbe4d5b1fe04
+      uses: allagentsdev/oh-my-promptfoo-action@1d83ead4e597f1067500540a1936c5d2d6a8a70f
       with:
         config: ${{ inputs.config }}
+        execution-mode: ${{ inputs.execution-mode }}
+        replay-results: ${{ inputs.replay-results }}
         args-json: ${{ inputs.args-json }}
         args-file: ${{ inputs.args-file }}
         working-directory: ${{ inputs.working-directory }}
