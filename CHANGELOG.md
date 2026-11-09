@@ -69,17 +69,16 @@
 
 ## [1.30.0](https://github.com/allagentsdev/oh-my-promptfoo/compare/v1.29.0...v1.30.0) (2026-11-09)
 
-
 ### Features
 
-* **ci:** run native suites with local and shared CI reports ([#185](https://github.com/allagentsdev/oh-my-promptfoo/issues/185)) ([6c2b3c7](https://github.com/allagentsdev/oh-my-promptfoo/commit/6c2b3c7ff0ee1be47c1a6369c934e1f124fe1743))
-* replay evaluation reports without model calls ([#192](https://github.com/allagentsdev/oh-my-promptfoo/issues/192)) ([833e280](https://github.com/allagentsdev/oh-my-promptfoo/commit/833e2808301159deb7281fa33d08d15f904a48bc))
+- **ci:** run native suites with local and shared CI reports ([#185](https://github.com/allagentsdev/oh-my-promptfoo/issues/185)) ([6c2b3c7](https://github.com/allagentsdev/oh-my-promptfoo/commit/6c2b3c7ff0ee1be47c1a6369c934e1f124fe1743))
+- replay evaluation reports without model calls ([#192](https://github.com/allagentsdev/oh-my-promptfoo/issues/192)) ([833e280](https://github.com/allagentsdev/oh-my-promptfoo/commit/833e2808301159deb7281fa33d08d15f904a48bc))
 
 
 ### Bug Fixes
 
-* **deps:** migrate OpenTelemetry 3 and preserve trace compatibility ([#181](https://github.com/allagentsdev/oh-my-promptfoo/issues/181)) ([7906e0f](https://github.com/allagentsdev/oh-my-promptfoo/commit/7906e0fe7ed44ce5650e2e28ec31239d430a42dc))
-* **deps:** update supported Copilot and Pi SDK peers ([#182](https://github.com/allagentsdev/oh-my-promptfoo/issues/182)) ([fb91f79](https://github.com/allagentsdev/oh-my-promptfoo/commit/fb91f79cc8428b691ce7202ee02084aa369b835a))
+- **deps:** migrate OpenTelemetry 3 and preserve trace compatibility ([#181](https://github.com/allagentsdev/oh-my-promptfoo/issues/181)) ([7906e0f](https://github.com/allagentsdev/oh-my-promptfoo/commit/7906e0fe7ed44ce5650e2e28ec31239d430a42dc))
+- **deps:** update supported Copilot and Pi SDK peers ([#182](https://github.com/allagentsdev/oh-my-promptfoo/issues/182)) ([fb91f79](https://github.com/allagentsdev/oh-my-promptfoo/commit/fb91f79cc8428b691ce7202ee02084aa369b835a))
 
 ## [1.29.0](https://github.com/allagentsdev/oh-my-promptfoo/compare/v1.28.1...v1.29.0) (2026-11-05)
 
