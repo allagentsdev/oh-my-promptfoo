@@ -71,10 +71,9 @@
 
 ## [1.30.1](https://github.com/allagentsdev/oh-my-promptfoo/compare/v1.30.0...v1.30.1) (2026-11-09)
 
-
 ### Bug Fixes
 
-* report native evaluation checks and costs accurately ([#193](https://github.com/allagentsdev/oh-my-promptfoo/issues/193)) ([fc9c998](https://github.com/allagentsdev/oh-my-promptfoo/commit/fc9c998755642cd98d3a526fa84ab8f2838b0318))
+- report native evaluation checks and costs accurately ([#193](https://github.com/allagentsdev/oh-my-promptfoo/issues/193)) ([fc9c998](https://github.com/allagentsdev/oh-my-promptfoo/commit/fc9c998755642cd98d3a526fa84ab8f2838b0318))
 
 ## [1.30.0](https://github.com/allagentsdev/oh-my-promptfoo/compare/v1.29.0...v1.30.0) (2026-11-09)
 
