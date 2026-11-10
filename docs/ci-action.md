@@ -45,8 +45,9 @@ step. Replay renders the complete export: leave `args-json` as `[]` and omit
 calls. Result uploads remain opt-in.
 
 For this repository, open **Actions → Live agent dogfood → Run workflow**, choose
-`replay`, and enter the original completed live run ID in `recording-run-id`.
-For example, `42458802204` is a six-case live agent evaluation. The workflow reads
+`replay`, select the original suite, and enter its completed live run ID in
+`recording-run-id`. For example, choose `code-review` with `42723784266` for the
+three-case invoice review. The workflow reads
 that run's scored-result artifact using the caller's `actions: read` permission,
 checks out its original suite revision, and renders it without passing the
 OpenRouter secret or installing the caller's provider/grader package. It links
@@ -176,9 +177,9 @@ using known config/environment credential values. The default is `false`; raw
 answers, assertion values, grader reasons, generated files and provider IDs are
 never used as labels.
 
-For a formatting example before the live workflow is merged, the validation
-workflow publishes the local release suite and a clearly labelled recorded
-six-case agent run in separate named job cards. The recorded report comes from
+For a formatting example, the validation workflow publishes the local release
+suite and a clearly labelled recorded three-case invoice review in separate
+named job cards. The recorded report comes from
 [`examples/ci/live-report.json`](../examples/ci/live-report.json). It contains only
 the sanitized report and provenance of an actual model run. Its displayed
 failures are the recorded model results; previewing it makes no inference calls
@@ -238,13 +239,16 @@ so the live suite evaluates the reviewed implementation instead of an older
 registry release. The workflow explicitly builds the caller after installing its
 locked dependencies; the Action builds its own toolchain separately.
 
-The fixed suite in `packages/oh-my-promptfoo/evals/live/promptfooconfig.yaml`
-runs the real Pi SDK through OpenRouter. Both the candidate and read-only
+The default `code-review` choice runs the three-case
+[invoice authorization suite](../packages/oh-my-promptfoo/evals/code-review/promptfooconfig.yaml).
+The `repository-skill` choice runs the existing six-case suite in
+`packages/oh-my-promptfoo/evals/live/promptfooconfig.yaml`. Both use the real Pi SDK
+through OpenRouter. Both the candidate and read-only
 `agentAssert` grader use the repository variable **`OPENROUTER_MODEL`**. Set it to
 `deepseek/deepseek-v4.1-flash`, or another tool-capable model supported by the
 pinned SDK. The selected model may incur charges. Changing the variable affects
 the next manual run without changing the authored tasks or scoring. The report
-labels include the selected model. The suite stages the selected Git commit as a
+labels include the selected model. The repository-skill suite stages the selected Git commit as a
 protected source, loads the repository's `oh-my-promptfoo` skill,
 and asks the candidate to author configs and commands for real repository tasks:
 an exact-match smoke config, package provider/grader IDs, repeated metadata
@@ -474,8 +478,9 @@ Assertion/provider failures still fail the Action and retain/upload available
 results. Missing, unparseable or zero-row results never create a scored artifact.
 
 The fixed release example and manual live workflow explicitly enable uploads.
-The recorded agent preview has only a sanitized report, so it does not claim to
-offer original answers or judge reasons. A fresh manual live run produces them.
+The recorded preview commits only a sanitized report. Its download link points
+to the original run's approved scored artifact and works within that artifact's
+retention period; raw answers and judge reasons are not committed.
 
 Local callers can prepare the same redacted native export for their approved
 storage and render the link after upload:
