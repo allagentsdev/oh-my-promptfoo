@@ -79,17 +79,16 @@
 
 ## [1.31.0](https://github.com/allagentsdev/oh-my-promptfoo/compare/v1.30.2...v1.31.0) (2026-11-10)
 
-
 ### Features
 
-* explain eval measurements and preserve external run status ([#200](https://github.com/allagentsdev/oh-my-promptfoo/issues/200)) ([2c8757f](https://github.com/allagentsdev/oh-my-promptfoo/commit/2c8757f2b4fc673ab0df03317e1a424ea18c2bed))
+- explain eval measurements and preserve external run status ([#200](https://github.com/allagentsdev/oh-my-promptfoo/issues/200)) ([2c8757f](https://github.com/allagentsdev/oh-my-promptfoo/commit/2c8757f2b4fc673ab0df03317e1a424ea18c2bed))
 
   Report a current native export with its original process exit code without loading providers or rerunning graders. GitHub summaries explain unavailable measurements, show execution phases and use Candidate labels for any evaluation domain.
 
 
 ### Bug Fixes
 
-* use score label in test details ([#201](https://github.com/allagentsdev/oh-my-promptfoo/issues/201)) ([143e70b](https://github.com/allagentsdev/oh-my-promptfoo/commit/143e70b802ecd6eebb5bd091d959bb5f494f2a47))
+- use score label in test details ([#201](https://github.com/allagentsdev/oh-my-promptfoo/issues/201)) ([143e70b](https://github.com/allagentsdev/oh-my-promptfoo/commit/143e70b802ecd6eebb5bd091d959bb5f494f2a47))
 
 ## [1.30.2](https://github.com/allagentsdev/oh-my-promptfoo/compare/v1.30.1...v1.30.2) (2026-11-09)
 
