@@ -571,7 +571,7 @@ export function renderSummary(report: EvaluationReport): string {
     const detail = [
       `<details><summary>${title(item, true)} — ${badge(item.status)}</summary>`,
       "",
-      `Native score: **${score(item.score)}** · Candidate time: **${time(item.latencyMs)}**`,
+      `Score: **${score(item.score)}** · Candidate time: **${time(item.latencyMs)}**`,
       "",
       "| Role | Tokens | Requests | Cost |",
       "| --- | ---: | ---: | ---: |",
