@@ -4,6 +4,12 @@
 
 ### Features
 
+- Accept the original native CLI exit code when reporting an external evaluation. Preserve runtime failures and native pass-rate policy without rerunning providers, and use domain-neutral candidate labels in reports.
+
+- Explain unavailable usage and cost with safe diagnostic categories inside test details. Add collapsed, measured invocation timing without changing native scores, accounting values or the results table. Replay distinguishes current rendering time from historical model measurements.
+
+- Add a three-case invoice authorization code-review dogfood with a safe control, native skill/artifact checks and nested workspace grading. Select it in the manual live/replay workflow using the configurable OpenRouter model.
+
 - Replay saved native scored results for formatting checks through `allagents-promptfoo report --replay`, including GitHub summaries and failure outputs. Reuse recorded outcomes and measurements without loading candidate or grader providers; label all replay reports as historical.
 
 - Select live or replay at runtime in the manually triggered agent workflow and the compatibility Action. Replay an approved original artifact at its evaluated suite revision without passing model credentials, and retain its original download link and retention policy.
@@ -16,7 +22,7 @@
 
 - Stream numeric native test completions to CI/local consoles through Promptfoo's public hooks, preserving authored extensions and private logs. Print final sanitized assertion/accounting reports locally and in Actions; show authored overall score thresholds without changing native verdicts.
 
-- Make CI summaries readable with numbered tests within each suite, opt-in public authored labels, compact metrics/results tables and expandable assertions. Add a recorded six-task real agent example for reviewing the format before merge; preserve native scores and unknown measurements.
+- Make CI summaries readable with numbered tests within each suite, opt-in public authored labels, compact metrics/results tables and expandable assertions. Add a recorded real agent example for reviewing the format before merge; preserve native scores and unknown measurements.
 
 - Add manually triggered live dogfooding of the repository's skill, workspace Agent and read-only agentAssert through OpenRouter. Select both candidate and grader with the `OPENROUTER_MODEL` repository variable; keep the API key in a secret. Keep fixed native cases, exact artifact checks, model-availability preflight and sanitized Action reporting.
 

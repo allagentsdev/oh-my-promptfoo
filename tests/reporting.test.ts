@@ -88,7 +88,7 @@ test("console and Markdown show authored score thresholds without overriding nat
   assert.ok(markdown.includes("✅ PASS | 1 / 1 | 100% / — |"));
   assert.ok(consoleText.includes("Test 1 · A required check"));
   assert.ok(consoleText.includes("FAIL · 10 ms · score 95% / threshold 90%"));
-  assert.ok(consoleText.includes("Agent: unknown; cost: unknown"));
+  assert.ok(consoleText.includes("Candidate: unknown; cost: unknown"));
   assert.ok(
     !consoleText.includes("PRIVATE_ANSWER") && !consoleText.includes("PRIVATE_GRADER_REASON"),
   );
@@ -496,7 +496,7 @@ test("Evals titles reports and result numbers match the table and details", () =
   );
   assert.ok(comparison.includes("Test 6 · Repository task 6 (Other candidate)"));
   assert.ok(comparison.includes("Test 1 · Repository task 1 (Free candidate)"));
-  assert.ok(!comparison.includes("| Candidate |"));
+  assert.ok(!comparison.split("### Results")[0].includes("| Candidate |"));
   for (const suiteNumber of [0, -1, 1.5, Number.NaN, Number.MAX_SAFE_INTEGER + 1])
     assert.throws(() => summarizeEvaluation(input, 0, { suiteNumber }), /Suite number/);
 });
@@ -639,4 +639,42 @@ test("display rounding preserves native scores and never rounds a positive spend
     assert.ok(renderConsoleSummary(report).includes(formatted));
     assert.equal(report.cases[0].candidateCost.usd, usd);
   }
+});
+
+test("unavailable measurement notes explain missing data, failed graders and pricing without revealing raw reasons", () => {
+  const missing = summarizeEvaluation(document([row()]), 0);
+  assert.deepEqual(missing.cases[0].candidateCost.unavailableReasons, ["not-reported"]);
+  assert.equal(missing.cases[0].candidateCost.usd, null);
+  const markdown = renderSummary(missing);
+  assert.ok(markdown.includes("Candidate cost: not reported"));
+  assert.ok(markdown.indexOf("Candidate cost: not reported") > markdown.indexOf("<details>"));
+  const failed = summarizeEvaluation(
+    document([
+      row({
+        gradingResult: {
+          pass: false,
+          score: 0,
+          reason: "PRIVATE_GRADER_REASON",
+          metadata: { graderError: true },
+          tokensUsed: { total: 0, cost: 0 },
+        },
+      }),
+    ]),
+    0,
+  );
+  assert.equal(failed.status, "error");
+  assert.equal(failed.totals.graderCost.usd, null);
+  assert.deepEqual(failed.cases[0].graderCost.unavailableReasons, ["grader-error"]);
+  const rendered = renderSummary(failed) + renderConsoleSummary(failed);
+  assert.ok(rendered.includes("grader error; spend may have occurred"));
+  assert.ok(!rendered.includes("PRIVATE_"));
+  assert.deepEqual(
+    responseCost({ metadata: { copilotTokenPrices: {} } }, "mismatch").unavailableReasons,
+    ["pricing-unavailable"],
+  );
+  assert.deepEqual(
+    responseCost({ metadata: { copilot: { accounting: {} } } }, "fixture").unavailableReasons,
+    ["incomplete-accounting"],
+  );
+  assert.deepEqual(responseCost({ cost: 0 }, undefined), { usd: 0, basis: "native" });
 });

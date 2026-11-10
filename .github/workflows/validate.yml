@@ -24,7 +24,7 @@ jobs:
           ARTIFACT_URL: ${{ steps.eval.outputs.result-artifact-url }}
         run: test -n "$ARTIFACT_URL"
   recorded-agent-eval:
-    name: Run Evals - Repository agent skill regression
+    name: Run Evals - Invoice authorization code review
     needs: native-eval-action
     if: ${{ always() }}
     runs-on: ubuntu-latest

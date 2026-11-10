@@ -14,7 +14,7 @@ import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { readProgress } from "./eval-progress.js";
+import { readProgress, readWorkspaceTiming } from "./eval-progress.js";
 import { secrets } from "./redaction.js";
 import {
   addSourceLinks,
@@ -213,7 +213,14 @@ function reportingOptions(options: ReportOptions): ReportOptions {
   };
 }
 
-async function finish(run: EvaluationRun, github: boolean): Promise<EvaluationRun> {
+async function finish(
+  run: EvaluationRun,
+  github: boolean,
+  reportingStarted: number,
+): Promise<EvaluationRun> {
+  // Include normalization, source links and initial rendering; file publication follows.
+  renderSummary(run.report);
+  run.report.timings = { ...run.report.timings, reportingMs: performance.now() - reportingStarted };
   const markdown = renderSummary(run.report);
   await writeFile(run.reportPath, `${JSON.stringify(run.report, null, 2)}\n`, { mode: 0o600 });
   await writeFile(run.summaryPath, markdown, { mode: 0o600 });
@@ -275,12 +282,22 @@ async function discoverSource(
   } catch {}
 }
 
+function toolchainTiming(): NonNullable<EvaluationReport["timings"]> {
+  const value = process.env.ALLAGENTS_EVAL_TOOLCHAIN_MS;
+  return value && Number.isFinite(Number(value)) && Number(value) >= 0
+    ? { toolchainMs: Number(value) }
+    : {};
+}
+
 /** Run one authored config through the installed peer's native CLI, retaining output on failure. */
 export async function runEvaluation(options: EvaluationOptions): Promise<EvaluationRun> {
+  const setupStarted = performance.now();
   const cwd = resolve(options.workingDirectory || process.cwd());
   const reporting = reportingOptions(options);
   const run = await files(resolve(cwd, options.outputDirectory), reporting);
   const log = await open(run.logPath, "wx", 0o600);
+  const timings = toolchainTiming();
+  let reportingStarted = setupStarted;
   try {
     const args = options.args === undefined ? [] : options.args;
     const config = resolve(cwd, options.config);
@@ -303,64 +320,87 @@ export async function runEvaluation(options: EvaluationOptions): Promise<Evaluat
     );
     if (!(await stat(hookPath)).isFile()) throw new Error("Evaluation progress hook unavailable");
     const progressHook = `file://${hookPath}`;
-    run.exitCode = await new Promise<number | null>((resolveExit, reject) => {
-      const child = spawn(
-        process.execPath,
-        [
-          executable,
-          "eval",
-          ...args,
-          "--config",
-          config,
-          "--output",
-          run.resultPath,
-          "--no-share",
-          "--no-write",
-          "--no-table",
-          "--no-progress-bar",
-          "--extension",
-          `${progressHook}:afterEach`,
-        ],
-        {
-          cwd,
-          stdio: ["ignore", log.fd, log.fd, "ipc"],
-          env: environment,
-        },
-      );
-      let progressFailed = false;
-      let progressError: unknown;
-      let termination: ReturnType<typeof setTimeout> | undefined;
-      child.once("error", reject);
-      child.on("message", (input) => {
-        if (progressFailed) return;
-        const progress = readProgress(input);
-        if (progress) {
-          try {
-            options.onProgress?.(progress);
-          } catch (error) {
-            progressFailed = true;
-            progressError = error;
-            child.kill();
-            termination = setTimeout(() => child.kill("SIGKILL"), 5_000);
-            termination.unref();
+    timings.setupMs = performance.now() - setupStarted;
+    const evaluationStarted = performance.now();
+    const workspaces = new Set<number>();
+    let workspaceSeen = false,
+      workspaceMs = 0;
+    try {
+      run.exitCode = await new Promise<number | null>((resolveExit, reject) => {
+        const child = spawn(
+          process.execPath,
+          [
+            executable,
+            "eval",
+            ...args,
+            "--config",
+            config,
+            "--output",
+            run.resultPath,
+            "--no-share",
+            "--no-write",
+            "--no-table",
+            "--no-progress-bar",
+            "--extension",
+            `${progressHook}:afterEach`,
+            "--extension",
+            `${progressHook}:beforeAll`,
+          ],
+          {
+            cwd,
+            stdio: ["ignore", log.fd, log.fd, "ipc"],
+            env: environment,
+          },
+        );
+        let progressFailed = false;
+        let progressError: unknown;
+        let termination: ReturnType<typeof setTimeout> | undefined;
+        child.once("error", reject);
+        child.on("message", (input) => {
+          if (progressFailed) return;
+          const workspace = readWorkspaceTiming(input);
+          if (workspace) {
+            workspaceSeen = true;
+            if (workspace.phase === "start") workspaces.add(workspace.caseIndex);
+            else if (workspaces.delete(workspace.caseIndex)) workspaceMs += workspace.elapsedMs!;
+            return;
           }
-        }
+          const progress = readProgress(input);
+          if (progress) {
+            try {
+              options.onProgress?.(progress);
+            } catch (error) {
+              progressFailed = true;
+              progressError = error;
+              child.kill();
+              termination = setTimeout(() => child.kill("SIGKILL"), 5_000);
+              termination.unref();
+            }
+          }
+        });
+        child.once("close", (code) => {
+          clearTimeout(termination);
+          if (progressFailed) reject(progressError);
+          else resolveExit(code);
+        });
       });
-      child.once("close", (code) => {
-        clearTimeout(termination);
-        if (progressFailed) reject(progressError);
-        else resolveExit(code);
-      });
-    });
+    } finally {
+      timings.nativeEvaluationMs = performance.now() - evaluationStarted;
+      if (workspaceSeen) timings.workspacePreparationMs = workspaces.size ? null : workspaceMs;
+    }
+    reportingStarted = performance.now();
     await readResults(run, reporting, run.exitCode);
     if (run.resultsAvailable) await chmod(run.resultPath, 0o600);
   } catch (error) {
+    if (timings.setupMs === undefined) timings.setupMs = performance.now() - setupStarted;
+    reportingStarted = performance.now();
     await log.write(error instanceof Error ? `${error.stack}\n` : "Evaluation setup failed\n");
     run.report = summarizeEvaluation(undefined, null, reporting);
   } finally {
     await log.close();
   }
-  return finish(run, options.github === true);
+  run.report.timings = timings;
+  return finish(run, options.github === true, reportingStarted);
 }
 
 /** Re-render a native export locally, including files produced by a direct promptfoo eval. */
@@ -369,11 +409,21 @@ export async function reportEvaluation(
   outputDirectory: string,
   options: ReportOptions & {
     replay?: boolean;
+    /** Original process status for a current external run; null means unknown. */
+    exitCode?: number | null;
     github?: boolean;
     config?: string;
     workingDirectory?: string;
   } = {},
 ): Promise<EvaluationRun> {
+  if (
+    (options.replay && options.exitCode !== undefined) ||
+    (options.exitCode !== undefined &&
+      options.exitCode !== null &&
+      (!Number.isInteger(options.exitCode) || options.exitCode < 0 || options.exitCode > 255))
+  )
+    throw new Error("An original exit code must be 0-255 or unknown, and cannot accompany replay");
+  const reportingStarted = performance.now();
   const cwd = resolve(options.workingDirectory || process.cwd());
   const reporting = reportingOptions(options);
   const run = await files(resolve(cwd, outputDirectory), reporting);
@@ -386,9 +436,11 @@ export async function reportEvaluation(
     { mode: 0o600 },
   );
   await discoverSource(options.config, cwd, reporting, options.github === true);
-  await readResults(run, reporting);
+  run.exitCode = options.exitCode ?? null;
+  await readResults(run, reporting, options.exitCode);
   if (options.replay) run.report.replayed = true;
-  return finish(run, options.github === true);
+  run.report.timings = toolchainTiming();
+  return finish(run, options.github === true, reportingStarted);
 }
 
 export async function evaluationCommand(command: "eval" | "report", args: string[]): Promise<void> {
@@ -401,7 +453,7 @@ export async function evaluationCommand(command: "eval" | "report", args: string
   const valid =
     command === "eval"
       ? new Set(["--config", "--output-dir", "--working-directory", "--args-json", "--args-file"])
-      : new Set(["--results", "--output-dir", "--config", "--working-directory"]);
+      : new Set(["--results", "--output-dir", "--config", "--working-directory", "--exit-code"]);
   valid.add("--suite-number");
   valid.add("--public-labels");
   for (let i = 0; i < own.length; i++) {
@@ -465,12 +517,16 @@ export async function evaluationCommand(command: "eval" | "report", args: string
   } else {
     const results = values.get("--results");
     if (!results || native.length) throw new Error("One native result is required");
+    const exit = values.get("--exit-code");
+    if (exit !== undefined && exit !== "unknown" && !/^(0|[1-9]\d{0,2})$/.test(exit))
+      throw new Error("Invalid original exit code");
     run = await reportEvaluation(results, output, {
       ...reporting,
       replay,
       github,
       config: values.get("--config"),
       workingDirectory: values.get("--working-directory"),
+      exitCode: exit === undefined ? undefined : exit === "unknown" ? null : Number(exit),
     });
   }
   console.log(renderConsoleSummary(run.report));

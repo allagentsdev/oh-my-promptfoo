@@ -206,9 +206,9 @@ test("recorded reports render their pinned definition links without resolving Gi
     await readFile(resolve(import.meta.dirname, "../examples/ci/live-report.json"), "utf8"),
   );
   const markdown = renderSummary(sample.report);
-  assert.equal((markdown.match(/\[Test \d+ ·/g) ?? []).length, 6);
-  assert.equal((markdown.match(/promptfooconfig\.yaml#L\d+-L\d+/g) ?? []).length, 12);
-  assert.equal((markdown.match(/\| 100% \/ 100% \|/g) ?? []).length, 6);
+  assert.equal((markdown.match(/\[Test \d+ ·/g) ?? []).length, 3);
+  assert.equal((markdown.match(/promptfooconfig\.yaml#L\d+-L\d+/g) ?? []).length, 6);
+  assert.equal((markdown.match(/\| 100% \/ 100% \|/g) ?? []).length, 3);
   assert.ok(
     sample.report.cases.every(
       (item: any) =>

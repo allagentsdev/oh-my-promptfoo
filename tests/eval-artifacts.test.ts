@@ -67,7 +67,7 @@ test("approved scored copies keep native answers, reasons and numbers while reda
 test("artifact notes use confirmed URLs and known retention without assuming fourteen days", () => {
   assert.equal(
     renderResultArtifactLink(url, 14),
-    `\nAgent output and judge reasons: [download the scored result](<${url}>) (expires in 14 days).\n`,
+    `\nCandidate output and judge reasons: [download the scored result](<${url}>) (expires in 14 days).\n`,
   );
   assert.ok(renderResultArtifactLink(url, 1).includes("expires in 1 day)"));
   assert.ok(renderResultArtifactLink(url).includes("retention follows repository settings"));

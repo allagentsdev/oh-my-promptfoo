@@ -45,8 +45,9 @@ step. Replay renders the complete export: leave `args-json` as `[]` and omit
 calls. Result uploads remain opt-in.
 
 For this repository, open **Actions → Live agent dogfood → Run workflow**, choose
-`replay`, and enter the original completed live run ID in `recording-run-id`.
-For example, `42458802204` is a six-case live agent evaluation. The workflow reads
+`replay`, select the original suite, and enter its completed live run ID in
+`recording-run-id`. For example, choose `code-review` with `42723784266` for the
+three-case invoice review. The workflow reads
 that run's scored-result artifact using the caller's `actions: read` permission,
 checks out its original suite revision, and renders it without passing the
 OpenRouter secret or installing the caller's provider/grader package. It links
@@ -176,9 +177,9 @@ using known config/environment credential values. The default is `false`; raw
 answers, assertion values, grader reasons, generated files and provider IDs are
 never used as labels.
 
-For a formatting example before the live workflow is merged, the validation
-workflow publishes the local release suite and a clearly labelled recorded
-six-case agent run in separate named job cards. The recorded report comes from
+For a formatting example, the validation workflow publishes the local release
+suite and a clearly labelled recorded three-case invoice review in separate
+named job cards. The recorded report comes from
 [`examples/ci/live-report.json`](../examples/ci/live-report.json). It contains only
 the sanitized report and provenance of an actual model run. Its displayed
 failures are the recorded model results; previewing it makes no inference calls
@@ -238,13 +239,16 @@ so the live suite evaluates the reviewed implementation instead of an older
 registry release. The workflow explicitly builds the caller after installing its
 locked dependencies; the Action builds its own toolchain separately.
 
-The fixed suite in `packages/oh-my-promptfoo/evals/live/promptfooconfig.yaml`
-runs the real Pi SDK through OpenRouter. Both the candidate and read-only
+The default `code-review` choice runs the three-case
+[invoice authorization suite](../packages/oh-my-promptfoo/evals/code-review/promptfooconfig.yaml).
+The `repository-skill` choice runs the existing six-case suite in
+`packages/oh-my-promptfoo/evals/live/promptfooconfig.yaml`. Both use the real Pi SDK
+through OpenRouter. Both the candidate and read-only
 `agentAssert` grader use the repository variable **`OPENROUTER_MODEL`**. Set it to
 `deepseek/deepseek-v4.1-flash`, or another tool-capable model supported by the
 pinned SDK. The selected model may incur charges. Changing the variable affects
 the next manual run without changing the authored tasks or scoring. The report
-labels include the selected model. The suite stages the selected Git commit as a
+labels include the selected model. The repository-skill suite stages the selected Git commit as a
 protected source, loads the repository's `oh-my-promptfoo` skill,
 and asks the candidate to author configs and commands for real repository tasks:
 an exact-match smoke config, package provider/grader IDs, repeated metadata
@@ -454,7 +458,7 @@ Action does not change those settings. For example, callers can use `14` for a
 
 After a successful upload, the suite card includes:
 
-> Agent output and judge reasons: download the scored result (expires in 14 days).
+> Candidate output and judge reasons: download the scored result (expires in 14 days).
 
 The actual text uses the configured effective retention, including the runner's
 repository limit; it never assumes 14 days. If retention is unavailable locally,
@@ -474,8 +478,9 @@ Assertion/provider failures still fail the Action and retain/upload available
 results. Missing, unparseable or zero-row results never create a scored artifact.
 
 The fixed release example and manual live workflow explicitly enable uploads.
-The recorded agent preview has only a sanitized report, so it does not claim to
-offer original answers or judge reasons. A fresh manual live run produces them.
+The recorded preview commits only a sanitized report. Its download link points
+to the original run's approved scored artifact and works within that artifact's
+retention period; raw answers and judge reasons are not committed.
 
 Local callers can prepare the same redacted native export for their approved
 storage and render the link after upload:
@@ -548,6 +553,14 @@ allagents-promptfoo report --results .promptfoo-ci/run-ABC123/results.json --pub
 allagents-promptfoo eval --config examples/ci/release/promptfooconfig.yaml --args-file /private/native-args.json
 ```
 
+For a current external run, pass its original process status with `--exit-code 0`,
+`--exit-code 100` for native assertion failures, or its actual runtime error code.
+Use `--exit-code unknown` when the process did not return a usable status; this
+fails the gate even if the export contains passing rows. A native exit of zero
+preserves explicitly configured native pass-rate tolerance. Provider/grader errors,
+missing results and zero coverage still fail. Omit `--replay` for a current run;
+historical replay cannot accept an original exit-code override.
+
 Use the actual path printed by `eval` in the second command. To run from this
 source checkout, run `pnpm install --frozen-lockfile`, `pnpm build`, then replace
 `allagents-promptfoo` with `node packages/oh-my-promptfoo/dist/cli.js`.
@@ -596,3 +609,56 @@ were inspected for this integration. They expose specific switches rather than a
 arbitrary native argument array, and remove the per-run JSON after their reporting.
 This Action therefore uses the public native CLI/JSON boundary directly; it
 does not import Promptfoo's evaluator, server or database internals.
+
+
+## Measurement notes and timing
+
+Unknown measurements remain unknown. Each test's expanded details explain whether
+usage/cost was not reported, the provider or grader errored, an accounting ledger
+was incomplete, or recorded pricing could not be matched. These are fixed diagnostic
+categories; raw provider errors and judge reasons remain private. A failed grader
+may have incurred spend even when its result contains synthetic zero tokens.
+Known deterministic checks still establish zero grader cost.
+
+The main results table is unchanged. A collapsed **Run timing** section reports
+CLI preparation, the native evaluation and reporting. When the public workspace
+progress channel is available, it also reports the sum of observed workspace
+preparation times, from provider case admission to workspace readiness (including
+queue waits). These phases overlap: native evaluation includes workspace
+preparation and grading. Do not add them together or compare the workspace sum to
+wall time under concurrency. Missing or unfinished workspace observations remain
+unknown. Caller preparation outside the Action is not included.
+
+The Action supplies its measured toolchain-preparation duration through
+`ALLAGENTS_EVAL_TOOLCHAIN_MS`; local runs omit that row unless the caller supplies
+an actual measured duration. This measures runtime preparation, including source
+checkout/install/build or installed-package verification; separate Node/pnpm setup
+steps and caller-owned installation are excluded. Replay reports its current
+runtime preparation and rendering duration in
+**Replay timing**. Recorded row latency, usage and costs remain historical; an old
+capture does not establish original toolchain or phase durations.
+
+### Realistic invoice-review dogfood
+
+The [invoice authorization suite](../packages/oh-my-promptfoo/evals/code-review/promptfooconfig.yaml)
+reviews two authorization regressions and a safe control. It stages only public,
+checked-in fixtures and a small review skill. Native skill-use and artifact checks
+are required alongside three workspace-grader criteria: diagnosis, reproduction
+and minimal fix. The authored threshold is 1. Source files must remain unchanged.
+
+Select `code-review` in the **Live agent dogfood** manual workflow. Both candidate
+and read-only grader use the `OPENROUTER_MODEL` repository variable (currently
+`deepseek/deepseek-v4.1-flash`) and the `OPENROUTER_API_KEY` secret. This is paid live
+evaluation; model availability and prices can change. No model is hardcoded in the
+shared Action. To inspect formatting later, choose replay, the same suite and the
+original completed run ID. The workflow checks out the evaluated revision and
+rejects a recording from another suite. Replay receives no model credentials.
+
+For local use with the pinned packages installed:
+
+```sh
+allagents-promptfoo eval --config packages/oh-my-promptfoo/evals/code-review/promptfooconfig.yaml --public-labels true -- --no-cache --max-concurrency 1
+```
+
+Keep scored answers and judge reasons in approved artifact storage. Only the
+sanitized report belongs in a public formatting preview.

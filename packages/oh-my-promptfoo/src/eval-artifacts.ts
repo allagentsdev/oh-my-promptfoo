@@ -54,5 +54,5 @@ export function renderResultArtifactLink(url: string, retentionDays?: number): s
     retentionDays === undefined
       ? "retention follows repository settings"
       : `expires in ${retentionDays} ${retentionDays === 1 ? "day" : "days"}`;
-  return `\nAgent output and judge reasons: [download the scored result](<${safe}>) (${retention}).\n`;
+  return `\nCandidate output and judge reasons: [download the scored result](<${safe}>) (${retention}).\n`;
 }

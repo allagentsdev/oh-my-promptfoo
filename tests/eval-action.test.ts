@@ -12,6 +12,7 @@ import {
   validateNativeArgs,
 } from "../packages/oh-my-promptfoo/src/eval-run";
 import type { EvaluationProgress } from "../packages/oh-my-promptfoo/src/reporting";
+import { removeTree } from "../packages/workspace-core/src/fs";
 import { testEntries } from "./global-setup";
 
 const root = resolve(import.meta.dirname, "..");
@@ -647,5 +648,74 @@ test("real package grader failures stay errors even when native score policy tol
     assert.ok(!(await readFile(run.summaryPath, "utf8")).includes("PRIVATE_"));
   } finally {
     await rm(directory, { recursive: true, force: true });
+  }
+}, 120_000);
+
+test("native CLI reports real workspace preparation and invocation phases before a credential-free provider failure", async () => {
+  const directory = await fixture();
+  try {
+    const source = join(directory, "source");
+    await mkdir(source);
+    await writeFile(join(source, "README.md"), "Offline workspace fixture");
+    const agentProvider = join(directory, "agent.mjs");
+    await writeFile(
+      agentProvider,
+      `export { Agent as default } from ${JSON.stringify(`file://${join(testEntries, "providers.js")}`)};`,
+    );
+    for (const missingSource of [false, true]) {
+      const config = join(directory, `timings-${missingSource}.yaml`);
+      await writeFile(
+        config,
+        stringify({
+          prompts: ["No delegate may run"],
+          env: {
+            ALLAGENTS_WORKSPACE_ROOT: join(directory, `workspaces-${missingSource}`),
+            ALLAGENTS_CACHE_ROOT: join(directory, `cache-${missingSource}`),
+          },
+          providers: [
+            {
+              id: `file://${agentProvider}`,
+              config: {
+                // Fail before delegate execution, even on a developer machine with stored credentials.
+                workingDir: "missing-offline-working-directory",
+                delegate: { id: "copilot-sdk", config: { model: "unused-no-model-call" } },
+                workspace: {
+                  sources: [
+                    {
+                      type: "local",
+                      path: missingSource ? join(directory, "absent") : source,
+                      destination: "project",
+                      permissions: "all",
+                    },
+                  ],
+                },
+              },
+            },
+          ],
+          tests: [{ description: "Offline readiness" }],
+        }),
+      );
+      const run = await runEvaluation({
+        config,
+        outputDirectory: join(directory, "out"),
+        args: ["--no-cache"],
+      });
+      assert.equal(run.report.status, "error");
+      assert.equal(run.resultsAvailable, true);
+      const timings = run.report.timings!;
+      assert.ok(
+        timings.setupMs! > 0 && timings.nativeEvaluationMs! > 0 && timings.reportingMs! >= 0,
+      );
+      if (missingSource) assert.equal(timings.workspacePreparationMs, null);
+      else assert.ok(timings.workspacePreparationMs! > 0);
+      const summary = await readFile(run.summaryPath, "utf8");
+      assert.ok(summary.includes("<details><summary>Run timing</summary>"));
+      assert.ok(summary.includes("Durations overlap"));
+      assert.ok(!(summary + JSON.stringify(timings)).includes(source));
+      const native = await json(run.resultPath);
+      if (!missingSource) assert.match(native.results.results[0].response.error, /workingDir/);
+    }
+  } finally {
+    await removeTree(directory);
   }
 }, 120_000);

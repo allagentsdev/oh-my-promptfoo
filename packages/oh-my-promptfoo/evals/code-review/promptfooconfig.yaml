@@ -1,0 +1,87 @@
+# yaml-language-server: $schema=https://promptfoo.dev/config-schema.json
+description: Invoice authorization code review
+prompts: [file://review.txt]
+providers:
+  - id: package:oh-my-promptfoo/providers:Agent
+    label: Pi / {{env.OPENROUTER_MODEL}}
+    config:
+      timeoutMs: 90000
+      delegate:
+        id: pi-sdk
+        config:
+          provider: openrouter
+          model: "{{env.OPENROUTER_MODEL}}"
+          thinkingLevel: off
+          permissions: { filesystem: write, shell: deny }
+        env:
+          OPENROUTER_API_KEY: "{{env.OPENROUTER_API_KEY}}"
+      workspace:
+        sources:
+          - type: local
+            path: fixtures
+            destination: source
+            permissions: all
+          - type: local
+            path: skills
+            destination: .agents/skills
+            permissions: all
+      fileChanges: true
+defaultTest:
+  threshold: 1
+  options: { disableVarExpansion: true }
+  assert:
+    - type: skill-used
+      value: review-change
+    - type: javascript
+      value: file://check-findings.mjs
+      metric: finding-contract
+    - type: javascript
+      value: package:oh-my-promptfoo/assertions:agentAssert
+      metric: review-quality
+      config:
+        scoring: binary
+        timeoutMs: 90000
+        grader:
+          id: pi-sdk
+          config:
+            provider: openrouter
+            model: "{{env.OPENROUTER_MODEL}}"
+            thinkingLevel: off
+            permissions: { filesystem: read, shell: deny }
+          env:
+            OPENROUTER_API_KEY: "{{env.OPENROUTER_API_KEY}}"
+        components:
+          - metric: diagnosis
+            value: >-
+              Read {{source}} and review.json. Expected behavior: {{expectedBehavior}}.
+              Verify the finding identifies that exact defect, or reports no finding
+              for the safe control. Reject unrelated or invented defects.
+          - metric: reproduction
+            value: >-
+              Read {{source}} and review.json. Every finding must give a concrete
+              user/invoice example demonstrating unauthorized access. For the safe
+              control require an empty findings array, not a fabricated reproducer.
+          - metric: minimal-fix
+            value: >-
+              Read {{source}} and review.json. Every proposed fix must require both
+              matching tenant IDs and the billing role. For the safe control require
+              an empty findings array. Check the source was left unchanged.
+tests:
+  - description: Detect cross-tenant invoice access
+    metadata: { id: cross-tenant-access, suite: required }
+    vars:
+      source: source/tenant-access.mjs
+      expectedFindings: [{ line: 2, severity: high }]
+      expectedBehavior: The billing role alone permits access to another tenant's invoice.
+  - description: Detect missing billing authorization
+    metadata: { id: missing-billing-role, suite: required }
+    vars:
+      source: source/role-access.mjs
+      expectedFindings: [{ line: 2, severity: high }]
+      expectedBehavior: Matching the tenant alone permits a user without the billing role.
+  - description: Accept the correctly authorized implementation
+    metadata: { id: safe-control, suite: required }
+    vars:
+      source: source/safe-access.mjs
+      expectedFindings: []
+      expectedBehavior: Both required checks are present; there is no authorization defect.

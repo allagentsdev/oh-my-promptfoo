@@ -1,0 +1,7 @@
+Read .agents/skills/review-change/SKILL.md and use it to review {{source}}.
+An invoice may be read only by a user in its tenant with the billing role.
+Write review.json at the workspace root with exactly one findings array.
+Each finding has line, severity, summary, reproduction and fix fields.
+Security authorization bypasses are high severity. Report only reproducible
+bugs; correct code has an empty array. Keep source files unchanged and use
+file reads and the artifact write only. Finish with one sentence.
