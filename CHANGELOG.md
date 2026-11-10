@@ -77,6 +77,19 @@
 - Exercise MCP candidate execution and packed consumers with pinned Git fixtures on all platforms; retain the Linux-specific protected local-source case.
 - Extend native-authoring Copilot examples and packed-consumer coverage with three generated turns, interleaved conversation IDs, JSON/YAML files, simplified/shared fixtures, full-prompt versus input/output replay, embedded/literal JSON, `storeOutputAs`, and transform-before-storage variable use on both public providers. Verify the real SDK/CLI local-fixture matrix on stock Promptfoo `0.122.1`, `0.124.1` and `0.125.1`; distinguish engine/provider/SDK provenance, preserve returned-error workspace retention, and isolate the native renderer's literal-block-tag limitation. Deterministic SDK receipts alone do not claim runtime/model proof.
 
+## [1.31.0](https://github.com/allagentsdev/oh-my-promptfoo/compare/v1.30.2...v1.31.0) (2026-11-10)
+
+### Features
+
+- explain eval measurements and preserve external run status ([#200](https://github.com/allagentsdev/oh-my-promptfoo/issues/200)) ([2c8757f](https://github.com/allagentsdev/oh-my-promptfoo/commit/2c8757f2b4fc673ab0df03317e1a424ea18c2bed))
+
+  Report a current native export with its original process exit code without loading providers or rerunning graders. GitHub summaries explain unavailable measurements, show execution phases and use Candidate labels for any evaluation domain.
+
+
+### Bug Fixes
+
+- use score label in test details ([#201](https://github.com/allagentsdev/oh-my-promptfoo/issues/201)) ([143e70b](https://github.com/allagentsdev/oh-my-promptfoo/commit/143e70b802ecd6eebb5bd091d959bb5f494f2a47))
+
 ## [1.30.2](https://github.com/allagentsdev/oh-my-promptfoo/compare/v1.30.1...v1.30.2) (2026-11-09)
 
 ### Bug Fixes
