@@ -84,6 +84,8 @@
 
 * explain eval measurements and preserve external run status ([#200](https://github.com/allagentsdev/oh-my-promptfoo/issues/200)) ([2c8757f](https://github.com/allagentsdev/oh-my-promptfoo/commit/2c8757f2b4fc673ab0df03317e1a424ea18c2bed))
 
+  Report a current native export with its original process exit code without loading providers or rerunning graders. GitHub summaries explain unavailable measurements, show execution phases and use Candidate labels for any evaluation domain.
+
 
 ### Bug Fixes
 
