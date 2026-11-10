@@ -458,7 +458,7 @@ Action does not change those settings. For example, callers can use `14` for a
 
 After a successful upload, the suite card includes:
 
-> Agent output and judge reasons: download the scored result (expires in 14 days).
+> Candidate output and judge reasons: download the scored result (expires in 14 days).
 
 The actual text uses the configured effective retention, including the runner's
 repository limit; it never assumes 14 days. If retention is unavailable locally,
@@ -552,6 +552,14 @@ allagents-promptfoo report --results .promptfoo-ci/run-ABC123/results.json --out
 allagents-promptfoo report --results .promptfoo-ci/run-ABC123/results.json --public-labels true
 allagents-promptfoo eval --config examples/ci/release/promptfooconfig.yaml --args-file /private/native-args.json
 ```
+
+For a current external run, pass its original process status with `--exit-code 0`,
+`--exit-code 100` for native assertion failures, or its actual runtime error code.
+Use `--exit-code unknown` when the process did not return a usable status; this
+fails the gate even if the export contains passing rows. A native exit of zero
+preserves explicitly configured native pass-rate tolerance. Provider/grader errors,
+missing results and zero coverage still fail. Omit `--replay` for a current run;
+historical replay cannot accept an original exit-code override.
 
 Use the actual path printed by `eval` in the second command. To run from this
 source checkout, run `pnpm install --frozen-lockfile`, `pnpm build`, then replace

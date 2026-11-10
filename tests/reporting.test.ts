@@ -88,7 +88,7 @@ test("console and Markdown show authored score thresholds without overriding nat
   assert.ok(markdown.includes("✅ PASS | 1 / 1 | 100% / — |"));
   assert.ok(consoleText.includes("Test 1 · A required check"));
   assert.ok(consoleText.includes("FAIL · 10 ms · score 95% / threshold 90%"));
-  assert.ok(consoleText.includes("Agent: unknown; cost: unknown"));
+  assert.ok(consoleText.includes("Candidate: unknown; cost: unknown"));
   assert.ok(
     !consoleText.includes("PRIVATE_ANSWER") && !consoleText.includes("PRIVATE_GRADER_REASON"),
   );
@@ -496,7 +496,7 @@ test("Evals titles reports and result numbers match the table and details", () =
   );
   assert.ok(comparison.includes("Test 6 · Repository task 6 (Other candidate)"));
   assert.ok(comparison.includes("Test 1 · Repository task 1 (Free candidate)"));
-  assert.ok(!comparison.includes("| Candidate |"));
+  assert.ok(!comparison.split("### Results")[0].includes("| Candidate |"));
   for (const suiteNumber of [0, -1, 1.5, Number.NaN, Number.MAX_SAFE_INTEGER + 1])
     assert.throws(() => summarizeEvaluation(input, 0, { suiteNumber }), /Suite number/);
 });
@@ -646,8 +646,8 @@ test("unavailable measurement notes explain missing data, failed graders and pri
   assert.deepEqual(missing.cases[0].candidateCost.unavailableReasons, ["not-reported"]);
   assert.equal(missing.cases[0].candidateCost.usd, null);
   const markdown = renderSummary(missing);
-  assert.ok(markdown.includes("Agent cost: not reported"));
-  assert.ok(markdown.indexOf("Agent cost: not reported") > markdown.indexOf("<details>"));
+  assert.ok(markdown.includes("Candidate cost: not reported"));
+  assert.ok(markdown.indexOf("Candidate cost: not reported") > markdown.indexOf("<details>"));
   const failed = summarizeEvaluation(
     document([
       row({

@@ -409,11 +409,20 @@ export async function reportEvaluation(
   outputDirectory: string,
   options: ReportOptions & {
     replay?: boolean;
+    /** Original process status for a current external run; null means unknown. */
+    exitCode?: number | null;
     github?: boolean;
     config?: string;
     workingDirectory?: string;
   } = {},
 ): Promise<EvaluationRun> {
+  if (
+    (options.replay && options.exitCode !== undefined) ||
+    (options.exitCode !== undefined &&
+      options.exitCode !== null &&
+      (!Number.isInteger(options.exitCode) || options.exitCode < 0 || options.exitCode > 255))
+  )
+    throw new Error("An original exit code must be 0-255 or unknown, and cannot accompany replay");
   const reportingStarted = performance.now();
   const cwd = resolve(options.workingDirectory || process.cwd());
   const reporting = reportingOptions(options);
@@ -427,7 +436,8 @@ export async function reportEvaluation(
     { mode: 0o600 },
   );
   await discoverSource(options.config, cwd, reporting, options.github === true);
-  await readResults(run, reporting);
+  run.exitCode = options.exitCode ?? null;
+  await readResults(run, reporting, options.exitCode);
   if (options.replay) run.report.replayed = true;
   run.report.timings = toolchainTiming();
   return finish(run, options.github === true, reportingStarted);
@@ -443,7 +453,7 @@ export async function evaluationCommand(command: "eval" | "report", args: string
   const valid =
     command === "eval"
       ? new Set(["--config", "--output-dir", "--working-directory", "--args-json", "--args-file"])
-      : new Set(["--results", "--output-dir", "--config", "--working-directory"]);
+      : new Set(["--results", "--output-dir", "--config", "--working-directory", "--exit-code"]);
   valid.add("--suite-number");
   valid.add("--public-labels");
   for (let i = 0; i < own.length; i++) {
@@ -507,12 +517,16 @@ export async function evaluationCommand(command: "eval" | "report", args: string
   } else {
     const results = values.get("--results");
     if (!results || native.length) throw new Error("One native result is required");
+    const exit = values.get("--exit-code");
+    if (exit !== undefined && exit !== "unknown" && !/^(0|[1-9]\d{0,2})$/.test(exit))
+      throw new Error("Invalid original exit code");
     run = await reportEvaluation(results, output, {
       ...reporting,
       replay,
       github,
       config: values.get("--config"),
       workingDirectory: values.get("--working-directory"),
+      exitCode: exit === undefined ? undefined : exit === "unknown" ? null : Number(exit),
     });
   }
   console.log(renderConsoleSummary(run.report));

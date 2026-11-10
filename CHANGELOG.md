@@ -4,6 +4,8 @@
 
 ### Features
 
+- Accept the original native CLI exit code when reporting an external evaluation. Preserve runtime failures and native pass-rate policy without rerunning providers, and use domain-neutral candidate labels in reports.
+
 - Explain unavailable usage and cost with safe diagnostic categories inside test details. Add collapsed, measured invocation timing without changing native scores, accounting values or the results table. Replay distinguishes current rendering time from historical model measurements.
 
 - Add a three-case invoice authorization code-review dogfood with a safe control, native skill/artifact checks and nested workspace grading. Select it in the manual live/replay workflow using the configurable OpenRouter model.

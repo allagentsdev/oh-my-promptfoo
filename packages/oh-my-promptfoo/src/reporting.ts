@@ -448,11 +448,11 @@ const measurementReasons: Record<MeasurementUnavailableReason, string> = {
 function measurementNotes(item: CaseReport): string {
   const measurements: [string, MeasurementUnavailableReason[] | undefined][] = [
     [
-      item.candidateUsage.total === null ? "Agent usage" : "Agent requests",
+      item.candidateUsage.total === null ? "Candidate usage" : "Candidate requests",
       item.candidateUsage.unavailableReasons,
     ],
     [
-      "Agent cost",
+      "Candidate cost",
       item.candidateCost.usd === null ? item.candidateCost.unavailableReasons : undefined,
     ],
     [
@@ -526,10 +526,10 @@ export function renderSummary(report: EvaluationReport): string {
     `| Errors | ${report.counts.error} |`,
     ...(report.counts.unknown ? [`| Unknown outcomes | ${report.counts.unknown} |`] : []),
     `| Pass rate | ${report.cases.length ? score(report.counts.pass / report.cases.length) : "unknown"} |`,
-    `| Total agent time (sum of rows) | ${time(report.totals.latencyMs)} |`,
-    `| Agent usage | ${usageSummary(report.totals.candidateUsage)} |`,
+    `| Total candidate time (sum of rows) | ${time(report.totals.latencyMs)} |`,
+    `| Candidate usage | ${usageSummary(report.totals.candidateUsage)} |`,
     `| Grader usage | ${usageSummary(report.totals.graderUsage)} |`,
-    `| Agent cost | ${money(report.totals.candidateCost)} |`,
+    `| Candidate cost | ${money(report.totals.candidateCost)} |`,
     `| Grader cost | ${money(report.totals.graderCost)} |`,
     "",
     "### Results",
@@ -571,11 +571,11 @@ export function renderSummary(report: EvaluationReport): string {
     const detail = [
       `<details><summary>${title(item, true)} — ${badge(item.status)}</summary>`,
       "",
-      `Native score: **${score(item.score)}** · Agent time: **${time(item.latencyMs)}**`,
+      `Native score: **${score(item.score)}** · Candidate time: **${time(item.latencyMs)}**`,
       "",
       "| Role | Tokens | Requests | Cost |",
       "| --- | ---: | ---: | ---: |",
-      `| Agent | ${number(item.candidateUsage.total)} | ${number(item.candidateUsage.requests)} | ${money(item.candidateCost)} |`,
+      `| Candidate | ${number(item.candidateUsage.total)} | ${number(item.candidateUsage.requests)} | ${money(item.candidateCost)} |`,
       `| Grader | ${number(item.graderUsage.total)} | ${number(item.graderUsage.requests)} | ${money(item.graderCost)} |`,
       "",
       ...(notes ? [`${notes}.`, ""] : []),
@@ -603,7 +603,7 @@ export function renderSummary(report: EvaluationReport): string {
     "",
     "Tests are numbered from 1 within each suite. Each candidate/repeat has its own result number.",
     "",
-    "Results-table tokens and cost include agent and grader when both are reported; latency is the agent's native latency. Unknown means unmeasured or incomplete. — means no assertion threshold was authored. ~ marks a token-price estimate. Costs are not invoices or savings. Native precision is retained in report.json.",
+    "Results-table tokens and cost include candidate and grader when both are reported; latency is the candidate's native latency. Unknown means unmeasured or incomplete. — means no assertion threshold was authored. ~ marks a token-price estimate. Costs are not invoices or savings. Native precision is retained in report.json.",
   );
   if (report.issues.length)
     lines.push(
@@ -633,14 +633,14 @@ export function renderConsoleSummary(report: EvaluationReport): string {
       : []),
     `${consoleLabel(report.suite?.title ?? "Promptfoo evaluation")} · ${report.status.toUpperCase()}`,
     `Tests: ${report.cases.length}; passed: ${report.counts.pass}; failed: ${report.counts.fail}; errors: ${report.counts.error}; unknown outcomes: ${report.counts.unknown}`,
-    `Agent: ${usageSummary(report.totals.candidateUsage)}; cost: ${money(report.totals.candidateCost)}; total agent time: ${time(report.totals.latencyMs)}`,
+    `Candidate: ${usageSummary(report.totals.candidateUsage)}; cost: ${money(report.totals.candidateCost)}; total candidate time: ${time(report.totals.latencyMs)}`,
     `Grader: ${usageSummary(report.totals.graderUsage)}; cost: ${money(report.totals.graderCost)}`,
   ];
   for (const item of report.cases) {
     const notes = measurementNotes(item);
     lines.push(
       `Test ${item.row}${item.label ? ` · ${consoleLabel(item.label)}` : ""}${item.candidate ? ` (${consoleLabel(item.candidate)})` : ""} · ${item.status.toUpperCase()} · ${time(item.latencyMs)} · score ${score(item.score)}${item.threshold === undefined ? "" : ` / threshold ${score(item.threshold)}`}`,
-      `  Agent: ${number(item.candidateUsage.total)} tokens; ${number(item.candidateUsage.requests)} requests; ${money(item.candidateCost)}. Grader: ${number(item.graderUsage.total)} tokens; ${number(item.graderUsage.requests)} requests; ${money(item.graderCost)}.`,
+      `  Candidate: ${number(item.candidateUsage.total)} tokens; ${number(item.candidateUsage.requests)} requests; ${money(item.candidateCost)}. Grader: ${number(item.graderUsage.total)} tokens; ${number(item.graderUsage.requests)} requests; ${money(item.graderCost)}.`,
       ...(notes ? [`  ${notes}.`] : []),
     );
     const names = new Map<string, number>();
