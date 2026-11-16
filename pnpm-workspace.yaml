@@ -2,7 +2,10 @@ packages:
   - packages/*
 # Reviewed security and compatibility overrides; see docs/releasing.md.
 overrides:
-  get-uri@8.0.1>basic-ftp: 6.2.3
+  get-uri@8.0.1>basic-ftp: 6.2.4
+  "mongoose@9.11.3": 9.11.4
+  "hono@4.13.13": 4.13.16
+  "@hono/node-server@2.1.5": 2.1.6
   node-forge: github:matthewscottconroy/forge#db05494352dd3c9a5a07c5270333dcc78866cad2
   "@github/copilot-sdk@1.0.28>zod": 4.6.7
   "@earendil-works/pi-coding-agent@1.4.0>undici": 8.12.2
