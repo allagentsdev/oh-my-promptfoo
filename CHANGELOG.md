@@ -77,6 +77,13 @@
 - Exercise MCP candidate execution and packed consumers with pinned Git fixtures on all platforms; retain the Linux-specific protected local-source case.
 - Extend native-authoring Copilot examples and packed-consumer coverage with three generated turns, interleaved conversation IDs, JSON/YAML files, simplified/shared fixtures, full-prompt versus input/output replay, embedded/literal JSON, `storeOutputAs`, and transform-before-storage variable use on both public providers. Verify the real SDK/CLI local-fixture matrix on stock Promptfoo `0.122.1`, `0.124.1` and `0.125.1`; distinguish engine/provider/SDK provenance, preserve returned-error workspace retention, and isolate the native renderer's literal-block-tag limitation. Deterministic SDK receipts alone do not claim runtime/model proof.
 
+## [1.31.1](https://github.com/allagentsdev/oh-my-promptfoo/compare/v1.31.0...v1.31.1) (2026-11-16)
+
+
+### Bug Fixes
+
+* **deps:** update bundled OpenTelemetry to 3.1.0 ([#203](https://github.com/allagentsdev/oh-my-promptfoo/issues/203)) ([13e562a](https://github.com/allagentsdev/oh-my-promptfoo/commit/13e562ae88316481e4328c920cdcf9f29b60db02))
+
 ## [1.31.0](https://github.com/allagentsdev/oh-my-promptfoo/compare/v1.30.2...v1.31.0) (2026-11-10)
 
 ### Features
