@@ -610,7 +610,6 @@ arbitrary native argument array, and remove the per-run JSON after their reporti
 This Action therefore uses the public native CLI/JSON boundary directly; it
 does not import Promptfoo's evaluator, server or database internals.
 
-
 ## Measurement notes and timing
 
 Unknown measurements remain unknown. Each test's expanded details explain whether
