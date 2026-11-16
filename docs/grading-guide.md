@@ -301,7 +301,6 @@ for the exact nano-AIU schema, conversion and runtime/invoice limitations, and t
 [Copilot cost methodology](copilot-cost-methodology.md) for turning ledgers and
 `CopilotModel` token prices into dollar totals.
 
-
 ### Caching
 
 `llmAssert` uses the judge provider's cache as it is and adds none of its own,

@@ -85,7 +85,6 @@
 
   Report a current native export with its original process exit code without loading providers or rerunning graders. GitHub summaries explain unavailable measurements, show execution phases and use Candidate labels for any evaluation domain.
 
-
 ### Bug Fixes
 
 - use score label in test details ([#201](https://github.com/allagentsdev/oh-my-promptfoo/issues/201)) ([143e70b](https://github.com/allagentsdev/oh-my-promptfoo/commit/143e70b802ecd6eebb5bd091d959bb5f494f2a47))
@@ -109,7 +108,6 @@
 - **ci:** run native suites with local and shared CI reports ([#185](https://github.com/allagentsdev/oh-my-promptfoo/issues/185)) ([6c2b3c7](https://github.com/allagentsdev/oh-my-promptfoo/commit/6c2b3c7ff0ee1be47c1a6369c934e1f124fe1743))
 - replay evaluation reports without model calls ([#192](https://github.com/allagentsdev/oh-my-promptfoo/issues/192)) ([833e280](https://github.com/allagentsdev/oh-my-promptfoo/commit/833e2808301159deb7281fa33d08d15f904a48bc))
 
-
 ### Bug Fixes
 
 - **deps:** migrate OpenTelemetry 3 and preserve trace compatibility ([#181](https://github.com/allagentsdev/oh-my-promptfoo/issues/181)) ([7906e0f](https://github.com/allagentsdev/oh-my-promptfoo/commit/7906e0fe7ed44ce5650e2e28ec31239d430a42dc))
@@ -120,7 +118,6 @@
 ### Features
 
 - **assertions:** inherit Copilot workspace judges and decode captured text ([aca3af7](https://github.com/allagentsdev/oh-my-promptfoo/commit/aca3af771907f533767c408dbefe86f9f4dcf3a3))
-
 
 ### Bug Fixes
 
@@ -147,7 +144,6 @@
 ### Features
 
 - **assertions:** default llmAssert and agentAssert to binary scoring ([#170](https://github.com/allagentsdev/oh-my-promptfoo/issues/170)) ([db20931](https://github.com/allagentsdev/oh-my-promptfoo/commit/db209311efbce566fb23343989f1159b4e35ee4e))
-
 
 ### Miscellaneous Chores
 
@@ -186,7 +182,6 @@
 - **assertions:** let Codex graders read through a sandboxed shell ([#156](https://github.com/allagentsdev/oh-my-promptfoo/issues/156)) ([4271594](https://github.com/allagentsdev/oh-my-promptfoo/commit/427159439b3bdf53dbaa0ab477fe8b656790f009))
 - **mcp:** run contained stdio tools in agent delegates ([#154](https://github.com/allagentsdev/oh-my-promptfoo/issues/154)) ([082580d](https://github.com/allagentsdev/oh-my-promptfoo/commit/082580da2801b1ac563fe087a8432b02d8378388))
 - **providers:** pass native delegate config through to Promptfoo ([#157](https://github.com/allagentsdev/oh-my-promptfoo/issues/157)) ([2332c03](https://github.com/allagentsdev/oh-my-promptfoo/commit/2332c034aaa56ba905f0a8ce7da9028cd1cd47a0))
-
 
 ### Bug Fixes
 
@@ -309,7 +304,6 @@
 ### Features
 
 - **provider:** run skill-gated evaluations with Pi ([#90](https://github.com/allagentsdev/oh-my-promptfoo/issues/90)) ([536c1d2](https://github.com/allagentsdev/oh-my-promptfoo/commit/536c1d289a0ebfbb9a6034ae7f9f7e4c2d2f2b7b))
-
 
 ### Bug Fixes
 
@@ -494,7 +488,6 @@ writable workspace that previously required OverlayFS may now fail admission.
 ### Features
 
 - **copilot:** report observed skill reads to Promptfoo ([#19](https://github.com/allagentsdev/oh-my-promptfoo/issues/19)) ([a4e6f90](https://github.com/allagentsdev/oh-my-promptfoo/commit/a4e6f9095233ada25f103c90d359311e39ab72d5))
-
 
 ### Bug Fixes
 

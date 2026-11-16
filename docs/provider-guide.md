@@ -884,7 +884,6 @@ never exported as generic money.
 conversions and how to combine this usage with token-price estimates and native
 costs.
 
-
 ## Filesystem behavior
 
 In `auto` mode, writable views try verified reflink, then disk-admitted full copy. In `copy-only` mode they directly use admitted full copies, without a reflink probe. Protected read-only checkouts use forced reflinks with full-copy fallback in `auto`, or physical copies in `copy-only`; they are admitted once per distinct source identity and mode and then shared by matching rows. A full writable source copy consumes disk per retained row; a protected read-only copy consumes peak disk in addition to the seed and any other sources. Insufficient capacity fails before copying. Plan capacity for seeds, protected copies, mutable views, Git objects, and temporary acquisition at peak concurrency; large-repository writable rollout depends on actual runner capacity or verified reflinks.
