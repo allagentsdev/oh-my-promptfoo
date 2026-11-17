@@ -489,7 +489,7 @@ async function runCopilot(frame: CallFrame, signal: AbortSignal): Promise<JsonOb
   );
   const sdk = await import(pathToFileURL(resolvePeer(frame.basePath, "@github/copilot-sdk")).href);
   if (typeof sdk.CopilotClient !== "function")
-    throw new Error("Install the supported @github/copilot-sdk@1.0.28 peer");
+    throw new Error("Install the supported @github/copilot-sdk@1.0.30 peer");
   const skillDirectories = frame.readOnly ? [] : workspaceSkillDirectories(frame.workingDir);
   const allowedRead = frame.readOnly
     ? await graderReadScope(frame.workingDir, frame.readOnly.sourceRoots)
@@ -937,7 +937,7 @@ async function runCopilot(frame: CallFrame, signal: AbortSignal): Promise<JsonOb
     ...(cost === undefined ? {} : { cost }),
     metadata: {
       copilot: {
-        sdkVersion: "1.0.28",
+        sdkVersion: "1.0.30",
         skillSupport: true,
         accounting,
         premiumRequestUsage: {
