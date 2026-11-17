@@ -31,8 +31,8 @@ Development tests use Promptfoo 0.125.1; native grading smoke also covers
 
 ```sh
 npm install --save-dev --save-exact promptfoo@0.125.1 oh-my-promptfoo
-npm install --save-dev @github/copilot-sdk@1.0.28               # only if you use Copilot
-npm install --save-dev @earendil-works/pi-coding-agent@1.4.0    # only if you use Pi
+npm install --save-dev @github/copilot-sdk@1.0.30               # only if you use Copilot
+npm install --save-dev @earendil-works/pi-coding-agent@1.5.0    # only if you use Pi
 ```
 
 Add a `promptfooconfig.yaml` next to your `skills` folder:
@@ -209,7 +209,7 @@ Copilot, Pi and read-only graders keep closed option lists. See the
 `package:oh-my-promptfoo/providers:CopilotModel` sends a prompt
 straight to a Copilot model: no workspace, tools or
 agent loop. Use it as an LLM candidate, or as the judge for `llmAssert` and
-`llm-rubric`. It needs `@github/copilot-sdk@1.0.28` installed and `GH_TOKEN`
+`llm-rubric`. It needs `@github/copilot-sdk@1.0.30` installed and `GH_TOKEN`
 exported, and it does not run on Windows.
 
 ```yaml
