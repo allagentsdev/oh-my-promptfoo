@@ -55,6 +55,8 @@ export interface CaseReport {
   candidateCost: ResultCost;
   graderCost: ResultCost;
   assertions: AssertionReport[];
+  /** Authored opt-in for publishing named numeric results from Promptfoo. */
+  namedScores?: { name: string; value: number }[];
 }
 export interface EvaluationReport {
   version: 1;
@@ -80,7 +82,7 @@ export interface ReportOptions {
   suiteNumber?: number;
   /** Checked-in source context for links; only used with publicLabels. */
   source?: SourceOptions;
-  /** Publish authored case IDs/descriptions, provider labels and assertion metrics/types. Defaults to false. */
+  /** Publish authored labels, assertion metrics/types and opted-in named scores. Defaults to false. */
   publicLabels?: boolean;
   /** Additional credential values to redact from explicitly public labels. */
   sensitiveValues?: string[];
@@ -284,6 +286,23 @@ function graderMeasurements(grade: unknown, failed: boolean): { cost: ResultCost
   };
 }
 
+function publicNamedScores(
+  names: unknown,
+  rawScores: unknown,
+  label: (value: unknown) => string | undefined,
+): CaseReport["namedScores"] {
+  if (!Array.isArray(names)) return;
+  const scores = record(rawScores);
+  const entries = new Map<string, number>();
+  for (const name of names.slice(0, 16)) {
+    if (typeof name !== "string" || !Object.hasOwn(scores, name)) continue;
+    const key = label(name);
+    const value = score(scores[name]);
+    if (key && value !== null && !entries.has(key)) entries.set(key, value);
+  }
+  if (entries.size) return Array.from(entries, ([name, value]) => ({ name, value }));
+}
+
 /** Read only public JSON exports. No config loading, case selection or scoring occurs here. */
 export function summarizeEvaluation(
   document: unknown,
@@ -341,6 +360,9 @@ export function summarizeEvaluation(
     const provider = record(row.provider).id;
     const testLabel = label(record(test.metadata).id) ?? label(test.description);
     const candidateLabel = label(record(row.provider).label);
+    const namedScores = options.publicLabels
+      ? publicNamedScores(record(test.metadata).publicNamedScores, row.namedScores, label)
+      : undefined;
     return {
       row: index + 1,
       test: safeCount(row.testIdx) ? row.testIdx + 1 : index + 1,
@@ -361,6 +383,7 @@ export function summarizeEvaluation(
       ),
       graderCost: grader.cost,
       assertions: assertionReports(row.gradingResult, test.assert, label),
+      ...(namedScores ? { namedScores } : {}),
     };
   });
   if (safeCount(stats.errors) && stats.errors > 0 && !counts.error) issues.push("native-errors");
@@ -579,6 +602,14 @@ export function renderSummary(report: EvaluationReport): string {
       `| Grader | ${number(item.graderUsage.total)} | ${number(item.graderUsage.requests)} | ${money(item.graderCost)} |`,
       "",
       ...(notes ? [`${notes}.`, ""] : []),
+      ...(item.namedScores?.length
+        ? [
+            "| Metric | Value |",
+            "| --- | ---: |",
+            ...item.namedScores.map(({ name, value }) => `| ${escapeMarkup(name)} | ${value} |`),
+            "",
+          ]
+        : []),
       `| Check | Type | Result | Score |${thresholds ? " Threshold |" : ""}`,
       `| --- | --- | --- | ---: |${thresholds ? " ---: |" : ""}`,
       ...item.assertions.map((check, index) => {
@@ -642,6 +673,7 @@ export function renderConsoleSummary(report: EvaluationReport): string {
       `Test ${item.row}${item.label ? ` · ${consoleLabel(item.label)}` : ""}${item.candidate ? ` (${consoleLabel(item.candidate)})` : ""} · ${item.status.toUpperCase()} · ${time(item.latencyMs)} · score ${score(item.score)}${item.threshold === undefined ? "" : ` / threshold ${score(item.threshold)}`}`,
       `  Candidate: ${number(item.candidateUsage.total)} tokens; ${number(item.candidateUsage.requests)} requests; ${money(item.candidateCost)}. Grader: ${number(item.graderUsage.total)} tokens; ${number(item.graderUsage.requests)} requests; ${money(item.graderCost)}.`,
       ...(notes ? [`  ${notes}.`] : []),
+      ...(item.namedScores ?? []).map(({ name, value }) => `  ${consoleLabel(name)}: ${value}`),
     );
     const names = new Map<string, number>();
     for (const check of item.assertions)
