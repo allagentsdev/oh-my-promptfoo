@@ -1,0 +1,39 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+language: en-US
+tone_instructions: "Be concise. Prioritize reproducible correctness, security, lifecycle and regression issues. Explain the failing scenario. Avoid cosmetic suggestions and speculative rewrites."
+reviews:
+  profile: chill
+  request_changes_workflow: false
+  high_level_summary_in_walkthrough: true
+  poem: false
+  sequence_diagrams: false
+  auto_review:
+    enabled: true
+    drafts: false
+    # Request another review with @coderabbitai review after a behavior change.
+    auto_incremental_review: false
+  path_filters:
+    - "!pnpm-lock.yaml"
+    - "!docs/evidence/**"
+  path_instructions:
+    - path: "packages/workspace-core/**"
+      instructions: >-
+        Follow the workspace contracts in CONTEXT.md. Preserve resolved source
+        identity, cache ownership, and isolation between evaluations. Verify that
+        checkout and lease cleanup remain safe on failure and under concurrency.
+    - path: "packages/oh-my-promptfoo/**"
+      instructions: >-
+        Preserve public provider, assertion, and artifact contracts. Keep
+        workspace evidence available through assertions and redact credentials
+        from summaries and exported artifacts.
+    - path: "{action.yml,.github/workflows/**}"
+      instructions: >-
+        Keep PR jobs that run untrusted code on read-only tokens without
+        repository secrets. Avoid direct shell interpolation of untrusted inputs.
+        Verify that failed evaluations still report their status and upload the
+        intended redacted artifacts.
+knowledge_base:
+  code_guidelines:
+    enabled: true
+    filePatterns:
+      - "CONTEXT.md"
