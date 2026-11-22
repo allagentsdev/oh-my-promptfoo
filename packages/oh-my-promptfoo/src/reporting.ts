@@ -286,7 +286,7 @@ function graderMeasurements(grade: unknown, failed: boolean): { cost: ResultCost
   };
 }
 
-function publicNamedScores(
+function selectNamedScores(
   names: unknown,
   rawScores: unknown,
   label: (value: unknown) => string | undefined,
@@ -361,7 +361,7 @@ export function summarizeEvaluation(
     const testLabel = label(record(test.metadata).id) ?? label(test.description);
     const candidateLabel = label(record(row.provider).label);
     const namedScores = options.publicLabels
-      ? publicNamedScores(record(test.metadata).publicNamedScores, row.namedScores, label)
+      ? selectNamedScores(record(test.metadata).reportMetrics, row.namedScores, label)
       : undefined;
     return {
       row: index + 1,

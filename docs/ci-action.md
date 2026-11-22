@@ -101,14 +101,15 @@ test `threshold`, or `—` when none was authored. The displayed score never det
 the verdict. Costs use four decimal places, with extra precision when a positive
 amount would otherwise round to zero. Native cost precision stays in `report.json`.
 
-With public labels enabled, a test can also publish selected numeric Promptfoo
-`namedScores`. List the exact keys in authored test metadata. The report shows
-them separately from model usage and verdicts.
+Use `metadata.reportMetrics` to choose which Promptfoo named metrics appear in
+the sanitized report. List the exact keys from Promptfoo's `namedScores` output.
+The oh-my-promptfoo reporter includes these values when `public-labels` is enabled
+and shows them separately from model usage and verdicts.
 
 ```yaml
 defaultTest:
   metadata:
-    publicNamedScores: [tool calls, screenshots]
+    reportMetrics: [tool calls, screenshots]
 ```
 
 ### Live console progress

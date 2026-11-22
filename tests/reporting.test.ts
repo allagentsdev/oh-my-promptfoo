@@ -102,7 +102,7 @@ test("reports only finite named scores explicitly opted in by public test metada
     row({
       testCase: {
         metadata: {
-          publicNamedScores: [
+          reportMetrics: [
             "Tool calls",
             "screenshots | retained",
             "PRIVATE_CREDENTIAL",
