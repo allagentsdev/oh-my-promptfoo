@@ -97,6 +97,50 @@ test("console and Markdown show authored score thresholds without overriding nat
   assert.ok(!privateText.includes("A required check") && !privateText.includes("PRIVATE_"));
 });
 
+test("reports only finite named scores explicitly opted in by public test metadata", () => {
+  const tests = document([
+    row({
+      testCase: {
+        metadata: {
+          reportMetrics: [
+            "Tool calls",
+            "screenshots | retained",
+            "PRIVATE_CREDENTIAL",
+            "Tool calls",
+            "invalid",
+            "missing",
+          ],
+        },
+      },
+      namedScores: {
+        "Tool calls": 4,
+        "screenshots | retained": 0,
+        PRIVATE_CREDENTIAL: 0.125,
+        invalid: "PRIVATE_INVALID",
+        PRIVATE_UNLISTED: 5,
+      },
+    }),
+    row({ namedScores: { PRIVATE_UNLISTED: 42 } }),
+  ]);
+
+  assert.equal(summarizeEvaluation(tests, 0).cases[0].namedScores, undefined);
+  const report = summarizeEvaluation(tests, 0, { publicLabels: true });
+  assert.deepEqual(report.cases[0].namedScores, [
+    { name: "Tool calls", value: 4 },
+    { name: "screenshots | retained", value: 0 },
+    { name: "[REDACTED]", value: 0.125 },
+  ]);
+  assert.equal(report.cases[1].namedScores, undefined);
+  assert.ok(renderSummary(report).includes("| Tool calls | 4 |"));
+  assert.ok(renderConsoleSummary(report).includes("screenshots | retained: 0"));
+  for (const result of [
+    JSON.stringify(report),
+    renderSummary(report),
+    renderConsoleSummary(report),
+  ])
+    assert.ok(!/PRIVATE_(UNLISTED|INVALID|CREDENTIAL)/.test(result));
+});
+
 test("public skill checks use target values after explicit metrics in Markdown and console", () => {
   const checks = [
     { type: "skill-used", value: "review-skill" },
