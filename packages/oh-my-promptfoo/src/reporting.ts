@@ -247,20 +247,27 @@ function graderMeasurements(grade: unknown, failed: boolean): { cost: ResultCost
         metadata.copilot !== undefined
       ) {
         const judge = metadata.judge;
+        const tokens = record(component.tokensUsed);
+        const cached = metadata.judgeAccounting === undefined && metadata.cachedResponse === true;
+        // Promptfoo's model matchers can fill missing usage with zeros even on a pass.
+        // Without an explicit cost or cache hit, neither report nor price that placeholder.
+        const tokenUsage =
+          !cached &&
+          !safeMultiplier(tokens.cost) &&
+          [tokens.total, tokens.prompt, tokens.completion, tokens.cached, tokens.numRequests].every(
+            (value) => value === 0,
+          )
+            ? undefined
+            : component.tokensUsed;
         return [
           {
             cost: responseCost(
-              {
-                metadata,
-                cost: record(component.tokensUsed).cost,
-                tokenUsage: component.tokensUsed,
-                cached: metadata.judgeAccounting === undefined && metadata.cachedResponse === true,
-              },
+              { metadata, cost: tokens.cost, tokenUsage, cached },
               typeof judge === "string" && judge.startsWith("copilot:")
                 ? judge.slice(8)
                 : metadata.model,
             ),
-            usage: usage(component.tokensUsed),
+            usage: usage(tokenUsage),
           },
         ];
       }

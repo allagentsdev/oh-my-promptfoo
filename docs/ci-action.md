@@ -541,12 +541,32 @@ do not own extra spend. Grader errors have unknown usage/cost, including synthet
 zero-token failure records. Absent costs, incomplete/mixed ledgers and unmeasured
 calls make totals unknown.
 
-The local artifact checker explicitly reports zero model calls and cost because
-it only parses and compares captured content. Known native local checks, including
-skill-use and exact matching, establish zero grader usage/cost without model calls.
-Neither masks the live workspace
-grader's reported usage or cost; arbitrary unmeasured JavaScript stays unknown.
-Missing grading results and unmeasured custom wrappers also stay unknown.
+Known native local checks, including skill-use and exact matching, establish
+zero grader usage and cost. Custom JavaScript can do the same by returning a
+Promptfoo grading result with explicit zero accounting, as the local artifact
+checker does. For example, use `type: javascript` and
+`value: file://assert-local.cjs` with an `echo` provider and the prompt `hello`:
+
+```js
+// assert-local.cjs
+module.exports = (output) => {
+  const pass = output === "hello";
+  return {
+    pass,
+    score: pass ? 1 : 0,
+    reason: pass ? "Exact match" : "Expected hello",
+    tokensUsed: { total: 0, prompt: 0, completion: 0, cached: 0, numRequests: 0, cost: 0 },
+  };
+};
+```
+
+`tokensUsed.cost` is in USD and `tokensUsed.numRequests` counts grader requests.
+Promptfoo keeps these fields on the individual assertion result. The report
+shows `$0.0000`, 0 tokens and 0 requests for this grader, without changing
+candidate accounting. Return those zeros only when the assertion makes no model
+calls, whether it passes or fails. A boolean return makes no accounting claim:
+aggregate zeros and zero-filled model usage without a reported cost or cache hit
+do not establish a measurement. Missing or failed judge accounting stays unknown.
 
 Incomplete result coverage or execution also makes run totals unknown; individual
 measured rows remain visible. Promptfoo response cache hits add no new cost; cache

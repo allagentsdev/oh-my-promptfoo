@@ -608,6 +608,105 @@ test("the public CLI sets outputs on native assertion failure and publishes only
   }
 }, 120_000);
 
+test.each([true, false])(
+  "local JavaScript grader accounting with explicit zeros: %s",
+  async (explicit) => {
+    const directory = await fixture();
+    try {
+      const config = join(directory, "local.yaml");
+      const tokensUsed = { total: 0, prompt: 0, completion: 0, cached: 0, numRequests: 0, cost: 0 };
+      await writeFile(
+        join(directory, "assert-local.cjs"),
+        `module.exports = (output) => {
+        const pass = output === 'hello';
+        return ${
+          explicit
+            ? `{
+          pass, score: pass ? 1 : 0, reason: pass ? 'Exact match' : 'Expected hello',
+          tokensUsed: ${JSON.stringify(tokensUsed)},
+        }`
+            : "pass"
+        };
+      };`,
+      );
+      await writeFile(
+        config,
+        stringify({
+          prompts: ["hello"],
+          providers: ["echo"],
+          tests: [{ assert: [{ type: "javascript", value: "file://assert-local.cjs" }] }],
+        }),
+      );
+      const run = await runEvaluation({
+        config,
+        workingDirectory: directory,
+        outputDirectory: join(directory, "out"),
+        args: ["--no-cache"],
+      });
+      assert.equal(run.exitCode, 0, await readFile(run.logPath, "utf8"));
+      const [row] = (await json(run.resultPath)).results.results;
+      assert.equal(row.gradingResult.tokensUsed.total, 0);
+      assert.equal(row.gradingResult.tokensUsed.numRequests, 0);
+      assert.deepEqual(
+        row.gradingResult.componentResults[0].tokensUsed,
+        explicit ? tokensUsed : undefined,
+      );
+      assert.deepEqual(run.report.counts, { pass: 1, fail: 0, error: 0, unknown: 0 });
+      assert.equal(run.report.totals.candidateUsage.requests, 1);
+      for (const { graderCost, graderUsage } of [run.report.cases[0], run.report.totals]) {
+        assert.equal(graderCost.usd, explicit ? 0 : null);
+        assert.equal(graderUsage.total, explicit ? 0 : null);
+        assert.equal(graderUsage.requests, explicit ? 0 : null);
+      }
+      const summary = await readFile(run.summaryPath, "utf8");
+      assert.ok(summary.includes(`| Grader cost | ${explicit ? "$0.0000" : "unknown"} |`));
+      assert.ok(
+        summary.includes(`| Grader usage | ${explicit ? "0 tokens · 0 requests" : "unknown"} |`),
+      );
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  },
+  120_000,
+);
+
+test("a native rubric with no provider telemetry does not present its zero-filled token record as measured", async () => {
+  const directory = await fixture();
+  try {
+    const config = join(directory, "rubric.yaml");
+    await writeFile(
+      config,
+      stringify({
+        prompts: ["hello"],
+        providers: ["echo"],
+        defaultTest: {
+          options: { provider: { id: provider, config: { mode: "grader-unmeasured" } } },
+        },
+        tests: [{ assert: [{ type: "llm-rubric", value: "Output says hello." }] }],
+      }),
+    );
+    const run = await runEvaluation({
+      config,
+      outputDirectory: join(directory, "out"),
+      args: ["--no-cache"],
+    });
+    assert.equal(run.exitCode, 0, await readFile(run.logPath, "utf8"));
+    const [row] = (await json(run.resultPath)).results.results;
+    const { tokensUsed } = row.gradingResult.componentResults[0];
+    assert.equal(tokensUsed.total, 0);
+    assert.equal(tokensUsed.numRequests, 0);
+    assert.equal(tokensUsed.cost, undefined);
+    assert.equal(run.report.status, "pass");
+    assert.equal(run.report.totals.graderCost.usd, null);
+    assert.equal(run.report.totals.graderUsage.total, null);
+    assert.equal(run.report.totals.graderUsage.requests, null);
+    const summary = await readFile(run.summaryPath, "utf8");
+    assert.ok(summary.includes("| Grader | unknown | unknown | unknown |"));
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+}, 120_000);
+
 test("real package grader failures stay errors even when native score policy tolerates the failed assertion", async () => {
   const directory = await fixture();
   try {
@@ -644,8 +743,11 @@ test("real package grader failures stay errors even when native score policy tol
     assert.equal(run.report.status, "error");
     assert.equal(run.report.totals.graderCost.usd, null);
     assert.equal(run.report.totals.graderUsage.total, null);
+    assert.equal(run.report.totals.graderUsage.requests, null);
     assert.ok(run.report.cases[0].assertions.some((item) => item.status === "error"));
-    assert.ok(!(await readFile(run.summaryPath, "utf8")).includes("PRIVATE_"));
+    const summary = await readFile(run.summaryPath, "utf8");
+    assert.ok(summary.includes("| Grader | unknown | unknown | unknown |"));
+    assert.ok(!summary.includes("PRIVATE_"));
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

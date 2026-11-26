@@ -460,9 +460,13 @@ test("native rubric prices use the recorded response model and keep mismatches u
   assert.equal(report.totals.graderCost.usd, estimateCopilotCost(usage, prices, "fixture"));
   assert.equal(report.totals.graderCost.basis, "estimate");
   assert.ok(renderSummary(report).includes("~$0.0001"));
-  input.results.results[0].gradingResult.componentResults[0].metadata.model = "another-model";
+  const component = input.results.results[0].gradingResult.componentResults[0];
+  component.metadata.model = "another-model";
   assert.equal(summarizeEvaluation(input, 0).totals.graderCost.usd, null);
-  delete input.results.results[0].gradingResult.componentResults[0].metadata.model;
+  delete component.metadata.model;
+  assert.equal(summarizeEvaluation(input, 0).totals.graderCost.usd, null);
+  component.metadata.model = "fixture";
+  component.tokensUsed = { total: 0, prompt: 0, completion: 0, cached: 0, numRequests: 0 };
   assert.equal(summarizeEvaluation(input, 0).totals.graderCost.usd, null);
 });
 

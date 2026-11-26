@@ -31,6 +31,8 @@ export default class CiProvider {
     if (mode === "throw") throw new Error("PRIVATE_TRANSPORT_REASON");
     if (mode === "error") return { error: "PRIVATE_PROVIDER_REASON" };
     if (mode === "grader-error") return { output: "PRIVATE_INVALID_GRADE" };
+    if (mode === "grader-unmeasured")
+      return { output: JSON.stringify({ pass: true, score: 1, reason: "Output says hello" }) };
     return { output: prompt };
   }
 }
