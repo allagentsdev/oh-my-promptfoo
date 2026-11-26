@@ -10,6 +10,7 @@ import { context, propagation, trace } from "@opentelemetry/api";
 import { AsyncLocalStorageContextManager } from "@opentelemetry/context-async-hooks";
 import { W3CTraceContextPropagator } from "@opentelemetry/core";
 import { type ReadableSpan, TracerProvider } from "@opentelemetry/sdk-trace";
+import { evaluate, ResultFailureReason } from "promptfoo";
 import { afterEach, expect, test, vi } from "vitest";
 import {
   agentAssert,
@@ -240,6 +241,107 @@ function candidate(
   });
 }
 const request = (value: Record<string, unknown>) => `mcp:${JSON.stringify(value)}`;
+
+async function installBrokenServer(root: string) {
+  await writeFile(
+    join(root, "mocks", "broken.mjs"),
+    await readFile(new URL("./fixtures/mcp-startup-failure.mjs", import.meta.url), "utf8"),
+  );
+}
+
+const startupError = /MCP server "fixture" failed to start.*missing module/i;
+const noMcpOutput = "Candidate answered without using MCP tools.";
+
+test.each(["event", "slow", "opaque", "late-failure"])(
+  "Copilot reports a configured stdio startup failure from an event (%s)",
+  async (mode) => {
+    const root = await consumerProject();
+    await installBrokenServer(root);
+    const provider = candidate(root, "copilot-sdk", {
+      path: ".eval-mocks/broken.mjs",
+      env: { MOCK_MODE: "private-stdio-literal" },
+    });
+    try {
+      const response = await provider.callApi(request({ startup: mode }));
+      expect(response.output).toBe(noMcpOutput);
+      expect(response.error).toMatch(
+        mode === "opaque" ? /MCP server "fixture" failed to start\./ : startupError,
+      );
+      expect(response.error).not.toMatch(
+        /raw-stderr-fixture|private-(?:stdio-literal|unknown-credential)|missing-mcp-fixture-dependency|\.eval-mocks|file:\/\/|allagents-mcp-|unconfigured/,
+      );
+      expect(parseToolInventory((response.metadata as any).toolInventory)).toMatchObject({
+        status: "incomplete",
+        incompleteReasons: expect.arrayContaining(["mcp-startup-failed"]),
+        calls: [],
+      });
+      expect(response.cost).toBeUndefined();
+      expect(response.metadata).toMatchObject({
+        copilot: { accounting: { status: "partial", reason: "execution_incomplete" } },
+      });
+    } finally {
+      await provider.cleanup();
+    }
+  },
+);
+
+test("Promptfoo records a Copilot startup failure known only to the status RPC as a provider error", async () => {
+  const root = await consumerProject();
+  await installBrokenServer(root);
+  vi.stubEnv("PROMPTFOO_DISABLE_TELEMETRY", "1");
+  vi.stubEnv("PROMPTFOO_DISABLE_UPDATE", "1");
+  vi.stubEnv("PROMPTFOO_CONFIG_DIR", join(root, "promptfoo"));
+  const provider = new CopilotSdk({
+    config: {
+      basePath: root,
+      working_dir: "mocks",
+      mcpServers: { fixture: { path: "broken.mjs" } },
+    },
+  });
+  try {
+    const evaluation = await evaluate(
+      {
+        writeLatestResults: false,
+        prompts: [request({ startup: "snapshot" })],
+        providers: [provider],
+        tests: [{ assert: [{ type: "equals", value: "must not be graded" }] }],
+      },
+      { cache: false, maxConcurrency: 1 },
+    );
+    const { results, stats } = await evaluation.toEvaluateSummary();
+    expect(results).toHaveLength(1);
+    expect(results[0]).toMatchObject({
+      error: expect.stringMatching(startupError),
+      failureReason: ResultFailureReason.ERROR,
+      success: false,
+    });
+    expect(results[0]?.gradingResult).toBeNull();
+    expect(stats).toMatchObject({ errors: 1, failures: 0 });
+  } finally {
+    await provider.cleanup();
+  }
+});
+
+test.each(["healthy", "recovered", "unmaterialized", "late-recovery"])(
+  "Copilot permits a %s configured server to go unused and ignores unrelated failures",
+  async (mode) => {
+    const root = await consumerProject();
+    const provider = candidate(root, "copilot-sdk", { tools: [] });
+    try {
+      const response = await provider.callApi(request({ startup: mode }));
+      expect(response.error).toBeUndefined();
+      expect(response.output).toBe(noMcpOutput);
+      expect(response.cost).toBe(0.001);
+      expect(response.metadata).toMatchObject({ copilot: { accounting: { status: "complete" } } });
+      expect(parseToolInventory((response.metadata as any).toolInventory)).toMatchObject({
+        status: "complete",
+        calls: [],
+      });
+    } finally {
+      await provider.cleanup();
+    }
+  },
+);
 
 for (const id of candidates) {
   test(`${id} executes real stdio with literal env, argv and working directory`, async () => {
