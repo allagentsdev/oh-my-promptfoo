@@ -249,8 +249,8 @@ function graderMeasurements(grade: unknown, failed: boolean): { cost: ResultCost
         const judge = metadata.judge;
         const tokens = record(component.tokensUsed);
         const cached = metadata.judgeAccounting === undefined && metadata.cachedResponse === true;
-        // Promptfoo's model matchers can fill missing usage with zeros even on a pass.
-        // Without an explicit cost or cache hit, neither report nor price that placeholder.
+        // Some Promptfoo matchers fill missing judge usage with zeros even on a pass.
+        // Do not report or price those zeros without a reported cost or a cache hit.
         const tokenUsage =
           !cached &&
           !safeMultiplier(tokens.cost) &&

@@ -608,9 +608,12 @@ test("the public CLI sets outputs on native assertion failure and publishes only
   }
 }, 120_000);
 
-test.each([true, false])(
-  "local JavaScript grader accounting with explicit zeros: %s",
-  async (explicit) => {
+test.each([
+  { explicit: true, expected: "zero" },
+  { explicit: false, expected: "unknown" },
+])(
+  "a local JavaScript assertion reports $expected grader usage and cost",
+  async ({ explicit }) => {
     const directory = await fixture();
     try {
       const config = join(directory, "local.yaml");
@@ -670,7 +673,7 @@ test.each([true, false])(
   120_000,
 );
 
-test("a native rubric with no provider telemetry does not present its zero-filled token record as measured", async () => {
+test("a rubric with no reported usage or cost stays unknown", async () => {
   const directory = await fixture();
   try {
     const config = join(directory, "rubric.yaml");
@@ -707,7 +710,7 @@ test("a native rubric with no provider telemetry does not present its zero-fille
   }
 }, 120_000);
 
-test("real package grader failures stay errors even when native score policy tolerates the failed assertion", async () => {
+test("a judge failure remains an error even when Promptfoo passes the case", async () => {
   const directory = await fixture();
   try {
     const config = join(directory, "grader.yaml");

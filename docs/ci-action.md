@@ -541,11 +541,11 @@ do not own extra spend. Grader errors have unknown usage/cost, including synthet
 zero-token failure records. Absent costs, incomplete/mixed ledgers and unmeasured
 calls make totals unknown.
 
-Known native local checks, including skill-use and exact matching, establish
-zero grader usage and cost. Custom JavaScript can do the same by returning a
-Promptfoo grading result with explicit zero accounting, as the local artifact
-checker does. For example, use `type: javascript` and
-`value: file://assert-local.cjs` with an `echo` provider and the prompt `hello`:
+Skill-use and exact-match checks make no model calls, so the report shows zero
+grader usage and cost. A JavaScript assertion can report the same zeros in
+`tokensUsed`, as the local artifact checker does. To try it, use the `echo`
+provider with the prompt `hello` and set `type: javascript` and
+`value: file://assert-local.cjs`:
 
 ```js
 // assert-local.cjs
@@ -562,11 +562,14 @@ module.exports = (output) => {
 
 `tokensUsed.cost` is in USD and `tokensUsed.numRequests` counts grader requests.
 Promptfoo keeps these fields on the individual assertion result. The report
-shows `$0.0000`, 0 tokens and 0 requests for this grader, without changing
-candidate accounting. Return those zeros only when the assertion makes no model
-calls, whether it passes or fails. A boolean return makes no accounting claim:
-aggregate zeros and zero-filled model usage without a reported cost or cache hit
-do not establish a measurement. Missing or failed judge accounting stays unknown.
+shows `$0.0000`, 0 tokens and 0 requests for the grader. Candidate accounting
+does not change. Return these zeros only if the assertion makes no model calls,
+whether it passes or fails.
+
+A boolean return leaves grader usage and cost unknown. The report ignores
+aggregate zeros and does not use zero-filled judge usage unless the judge
+reported a cost or the response came from cache. Failed judges also show
+unknown usage and cost.
 
 Incomplete result coverage or execution also makes run totals unknown; individual
 measured rows remain visible. Promptfoo response cache hits add no new cost; cache

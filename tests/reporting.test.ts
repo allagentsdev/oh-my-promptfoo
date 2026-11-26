@@ -439,7 +439,7 @@ test("batch diagnostic children are shown once and do not duplicate judge spend"
   assert.equal(unknown.totals.graderCost.usd, null);
 });
 
-test("native rubric prices use the recorded response model and keep mismatches unknown", () => {
+test("rubric cost estimates require a matching model and measured usage", () => {
   const input = document([
     row({
       gradingResult: {
