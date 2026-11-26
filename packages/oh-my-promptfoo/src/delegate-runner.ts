@@ -23,6 +23,7 @@ import {
   sessionAccounting,
 } from "./copilot-accounting.js";
 import { copilotInput } from "./copilot-input.js";
+import { CopilotMcpStatus } from "./copilot-mcp-status.js";
 import { claudeReadAllowed, graderConfig, graderReadScope } from "./grader-policy.js";
 import {
   claudeMcpOptions,
@@ -400,6 +401,7 @@ async function runNative(
 
 interface SessionLike {
   rpc?: {
+    mcp?: { listConfigured?: () => Promise<unknown> };
     skills?: { getInvoked?: () => Promise<{ skills: unknown }> };
     usage?: { getMetrics?: () => Promise<unknown> };
   };
@@ -514,7 +516,9 @@ async function runCopilot(frame: CallFrame, signal: AbortSignal): Promise<JsonOb
   });
   let session: SessionLike | undefined, unsubscribe: (() => void) | undefined;
   let output = "",
-    sessionError: string | undefined;
+    sessionError: string | undefined,
+    mcpStartupError: string | undefined;
+  const mcpStatus = new CopilotMcpStatus(mcpServers);
   const usage = { prompt: 0, completion: 0, total: 0, cached: 0, numRequests: 0 };
   let premiumCost = 0;
   let premiumCostComplete = true;
@@ -620,6 +624,10 @@ async function runCopilot(frame: CallFrame, signal: AbortSignal): Promise<JsonOb
           return;
         }
         const data = event.data;
+        if (event.type === "session.mcp_server_status_changed") {
+          mcpStatus.observe(data.serverName, data.status, data.error);
+          return;
+        }
         for (const identity of [event.agentId, data.parentToolCallId])
           if (
             identity !== undefined &&
@@ -834,6 +842,13 @@ async function runCopilot(frame: CallFrame, signal: AbortSignal): Promise<JsonOb
     callFailed = true;
     callError = error;
   } finally {
+    if (session && !signal.aborted) {
+      // Events can precede session.on(). Read existing live state, not mcp.list(),
+      // which can start MCP servers (and wait for them) on a cache miss.
+      await mcpStatus.refresh(() => session?.rpc?.mcp?.listConfigured?.(), frame.deadlineMs);
+      mcpStartupError = mcpStatus.error();
+      if (mcpStartupError) inventory.incomplete("mcp-startup-failed");
+    }
     // The cumulative snapshot is the only monetary source. Capture even after a
     // failed send, while the session and its subscription are still available.
     if (session) {
@@ -862,7 +877,7 @@ async function runCopilot(frame: CallFrame, signal: AbortSignal): Promise<JsonOb
           else
             accounting = sessionAccounting(
               metrics,
-              !callFailed && !sessionError && !signal.aborted,
+              !callFailed && !sessionError && !mcpStartupError && !signal.aborted,
               frame.config.model,
             );
         }
@@ -920,10 +935,11 @@ async function runCopilot(frame: CallFrame, signal: AbortSignal): Promise<JsonOb
   }
   const error = cleanupErrors.length
     ? "Copilot cleanup failed"
-    : callFailed
-      ? (callError instanceof Error ? callError.message : String(callError)) ||
-        "Copilot execution failed"
-      : sessionError;
+    : ((!signal.aborted ? mcpStartupError : undefined) ??
+      (callFailed
+        ? (callError instanceof Error ? callError.message : String(callError)) ||
+          "Copilot execution failed"
+        : sessionError));
   if ((callFailed || error || signal.aborted) && accounting.status === "complete") {
     accounting.status = "partial";
     accounting.reason = "execution_incomplete";

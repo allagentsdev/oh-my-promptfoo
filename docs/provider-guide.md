@@ -525,7 +525,15 @@ termination does not depend on a main-thread disconnect callback or polling.
 
 Copilot receives explicit stdio options, tools and timeout with
 `enableConfigDiscovery: false`; permission requests approve only configured server
-and tool pairs. Claude receives Promptfoo's `mcp.servers`,
+and tool pairs. If Copilot reports an unresolved startup failure for a configured
+server, the row is a provider error and Promptfoo skips grading it. The error
+names the server and includes a recognized cause when available (for example, a
+missing module). It does not copy startup stderr, which may contain private paths or
+credentials. Check that stderr locally for details. Detection uses SDK status
+events and a bounded, best-effort status lookup that does not start servers.
+A healthy or not-yet-started server does not need to be used.
+
+Claude receives Promptfoo's `mcp.servers`,
 `strict_mcp_config: true`, with configured MCP names added to its allowed-tools
 policy without replacing existing native restrictions. Authored Claude
 `setting_sources`, settings and plugins pass through unchanged.

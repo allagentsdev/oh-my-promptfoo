@@ -30,7 +30,10 @@ async function connect(server, cwd) {
     pending.clear();
   };
   child.on("error", fail);
-  child.on("exit", () => fail(Error(`MCP exited: ${stderr}`)));
+  child.stdin.on("error", (error) => {
+    if (error.code !== "EPIPE") fail(error);
+  });
+  child.on("close", () => fail(Error(`MCP exited: ${stderr}`)));
   return {
     request(method, params = {}) {
       return new Promise((resolve, reject) => {
@@ -74,8 +77,23 @@ export class CopilotClient {
   async createSession(config) {
     let callback = () => {};
     let connection;
+    const serverStates = [];
+    let startupMode;
+    let materializedByList = false;
     return {
       rpc: {
+        mcp: {
+          async list() {
+            materializedByList = true;
+            return { servers: [] };
+          },
+          async listConfigured() {
+            if (startupMode === "event" || startupMode === "opaque")
+              throw Error("Method not supported");
+            if (startupMode === "slow") return new Promise(() => {});
+            return { servers: serverStates };
+          },
+        },
         skills: {
           async getInvoked() {
             return { skills: [] };
@@ -101,6 +119,37 @@ export class CopilotClient {
           return { data: { content: JSON.stringify(permissions.map((item) => item.kind)) } };
         }
         if (!server) throw Error("Configured MCP server is unavailable");
+        if (request.startup) {
+          startupMode = request.startup;
+          let live;
+          if (startupMode !== "unmaterialized") {
+            connection = await connect(server, config.workingDirectory);
+            try {
+              await connection.request("initialize");
+              live = { status: "connected" };
+            } catch (error) {
+              live = { status: "failed", error: error.message };
+            }
+          }
+          serverStates.push({ name: serverName, enabled: true, live });
+          serverStates.push({ name: "unconfigured", enabled: true, live: { status: "failed" } });
+          if (live && startupMode !== "snapshot")
+            callback({
+              type: "session.mcp_server_status_changed",
+              data: {
+                serverName,
+                ...(startupMode === "recovered" ? { status: "failed" } : live),
+                ...(startupMode === "opaque" ? { error: undefined } : {}),
+              },
+            });
+          callback({
+            type: "session.mcp_server_status_changed",
+            data: { serverName: "unconfigured", status: "failed" },
+          });
+          const content = "Candidate answered without using MCP tools.";
+          callback({ type: "session.idle", data: {} });
+          return { data: { content } };
+        }
         if (!request.bypassPermission && !request.list) {
           const permission = await config.onPermissionRequest({
             kind: "mcp",
@@ -132,6 +181,7 @@ export class CopilotClient {
       async disconnect() {
         callback = () => {};
         await connection?.close();
+        if (materializedByList) throw Error("Diagnostic unexpectedly materialized MCP servers");
       },
     };
   }
