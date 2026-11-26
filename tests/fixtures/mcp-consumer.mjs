@@ -79,6 +79,7 @@ export class CopilotClient {
     let connection;
     const serverStates = [];
     let startupMode;
+    let lateStartupEvent;
     let materializedByList = false;
     return {
       rpc: {
@@ -92,6 +93,12 @@ export class CopilotClient {
               throw Error("Method not supported");
             if (startupMode === "slow") return new Promise(() => {});
             return { servers: serverStates };
+          },
+        },
+        usage: {
+          async getMetrics() {
+            if (lateStartupEvent) callback(lateStartupEvent);
+            return { totalNanoAiu: 100_000_000 };
           },
         },
         skills: {
@@ -131,14 +138,25 @@ export class CopilotClient {
               live = { status: "failed", error: error.message };
             }
           }
-          serverStates.push({ name: serverName, enabled: true, live });
+          const lateFailure = startupMode === "late-failure";
+          const lateRecovery = startupMode === "late-recovery";
+          if (lateFailure || lateRecovery)
+            lateStartupEvent = {
+              type: "session.mcp_server_status_changed",
+              data: { serverName, ...live },
+            };
+          serverStates.push({
+            name: serverName,
+            enabled: true,
+            live: lateFailure ? undefined : lateRecovery ? { status: "failed" } : live,
+          });
           serverStates.push({ name: "unconfigured", enabled: true, live: { status: "failed" } });
-          if (live && startupMode !== "snapshot")
+          if (live && startupMode !== "snapshot" && !lateFailure)
             callback({
               type: "session.mcp_server_status_changed",
               data: {
                 serverName,
-                ...(startupMode === "recovered" ? { status: "failed" } : live),
+                ...(startupMode === "recovered" || lateRecovery ? { status: "failed" } : live),
                 ...(startupMode === "opaque" ? { error: undefined } : {}),
               },
             });

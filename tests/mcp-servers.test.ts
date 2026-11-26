@@ -252,7 +252,7 @@ async function installBrokenServer(root: string) {
 const startupError = /MCP server "fixture" failed to start.*missing module/i;
 const noMcpOutput = "Candidate answered without using MCP tools.";
 
-test.each(["event", "slow", "opaque"])(
+test.each(["event", "slow", "opaque", "late-failure"])(
   "Copilot reports a configured stdio startup failure from an event (%s)",
   async (mode) => {
     const root = await consumerProject();
@@ -274,6 +274,10 @@ test.each(["event", "slow", "opaque"])(
         status: "incomplete",
         incompleteReasons: expect.arrayContaining(["mcp-startup-failed"]),
         calls: [],
+      });
+      expect(response.cost).toBeUndefined();
+      expect(response.metadata).toMatchObject({
+        copilot: { accounting: { status: "partial", reason: "execution_incomplete" } },
       });
     } finally {
       await provider.cleanup();
@@ -318,7 +322,7 @@ test("Promptfoo records a Copilot startup failure known only to the status RPC a
   }
 });
 
-test.each(["healthy", "recovered", "unmaterialized"])(
+test.each(["healthy", "recovered", "unmaterialized", "late-recovery"])(
   "Copilot permits a %s configured server to go unused and ignores unrelated failures",
   async (mode) => {
     const root = await consumerProject();
@@ -327,6 +331,8 @@ test.each(["healthy", "recovered", "unmaterialized"])(
       const response = await provider.callApi(request({ startup: mode }));
       expect(response.error).toBeUndefined();
       expect(response.output).toBe(noMcpOutput);
+      expect(response.cost).toBe(0.001);
+      expect(response.metadata).toMatchObject({ copilot: { accounting: { status: "complete" } } });
       expect(parseToolInventory((response.metadata as any).toolInventory)).toMatchObject({
         status: "complete",
         calls: [],

@@ -516,8 +516,7 @@ async function runCopilot(frame: CallFrame, signal: AbortSignal): Promise<JsonOb
   });
   let session: SessionLike | undefined, unsubscribe: (() => void) | undefined;
   let output = "",
-    sessionError: string | undefined,
-    mcpStartupError: string | undefined;
+    sessionError: string | undefined;
   const mcpStatus = new CopilotMcpStatus(mcpServers);
   const usage = { prompt: 0, completion: 0, total: 0, cached: 0, numRequests: 0 };
   let premiumCost = 0;
@@ -846,8 +845,6 @@ async function runCopilot(frame: CallFrame, signal: AbortSignal): Promise<JsonOb
       // Events can precede session.on(). Read existing live state, not mcp.list(),
       // which can start MCP servers (and wait for them) on a cache miss.
       await mcpStatus.refresh(() => session?.rpc?.mcp?.listConfigured?.(), frame.deadlineMs);
-      mcpStartupError = mcpStatus.error();
-      if (mcpStartupError) inventory.incomplete("mcp-startup-failed");
     }
     // The cumulative snapshot is the only monetary source. Capture even after a
     // failed send, while the session and its subscription are still available.
@@ -877,7 +874,7 @@ async function runCopilot(frame: CallFrame, signal: AbortSignal): Promise<JsonOb
           else
             accounting = sessionAccounting(
               metrics,
-              !callFailed && !sessionError && !mcpStartupError && !signal.aborted,
+              !callFailed && !sessionError && !signal.aborted,
               frame.config.model,
             );
         }
@@ -933,9 +930,12 @@ async function runCopilot(frame: CallFrame, signal: AbortSignal): Promise<JsonOb
         error: "Tool did not complete before session shutdown",
       });
   }
+  // The SDK can report a failure or recovery while usage metrics are pending.
+  const mcpStartupError = signal.aborted ? undefined : mcpStatus.error();
+  if (mcpStartupError) inventory.incomplete("mcp-startup-failed");
   const error = cleanupErrors.length
     ? "Copilot cleanup failed"
-    : ((!signal.aborted ? mcpStartupError : undefined) ??
+    : (mcpStartupError ??
       (callFailed
         ? (callError instanceof Error ? callError.message : String(callError)) ||
           "Copilot execution failed"
