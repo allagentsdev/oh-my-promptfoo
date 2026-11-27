@@ -721,6 +721,30 @@ such as `eval`, `source`, and `.` fail closed. External wrappers, interpreters,
 and scripts are not recursively interpreted. Use raw argument regexes only
 when their weaker semantics are appropriate.
 
+## Deterministic file-read assertion
+
+Use `file-read` to check whether an agent read a named file during the session,
+without hard-coding its directory or enabling OpenTelemetry tracing.
+
+```yaml
+- type: javascript
+  value: package:oh-my-promptfoo/assertions:file-read
+  config:
+    filename: guide.md
+```
+
+The assertion uses a complete provider tool inventory. It matches the exact
+basename of a successful local `view`, `read`, or `read_file` call. It also
+accepts a `cat` file operand in a successful Bash call, including a simple
+`cd dir && cat file` guard. It does not count file mentions, redirect targets,
+failed calls, or reads that cannot be recognized by the static shell parser.
+A match reports its tool call ID in `metadata.matchedCallIds`.
+
+Bash success applies to the tool call as a whole; it does not prove that each
+subcommand succeeded or that its output reached the agent. A filename match
+also does not prove which copy was read if multiple files share that name.
+Missing or incomplete tool inventory is a grader error.
+
 ## Deterministic workspace-file assertion
 
 ```yaml

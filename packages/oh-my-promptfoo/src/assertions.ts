@@ -12,6 +12,8 @@ export { withAssertions } from "./assertion-integration.js";
 export type { BatchedRubricConfig, RubricComponent } from "./rubric-contract.js";
 export type { ParsedCommand, ShellCommandSelector } from "./shell-selector.js";
 export {
+  type FileReadConfig,
+  fileRead as "file-read",
   type SkillNotLoadedConfig,
   skillNotLoaded as "skill-not-loaded",
   type ToolAssertionConfig,

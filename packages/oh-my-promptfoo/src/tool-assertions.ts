@@ -1,3 +1,4 @@
+import { basename } from "node:path";
 import { closed, object } from "./config.js";
 import {
   type ParsedCommand,
@@ -20,6 +21,9 @@ export interface ToolAssertionConfig extends ToolSelector {
 }
 export interface SkillNotLoadedConfig {
   name: ToolName;
+}
+export interface FileReadConfig {
+  filename: string;
 }
 interface InventoryAssertionContext {
   config?: unknown;
@@ -187,6 +191,83 @@ export function toolCalled(_output: unknown, context?: InventoryAssertionContext
 export function toolNotCalled(_output: unknown, context?: InventoryAssertionContext): Grade {
   return toolAssertion(false, context);
 }
+const filesystemReadTools = new Set(["view", "read", "read_file"]);
+const catReadOption =
+  /^(?:-[AbEnstTuv]+|--(?:show-all|number-nonblank|show-ends|number|squeeze-blank|show-tabs|show-nonprinting))$/;
+
+function catReadsFile(args: string[], filename: string): boolean {
+  let optionsEnded = false;
+  let matched = false;
+  for (const arg of args) {
+    if (!optionsEnded && arg === "--") {
+      optionsEnded = true;
+    } else if (!optionsEnded && arg.startsWith("-") && arg !== "-") {
+      if (!catReadOption.test(arg)) return false;
+    } else if (arg !== "-" && basename(arg) === filename) {
+      matched = true;
+    }
+  }
+  return matched;
+}
+
+function bashReadsFile(command: string, filename: string): boolean {
+  let commands: ParsedCommand[];
+  try {
+    commands = parseShell(command);
+  } catch {
+    // An unsupported Bash call cannot provide evidence, but another call may.
+    return false;
+  }
+  return commands.some(({ program, args, conditional }, index) => {
+    const previous = commands[index - 1];
+    // Accept the common `cd dir && cat file` guard, not arbitrary conditional commands.
+    const directoryGuard =
+      previous?.program === "cd" && !previous.conditional && !command.includes("||");
+    return program === "cat" && (!conditional || directoryGuard) && catReadsFile(args, filename);
+  });
+}
+
+export function fileRead(_output: unknown, context?: InventoryAssertionContext): Grade {
+  try {
+    const { filename } = closed(context?.config, ["filename"], "file-read config");
+    if (
+      typeof filename !== "string" ||
+      !filename ||
+      filename === "." ||
+      filename === ".." ||
+      basename(filename) !== filename
+    ) {
+      throw new Error("file-read requires a filename without a directory path");
+    }
+    const inventory = evidence(context);
+    for (const call of inventory.calls) {
+      if (call.mcpServer || call.mcpTool || call.success !== true || call.argumentsTruncated)
+        continue;
+      const args = call.arguments;
+      if (!args || typeof args !== "object" || Array.isArray(args)) continue;
+      const { path, command } = args as Record<string, unknown>;
+      const direct =
+        filesystemReadTools.has(call.name) &&
+        typeof path === "string" &&
+        basename(path) === filename;
+      const shell =
+        call.name === "bash" && typeof command === "string" && bashReadsFile(command, filename);
+      if (!direct && !shell) continue;
+      return {
+        pass: true,
+        score: 1,
+        reason: direct
+          ? `Read ${filename}`
+          : `Successful Bash call contained a cat read of ${filename}`,
+        metadata: { matchedCallIds: [call.id] },
+      };
+    }
+    return { pass: false, score: 0, reason: `No successful read of ${filename}`, metadata: {} };
+  } catch (cause) {
+    return error(cause instanceof Error ? cause.message : String(cause));
+  }
+}
+
 export function skillNotLoaded(_output: unknown, context?: InventoryAssertionContext): Grade {
   try {
     const inventory = evidence(context);
