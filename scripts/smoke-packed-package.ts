@@ -49,6 +49,8 @@ const selector: Assertions.ToolAssertionConfig = {name: {regex: '^read$'}, argum
 const called: unknown = Assertions['tool-called']('answer', {config: selector});
 const absent: unknown = Assertions['tool-not-called']('answer', {config: selector});
 const skillAbsent: unknown = Assertions['skill-not-loaded']('answer', {config: {name: 'demo'}});
+const fileConfig: Assertions.FileReadConfig = {filename: 'guide.md'};
+const read: unknown = Assertions['file-read']('answer', {config: fileConfig});
 const fallbackConfig: Providers.FallbackConfig = {providers: ['openai:example'], cooldownMs: 0};
 const fallback = new Providers.Fallback({config: fallbackConfig});
 const fallbackId: string = fallback.id();
@@ -275,6 +277,8 @@ for(const entry of [InventoryAssertions,c]){
   assert.equal(entry['tool-not-called']('answer',context).pass,true);
   assert.equal(entry['tool-called']('answer',context).pass,false);
   assert.equal(entry['skill-not-loaded']('answer',context).pass,true);
+  const read={id:'read',name:'view',arguments:{path:'docs/guide.md'},argumentsTruncated:false,startedAt:'2026-01-01T00:00:00Z',endedAt:'2026-01-01T00:00:01Z',success:true};
+  assert.equal(entry['file-read']('answer',{config:{filename:'guide.md'},providerResponse:{metadata:{toolInventory:{...complete,calls:[read]}}}}).pass,true);
   for(const name of ['tool-called','tool-not-called','skill-not-loaded']){
     const grade=entry[name]('answer',{...context,providerResponse:{metadata:{toolInventory:{...complete,status:'incomplete',incompleteReasons:['missing-tool-completion']}}}});
     assert.equal(grade.pass,false);assert.equal(grade.metadata.graderError,true);

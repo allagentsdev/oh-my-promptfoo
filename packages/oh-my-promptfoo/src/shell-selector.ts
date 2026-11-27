@@ -108,16 +108,21 @@ const executionBuiltins = /^(?:eval|source|\.|builtin|trap|alias|unalias|enable|
  * duplication and unmodeled execution/resolution-changing builtins fail closed.
  * External wrappers, interpreters and scripts are not recursively interpreted.
  */
-export function parseShell(source: string): ParsedCommand[] {
+export function parseShell(
+  source: string,
+  { stopAfterExec = false }: { stopAfterExec?: boolean } = {},
+): ParsedCommand[] {
   if (source.includes("\0")) throw new Error("NUL in shell command");
   const commands: ParsedCommand[] = [];
   let words: WordToken[] = [],
     conditional = false,
-    requiresCommand = false;
-  const flush = () => {
+    requiresCommand = false,
+    previousWasPipe = false;
+  const flush = (nextIsPipe = false) => {
     let offset = 0;
     while (words[offset]?.assignment) offset++;
     const hadCommand = offset < words.length;
+    let replacesShell = false;
     if (hadCommand) {
       if (reserved.test(words[offset].word))
         throw new Error(`Unsupported shell control syntax: ${words[offset].word}`);
@@ -133,6 +138,7 @@ export function parseShell(source: string): ParsedCommand[] {
         // another shell builtin. Neither wrapper operand is an assignment prefix.
         if (builtin === "exec") {
           external = true;
+          replacesShell = !previousWasPipe && !nextIsPipe;
           break;
         }
       }
@@ -146,7 +152,7 @@ export function parseShell(source: string): ParsedCommand[] {
       });
     }
     words = [];
-    return hadCommand;
+    return { hadCommand, replacesShell };
   };
   const input = tokens(source);
   for (let i = 0; i < input.length; i++) {
@@ -162,8 +168,10 @@ export function parseShell(source: string): ParsedCommand[] {
       i++;
       continue;
     }
-    const hadCommand = flush();
+    const { hadCommand, replacesShell } = flush(token.op === "|");
     if (token.op !== ";" && !hadCommand) throw new Error("Shell operator requires a command");
+    if (stopAfterExec && replacesShell) return commands;
+    if (hadCommand || token.op !== ";") previousWasPipe = token.op === "|";
     if (token.op === ";") {
       if (requiresCommand) throw new Error("Shell operator requires a following command");
       conditional = false;
