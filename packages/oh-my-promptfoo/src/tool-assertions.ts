@@ -33,6 +33,7 @@ interface Grade {
   pass: boolean;
   score: number;
   reason: string;
+  tokensUsed?: typeof noGraderUsage;
   metadata: {
     graderError?: true;
     matchedCallIds?: string[];
@@ -192,6 +193,7 @@ export function toolNotCalled(_output: unknown, context?: InventoryAssertionCont
   return toolAssertion(false, context);
 }
 const filesystemReadTools = new Set(["view", "read", "read_file"]);
+const noGraderUsage = { total: 0, prompt: 0, completion: 0, cached: 0, numRequests: 0, cost: 0 };
 const catReadOption =
   /^(?:-[AbeEnstTuv]+|--(?:show-all|number-nonblank|show-ends|number|squeeze-blank|show-tabs|show-nonprinting))$/;
 
@@ -259,10 +261,17 @@ export function fileRead(_output: unknown, context?: InventoryAssertionContext):
         reason: direct
           ? `Read ${filename}`
           : `Successful Bash call contained a cat read of ${filename}`,
+        tokensUsed: { ...noGraderUsage },
         metadata: { matchedCallIds: [call.id] },
       };
     }
-    return { pass: false, score: 0, reason: `No successful read of ${filename}`, metadata: {} };
+    return {
+      pass: false,
+      score: 0,
+      reason: `No successful read of ${filename}`,
+      tokensUsed: { ...noGraderUsage },
+      metadata: {},
+    };
   } catch (cause) {
     return error(cause instanceof Error ? cause.message : String(cause));
   }
