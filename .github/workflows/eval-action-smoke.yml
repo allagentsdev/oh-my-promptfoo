@@ -46,3 +46,56 @@ jobs:
           assert.equal(rows[0].response.output, 'READY');
           assert.ok(rows[0].gradingResult.reason);
           NODE
+  token-breakdown:
+    name: Render Test details from synthetic results
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Verify and publish the synthetic summary
+        run: |
+          node --import tsx --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import { appendFile } from 'node:fs/promises';
+          import { renderSummary, summarizeEvaluation } from './packages/oh-my-promptfoo/src/reporting.ts';
+
+          const result = {
+            success: true,
+            score: 1,
+            testIdx: 0,
+            promptIdx: 0,
+            failureReason: 0,
+            testCase: { description: 'Token accounting fixture' },
+            response: {
+              tokenUsage: { total: 1400, prompt: 1200, completion: 200, cached: 800, numRequests: 2 },
+              cost: 0.012,
+            },
+            gradingResult: {
+              pass: true,
+              score: 1,
+              componentResults: [{
+                pass: true,
+                score: 1,
+                assertion: { type: 'llm-rubric' },
+                tokensUsed: { total: 560, prompt: 500, completion: 60, cached: 300, numRequests: 1, cost: 0.004 },
+              }],
+            },
+          };
+          const results = { results: [result], stats: { successes: 1, failures: 0, errors: 0 } };
+          const report = summarizeEvaluation({ results }, undefined, { publicLabels: true });
+          assert.equal(report.status, 'pass');
+          const markdown = renderSummary(report);
+          const details = markdown.split('### Test details')[1];
+          assert.ok(details.includes('Cached input (included in input)'));
+          assert.ok(details.includes('| Candidate | 1,400 | 1,200 | 200 | 800 | 2 | $0.0120 |'));
+          assert.ok(details.includes('| Grader | 560 | 500 | 60 | 300 | 1 | $0.0040 |'));
+          const summary = '> **Synthetic replay:** Fixture token counts and costs. No model calls.\n\n' + markdown;
+          await appendFile(process.env.GITHUB_STEP_SUMMARY, summary);
+          console.log(summary);
+          NODE

@@ -470,6 +470,47 @@ test("rubric cost estimates require a matching model and measured usage", () => 
   assert.equal(summarizeEvaluation(input, 0).totals.graderCost.usd, null);
 });
 
+test("Markdown test details distinguish cached input, unknown counts, and explicit zeros", () => {
+  const report = summarizeEvaluation(
+    document([
+      row({
+        response: { tokenUsage: { ...usage, cached: 40 }, cost: 0.002 },
+      }),
+      row({
+        gradingResult: {
+          pass: true,
+          score: 1,
+          componentResults: [
+            {
+              ...assertion(),
+              assertion: { type: "llm-rubric" },
+              tokensUsed: {
+                total: 65,
+                prompt: 50,
+                completion: 15,
+                cached: 20,
+                numRequests: 1,
+                cost: 0.003,
+              },
+            },
+          ],
+        },
+        response: { tokenUsage: usage },
+      }),
+    ]),
+  );
+  const details = renderSummary(report).split("### Test details")[1];
+  assert.ok(
+    details.includes(
+      "| Role | Total tokens | Input tokens | Output tokens | Cached input (included in input) | Requests | Cost |",
+    ),
+  );
+  assert.ok(details.includes("| Candidate | 110 | 100 | 10 | 40 | 1 | $0.0020 |"));
+  assert.ok(details.includes("| Grader | 0 | 0 | 0 | 0 | 0 | $0.0000 |"));
+  assert.ok(details.includes("| Candidate | 110 | 100 | 10 | unknown | 1 | unknown |"));
+  assert.ok(details.includes("| Grader | 65 | 50 | 15 | 20 | 1 | $0.0030 |"));
+});
+
 test("public case IDs label numbered links while private reports omit them", () => {
   const input = document([
     row({

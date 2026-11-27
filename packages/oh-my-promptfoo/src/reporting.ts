@@ -505,22 +505,24 @@ function measurementNotes(item: CaseReport): string {
     .join(". ");
 }
 
-/** Durations overlap: native evaluation includes workspace preparation and grader calls. */
+/** Durations overlap: evaluation includes workspace preparation and grader calls. */
 function renderTimings(timings: RunTimings, replayed = false): string {
   const rows = [
     ["Toolchain preparation", timings.toolchainMs],
     ["CLI preparation", timings.setupMs],
-    ["Native evaluation (includes workspace and grading)", timings.nativeEvaluationMs],
+    ["Evaluation (includes workspace setup and grading)", timings.nativeEvaluationMs],
     ["Workspace preparation (sum of observed workspaces)", timings.workspacePreparationMs],
     [replayed ? "Replay rendering (this invocation)" : "Reporting", timings.reportingMs],
   ].filter(([, value]) => value !== undefined);
   if (!rows.length) return "";
-  return `<details><summary>${replayed ? "Replay timing" : "Run timing"}</summary>\n\n| Phase | Duration |\n| --- | ---: |\n${rows.map(([name, value]) => `| ${name} | ${formats.time(value as number | null)} |`).join("\n")}\n\nDurations overlap; workspace time is included in native evaluation. They must not be added together.\n\n</details>\n`;
+  return `<details><summary>${replayed ? "Replay timing" : "Run timing"}</summary>\n\n| Phase | Duration |\n| --- | ---: |\n${rows.map(([name, value]) => `| ${name} | ${formats.time(value as number | null)} |`).join("\n")}\n\nDurations overlap; workspace time is included in evaluation. They must not be added together.\n\n</details>\n`;
 }
 
 /** Render only normalized outcomes and explicitly public, redacted labels. */
 export function renderSummary(report: EvaluationReport): string {
   const { number, score, time, money, escapeMarkup, badge, usageSummary } = formats;
+  const usageRow = (role: string, usage: Usage, cost: ResultCost) =>
+    `| ${role} | ${number(usage.total)} | ${number(usage.prompt)} | ${number(usage.completion)} | ${number(usage.cached)} | ${number(usage.requests)} | ${money(cost)} |`;
   const candidate = report.cases[0]?.candidate;
   const sharedCandidate = candidate && report.cases.every((item) => item.candidate === candidate);
   const title = (item: CaseReport, html = false) => {
@@ -603,10 +605,10 @@ export function renderSummary(report: EvaluationReport): string {
       "",
       `Score: **${score(item.score)}** · Candidate time: **${time(item.latencyMs)}**`,
       "",
-      "| Role | Tokens | Requests | Cost |",
-      "| --- | ---: | ---: | ---: |",
-      `| Candidate | ${number(item.candidateUsage.total)} | ${number(item.candidateUsage.requests)} | ${money(item.candidateCost)} |`,
-      `| Grader | ${number(item.graderUsage.total)} | ${number(item.graderUsage.requests)} | ${money(item.graderCost)} |`,
+      "| Role | Total tokens | Input tokens | Output tokens | Cached input (included in input) | Requests | Cost |",
+      "| --- | ---: | ---: | ---: | ---: | ---: | ---: |",
+      usageRow("Candidate", item.candidateUsage, item.candidateCost),
+      usageRow("Grader", item.graderUsage, item.graderCost),
       "",
       ...(notes ? [`${notes}.`, ""] : []),
       ...(item.namedScores?.length
