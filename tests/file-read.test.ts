@@ -3,6 +3,7 @@ import { "file-read" as fileRead } from "../packages/oh-my-promptfoo/src/asserti
 import type { ToolCall } from "../packages/oh-my-promptfoo/src/tool-inventory.js";
 
 const filename = "guide.md";
+const zeroUsage = { total: 0, prompt: 0, completion: 0, cached: 0, numRequests: 0, cost: 0 };
 const read = { name: "view", arguments: { path: `docs/${filename}` } };
 const bash = (command: string, success = true) => ({
   name: "bash",
@@ -40,6 +41,7 @@ test.each(["view", "read", "read_file"])("matches successful %s by basename", (n
     pass: true,
     score: 1,
     metadata: { matchedCallIds: ["tool-0"] },
+    tokensUsed: zeroUsage,
   });
 });
 
@@ -57,6 +59,7 @@ test.each([
     pass: true,
     score: 1,
     metadata: { matchedCallIds: ["tool-1"] },
+    tokensUsed: zeroUsage,
   });
 });
 
@@ -74,16 +77,14 @@ test.each([
   bash(`false && cat ${filename}; true`),
   bash(`cd docs || cat ${filename}`),
 ])("does not count a failed or unrelated call: %j", (call) => {
-  expect(grade([call])).toMatchObject({ pass: false, score: 0 });
+  expect(grade([call])).toMatchObject({ pass: false, score: 0, tokensUsed: zeroUsage });
 });
 
 test("reports invalid configuration and incomplete inventory as grader errors", () => {
-  expect(grade([read], { filename: `docs/${filename}` })).toMatchObject({
-    pass: false,
-    metadata: { graderError: true },
-  });
-  expect(grade([read], { filename }, false)).toMatchObject({
-    pass: false,
-    metadata: { graderError: true },
-  });
+  const invalidConfig = grade([read], { filename: `docs/${filename}` });
+  const incompleteInventory = grade([read], { filename }, false);
+  for (const result of [invalidConfig, incompleteInventory]) {
+    expect(result).toMatchObject({ pass: false, metadata: { graderError: true } });
+    expect(result).not.toHaveProperty("tokensUsed");
+  }
 });

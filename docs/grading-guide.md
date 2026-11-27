@@ -744,7 +744,9 @@ reports its tool call ID in `metadata.matchedCallIds`.
 Bash success applies to the tool call as a whole; it does not prove that each
 subcommand succeeded or that its output reached the agent. A filename match
 also does not prove which copy was read if multiple files share that name.
-Missing or incomplete tool inventory is a grader error.
+The assertion makes no model calls, so a pass or a no-match result reports
+zero grader tokens, requests, and cost. Missing or incomplete tool inventory
+is a grader error, not a no-match result.
 
 ## Deterministic workspace-file assertion
 
