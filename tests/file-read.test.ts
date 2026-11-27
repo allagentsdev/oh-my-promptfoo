@@ -48,6 +48,10 @@ test.each([
   `cd docs && cat ${filename}; ls ../tools; cat other.md`,
   `/bin/cat -- docs/${filename} | head -20`,
   `cat -n --number-nonblank docs/${filename}`,
+  `cat -e docs/${filename}`,
+  `exec /bin/cat docs/${filename}`,
+  `exec /usr/bin/true | /usr/bin/true; cat docs/${filename}`,
+  `/usr/bin/true | exec /usr/bin/true; cat docs/${filename}`,
 ])("recognizes a Bash file operand: %s", (command) => {
   expect(grade([bash("ls *.md"), bash(command)])).toMatchObject({
     pass: true,
@@ -66,6 +70,7 @@ test.each([
   bash(`cat other.md > ${filename}`),
   bash(`cat --help ${filename}`),
   bash(`cat --not-a-cat-option ${filename}; true`),
+  bash(`exec /usr/bin/true; cat ${filename}`),
   bash(`false && cat ${filename}; true`),
   bash(`cd docs || cat ${filename}`),
 ])("does not count a failed or unrelated call: %j", (call) => {

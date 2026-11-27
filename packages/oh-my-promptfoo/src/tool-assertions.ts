@@ -193,7 +193,7 @@ export function toolNotCalled(_output: unknown, context?: InventoryAssertionCont
 }
 const filesystemReadTools = new Set(["view", "read", "read_file"]);
 const catReadOption =
-  /^(?:-[AbEnstTuv]+|--(?:show-all|number-nonblank|show-ends|number|squeeze-blank|show-tabs|show-nonprinting))$/;
+  /^(?:-[AbeEnstTuv]+|--(?:show-all|number-nonblank|show-ends|number|squeeze-blank|show-tabs|show-nonprinting))$/;
 
 function catReadsFile(args: string[], filename: string): boolean {
   let optionsEnded = false;
@@ -213,7 +213,7 @@ function catReadsFile(args: string[], filename: string): boolean {
 function bashReadsFile(command: string, filename: string): boolean {
   let commands: ParsedCommand[];
   try {
-    commands = parseShell(command);
+    commands = parseShell(command, { stopAfterExec: true });
   } catch {
     // An unsupported Bash call cannot provide evidence, but another call may.
     return false;

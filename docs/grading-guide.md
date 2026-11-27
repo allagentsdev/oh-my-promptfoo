@@ -738,7 +738,8 @@ basename of a successful local `view`, `read`, or `read_file` call. It also
 accepts a `cat` file operand in a successful Bash call, including a simple
 `cd dir && cat file` guard. It does not count file mentions, redirect targets,
 failed calls, or reads that cannot be recognized by the static shell parser.
-A match reports its tool call ID in `metadata.matchedCallIds`.
+Commands after a potentially shell-replacing `exec` are not counted. A match
+reports its tool call ID in `metadata.matchedCallIds`.
 
 Bash success applies to the tool call as a whole; it does not prove that each
 subcommand succeeded or that its output reached the agent. A filename match
