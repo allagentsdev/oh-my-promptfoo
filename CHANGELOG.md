@@ -77,6 +77,19 @@
 - Exercise MCP candidate execution and packed consumers with pinned Git fixtures on all platforms; retain the Linux-specific protected local-source case.
 - Extend native-authoring Copilot examples and packed-consumer coverage with three generated turns, interleaved conversation IDs, JSON/YAML files, simplified/shared fixtures, full-prompt versus input/output replay, embedded/literal JSON, `storeOutputAs`, and transform-before-storage variable use on both public providers. Verify the real SDK/CLI local-fixture matrix on stock Promptfoo `0.122.1`, `0.124.1` and `0.125.1`; distinguish engine/provider/SDK provenance, preserve returned-error workspace retention, and isolate the native renderer's literal-block-tag limitation. Deterministic SDK receipts alone do not claim runtime/model proof.
 
+## [1.33.0](https://github.com/allagentsdev/oh-my-promptfoo/compare/v1.32.0...v1.33.0) (2026-11-27)
+
+
+### Features
+
+* add a file-read assertion for agent evaluations ([#222](https://github.com/allagentsdev/oh-my-promptfoo/issues/222)) ([5b92153](https://github.com/allagentsdev/oh-my-promptfoo/commit/5b92153ff98d2839428557d0dff5f570a3a7184d))
+
+
+### Bug Fixes
+
+* report Copilot MCP startup failures as provider errors ([#219](https://github.com/allagentsdev/oh-my-promptfoo/issues/219)) ([3a61fd2](https://github.com/allagentsdev/oh-my-promptfoo/commit/3a61fd2426c030fbbe652015cd3922aac5ee5e1e))
+* **reporting:** distinguish zero from unknown grader usage ([#218](https://github.com/allagentsdev/oh-my-promptfoo/issues/218)) ([1ea3bf1](https://github.com/allagentsdev/oh-my-promptfoo/commit/1ea3bf1bbfe13f6e0abd6bee060c6ca0a762b1f4))
+
 ## [1.32.0](https://github.com/allagentsdev/oh-my-promptfoo/compare/v1.31.2...v1.32.0) (2026-11-23)
 
 
