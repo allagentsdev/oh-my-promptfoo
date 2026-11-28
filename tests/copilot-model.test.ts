@@ -972,7 +972,8 @@ test("token usage carries prompt-cache reads and writes from each API", async ()
     const f = consumers(async (chosen) => endpoints[chosen]!, {}, undefined, {
       config: { model: selected },
     });
-    const { tokenUsage } = await f.first.callApi("Grade local candidate");
+    const { tokenUsage, metadata } = await f.first.callApi("Grade local candidate");
+    assert.deepEqual(metadata?.copilotPromptCache, { read: 6, write: 3 });
     assert.equal(tokenUsage?.prompt, 10, `${selected}: prompt counts every input token`);
     assert.equal(tokenUsage?.completion, 2);
     assert.equal(tokenUsage?.cached, undefined, "cached means a Promptfoo response-cache hit");
@@ -993,8 +994,9 @@ test("token usage carries prompt-cache reads and writes from each API", async ()
     total_tokens: 12,
   });
   const f = consumers(async () => endpoints[model]!, {}, undefined, { config: { model } });
-  const { tokenUsage } = await f.first.callApi("Grade local candidate");
+  const { tokenUsage, metadata } = await f.first.callApi("Grade local candidate");
   assert.equal((tokenUsage?.completionDetails as any)?.cacheReadInputTokens, 0);
+  assert.deepEqual(metadata?.copilotPromptCache, { read: 0 });
 });
 
 test("constructing and serializing the exported provider is connection-free", async () => {

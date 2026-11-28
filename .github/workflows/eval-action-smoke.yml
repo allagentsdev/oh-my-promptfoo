@@ -73,7 +73,8 @@ jobs:
             failureReason: 0,
             testCase: { description: 'Token accounting fixture' },
             response: {
-              tokenUsage: { total: 1400, prompt: 1200, completion: 200, cached: 800, numRequests: 2 },
+              tokenUsage: { total: 1400, prompt: 1200, completion: 200, cached: 800, numRequests: 2, completionDetails: { cacheCreationInputTokens: 150 } },
+              metadata: { copilotPromptCache: { read: 800, write: 150 } },
               cost: 0.012,
             },
             gradingResult: {
@@ -83,7 +84,8 @@ jobs:
                 pass: true,
                 score: 1,
                 assertion: { type: 'llm-rubric' },
-                tokensUsed: { total: 560, prompt: 500, completion: 60, cached: 300, numRequests: 1, cost: 0.004 },
+                metadata: { copilotPromptCache: { read: 300, write: 50 } },
+                tokensUsed: { total: 560, prompt: 500, completion: 60, cached: 300, numRequests: 1, cost: 0.004, completionDetails: { cacheCreationInputTokens: 50 } },
               }],
             },
           };
@@ -92,10 +94,10 @@ jobs:
           assert.equal(report.status, 'pass');
           const markdown = renderSummary(report);
           const details = markdown.split('### Test details')[1];
-          assert.ok(details.indexOf('Uncached input excludes cache reads and can include cache writes.') > details.lastIndexOf('</details>'));
-          assert.ok(details.includes('| Role | Total tokens | Uncached input | Cache read | Output | Requests | Cost |'));
-          assert.ok(details.includes('| Candidate | 1,400 | 400 | 800 | 200 | 2 | $0.0120 |'));
-          assert.ok(details.includes('| Grader | 560 | 200 | 300 | 60 | 1 | $0.0040 |'));
+          assert.ok(details.indexOf('Cache reads and writes are reported separately and can overlap with the input count.') > details.lastIndexOf('</details>'));
+          assert.ok(details.includes('| Role | Total tokens | Input (reported) | Cache read | Cache write | Output | Requests | Cost |'));
+          assert.ok(details.includes('| Candidate | 1,400 | 1,200 | 800 | 150 | 200 | 2 | $0.0120 |'));
+          assert.ok(details.includes('| Grader | 560 | 500 | 300 | 50 | 60 | 1 | $0.0040 |'));
           const summary = '> **Synthetic replay:** Fixture token counts and costs. No model calls.\n\n' + markdown;
           await appendFile(process.env.GITHUB_STEP_SUMMARY, summary);
           console.log(summary);

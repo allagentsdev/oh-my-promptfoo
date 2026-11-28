@@ -6,11 +6,14 @@ import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { evaluate } from "promptfoo";
 import { test } from "vitest";
 import {
   agentAssert as installedAgentAssert,
   llmAssert,
 } from "../packages/oh-my-promptfoo/src/assertions";
+
+import { renderSummary, summarizeEvaluation } from "../packages/oh-my-promptfoo/src/reporting";
 
 let agentAssert = installedAgentAssert;
 
@@ -29,6 +32,7 @@ type DelegateId = "openai:codex-sdk" | "anthropic:claude-agent-sdk" | "copilot-s
 interface Reply {
   output: string;
   tokenUsage?: Record<string, number>;
+  usageEvents?: Record<string, number>[];
   cost?: number;
   metadata?: Record<string, unknown>;
   metrics?: { totalNanoAiu: number };
@@ -59,6 +63,7 @@ interface RecordedCall {
 async function withGrader(
   run: (fixture: {
     workspace: string;
+    createCandidate: () => import("../packages/oh-my-promptfoo/src/copilot-sdk").CopilotSdk;
     queue: (replies: Reply[]) => Promise<void>;
     calls: () => Promise<RecordedCall[]>;
     context: (
@@ -144,7 +149,7 @@ export class CopilotClient {
     if(permission.kind==='reject')throw Error('Read-only grader denied '+next.forbidden);
     await writeFile(config.workingDirectory+'/input.txt','forbidden tool changed candidate');
    }
-   if(next.tokenUsage)listener({type:'assistant.usage',data:{inputTokens:next.tokenUsage.prompt,outputTokens:next.tokenUsage.completion,cacheReadTokens:next.tokenUsage.cached,cost:next.cost}});
+   for(const data of next.usageEvents??(next.tokenUsage?[{inputTokens:next.tokenUsage.prompt,outputTokens:next.tokenUsage.completion,cacheReadTokens:next.tokenUsage.cached,cost:next.cost}]:[]))listener({type:'assistant.usage',data});
    listener({type:'assistant.message',data:{content:next.output}});
    if(next.executionError!==undefined)throw Error(next.executionError);
    return {data:{content:next.output}};
@@ -163,8 +168,13 @@ export class CopilotClient {
       await writeFile(join(directory, "index.js"), source);
     }
     ({ agentAssert } = await import(pathToFileURL(join(adapterSource, "agent-assert.ts")).href));
+    const { CopilotSdk } = await import(pathToFileURL(join(adapterSource, "copilot-sdk.ts")).href);
     await run({
       workspace,
+      createCandidate: () =>
+        new CopilotSdk({
+          config: { basePath: root, working_dir: workspace, model: "fixture" },
+        }),
       async queue(replies) {
         await writeFile(queuePath, JSON.stringify(replies));
         await writeFile(logPath, "[]");
@@ -1439,3 +1449,79 @@ test("agentAssert records a delegate that throws as a grader error without expos
     }
   });
 });
+
+test("native Promptfoo results retain Copilot cache writes and their reporting provenance", async () => {
+  await withGrader(async ({ queue, context, createCandidate }) => {
+    const event = { inputTokens: 20, outputTokens: 4, cacheReadTokens: 6 };
+    const candidateProvider = createCandidate();
+    try {
+      for (const [writes, graderWrites, expected, expectedGrader] of [
+        [[3, 2], [4, 1], 5, 5],
+        [[0], [0], 0, 0],
+        [[undefined], [undefined], undefined, undefined],
+        [[3, undefined], [4, undefined], undefined, undefined],
+      ] as const) {
+        const events = (values: readonly (number | undefined)[]) =>
+          values.map((cacheWriteTokens) => ({
+            ...event,
+            ...(cacheWriteTokens === undefined ? {} : { cacheWriteTokens }),
+          }));
+        await queue([
+          { output: "candidate", usageEvents: events(writes) },
+          { output: verdict(), usageEvents: events(graderWrites) },
+        ]);
+        const result = await evaluate(
+          {
+            writeLatestResults: false,
+            prompts: ["task"],
+            providers: [candidateProvider],
+            tests: [
+              {
+                vars: { bug: "parser regression" },
+                assert: [
+                  {
+                    type: "javascript",
+                    value: async (output: string) => agentAssert(output, context("copilot-sdk")),
+                  },
+                ],
+              },
+            ],
+          },
+          { cache: false, maxConcurrency: 1 },
+        );
+        const summary = await result.toEvaluateSummary();
+        const row = summary.results[0]!;
+        assert.equal(row.success, true, JSON.stringify(row.gradingResult));
+        assert.equal(
+          row.response?.tokenUsage?.completionDetails?.cacheCreationInputTokens,
+          expected ?? 0,
+        );
+        assert.equal(row.response?.metadata?.copilotPromptCache?.write, expected);
+        const grade = row.gradingResult?.componentResults?.[0];
+        assert.equal(grade?.metadata?.copilotPromptCache?.write, expectedGrader);
+        assert.equal(
+          row.tokenUsage?.assertions?.completionDetails?.cacheCreationInputTokens,
+          expectedGrader ?? 0,
+        );
+        const report = summarizeEvaluation({ results: summary });
+        const details = renderSummary(report).split("### Test details")[1]!;
+        const shown = expected ?? "unknown";
+        const shownGrader = expectedGrader ?? "unknown";
+        assert.ok(
+          details.includes(
+            `| Candidate | ${24 * writes.length} | ${20 * writes.length} | ${6 * writes.length} | ${shown} | ${4 * writes.length} | ${writes.length} |`,
+          ),
+          details,
+        );
+        assert.ok(
+          details.includes(
+            `| Grader | ${24 * graderWrites.length} | ${20 * graderWrites.length} | ${6 * graderWrites.length} | ${shownGrader} | ${4 * graderWrites.length} | ${graderWrites.length} |`,
+          ),
+          details,
+        );
+      }
+    } finally {
+      await candidateProvider.cleanup();
+    }
+  });
+}, 30_000);

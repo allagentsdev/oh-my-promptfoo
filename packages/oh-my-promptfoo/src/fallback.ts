@@ -9,6 +9,7 @@ import {
   judgeFailureMessage,
   preserveJudgeFailure,
 } from "./judge-accounting.js";
+import { type PromptCacheUsage, readPromptCache, sumPromptCache } from "./prompt-cache.js";
 
 export interface FallbackConfig {
   /** Judges to try in order: provider ids, provider objects, or `{ text: … }` maps. */
@@ -246,6 +247,7 @@ export class Fallback {
       completionDetails?: CompletionDetails;
     } = { total: 0, prompt: 0, completion: 0, cached: 0, numRequests: 0 };
     const accounting = new JudgeAccountingCollector();
+    const promptCaches: (PromptCacheUsage | undefined)[] = [];
     let lastMetadata: JudgeResponse["metadata"];
     for (const { spec, index, key } of order) {
       signal?.throwIfAborted();
@@ -296,6 +298,7 @@ export class Fallback {
       usage.numRequests +=
         typeof tokens.numRequests === "number" ? tokens.numRequests : response.cached ? 0 : 1;
       accounting.record(response.metadata, response.cached, response.cost);
+      promptCaches.push(readPromptCache(response.metadata));
       if (propagation) {
         // Native-only calls still throw the exact value, including frozen objects
         // and primitives; an enclosing accounted call can retain their evidence.
@@ -334,6 +337,7 @@ export class Fallback {
         ...(cost === undefined ? {} : { cost }),
         metadata: {
           ...lastMetadata,
+          copilotPromptCache: sumPromptCache(promptCaches),
           judgeAccounting: accounting.ledger,
           fallback: {
             answeredBy: name,
@@ -351,7 +355,12 @@ export class Fallback {
         .join("; ")}`,
       tokenUsage: usage,
       ...(cost === undefined ? {} : { cost }),
-      metadata: { ...lastMetadata, judgeAccounting: accounting.ledger, fallback: { attempts } },
+      metadata: {
+        ...lastMetadata,
+        copilotPromptCache: sumPromptCache(promptCaches),
+        judgeAccounting: accounting.ledger,
+        fallback: { attempts },
+      },
     };
   }
 }

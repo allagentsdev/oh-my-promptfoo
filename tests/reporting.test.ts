@@ -474,7 +474,11 @@ test("Markdown test details distinguish cached input, unknown counts, and explic
   const report = summarizeEvaluation(
     document([
       row({
-        response: { tokenUsage: { ...usage, cached: 40 }, cost: 0.002 },
+        response: {
+          tokenUsage: { ...usage, cached: 40 },
+          metadata: { copilotPromptCache: { read: 40, write: 30 } },
+          cost: 0.002,
+        },
       }),
       row({
         gradingResult: {
@@ -484,6 +488,7 @@ test("Markdown test details distinguish cached input, unknown counts, and explic
             {
               ...assertion(),
               assertion: { type: "llm-rubric" },
+              metadata: { copilotPromptCache: { read: 20, write: 0 } },
               tokensUsed: {
                 total: 65,
                 prompt: 50,
@@ -504,19 +509,20 @@ test("Markdown test details distinguish cached input, unknown counts, and explic
   assert.equal(report.cases[0].candidateUsage.cached, 40);
   const details = renderSummary(report).split("### Test details")[1];
   assert.ok(
-    details.indexOf("Uncached input excludes cache reads and can include cache writes.") >
-      details.lastIndexOf("</details>"),
+    details.indexOf(
+      "Cache reads and writes are reported separately and can overlap with the input count.",
+    ) > details.lastIndexOf("</details>"),
   );
   assert.ok(
     details.includes(
-      "| Role | Total tokens | Uncached input | Cache read | Output | Requests | Cost |",
+      "| Role | Total tokens | Input (reported) | Cache read | Cache write | Output | Requests | Cost |",
     ),
   );
-  assert.ok(details.includes("| Candidate | 110 | 60 | 40 | 10 | 1 | $0.0020 |"));
-  assert.ok(details.includes("| Grader | 0 | 0 | 0 | 0 | 0 | $0.0000 |"));
-  assert.ok(details.includes("| Candidate | 110 | unknown | unknown | 10 | 1 | unknown |"));
-  assert.ok(details.includes("| Candidate | 110 | unknown | unknown | 10 | 1 | $0.0050 |"));
-  assert.ok(details.includes("| Grader | 65 | 30 | 20 | 15 | 1 | $0.0030 |"));
+  assert.ok(details.includes("| Candidate | 110 | 100 | 40 | 30 | 10 | 1 | $0.0020 |"));
+  assert.ok(details.includes("| Grader | 0 | 0 | 0 | 0 | 0 | 0 | $0.0000 |"));
+  assert.ok(details.includes("| Candidate | 110 | 100 | unknown | unknown | 10 | 1 | unknown |"));
+  assert.ok(details.includes("| Candidate | 110 | 100 | unknown | unknown | 10 | 1 | $0.0050 |"));
+  assert.ok(details.includes("| Grader | 65 | 50 | 20 | 0 | 15 | 1 | $0.0030 |"));
 });
 
 test("public case IDs label numbered links while private reports omit them", () => {

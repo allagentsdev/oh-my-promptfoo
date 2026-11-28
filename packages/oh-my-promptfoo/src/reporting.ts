@@ -1,5 +1,6 @@
 import { safeCount, safeMultiplier } from "./copilot-accounting.js";
 import { type SourceOptions, sourceUrl } from "./eval-sources.js";
+import { type PromptCacheUsage, readPromptCache, sumPromptCache } from "./prompt-cache.js";
 import { redact, secrets } from "./redaction.js";
 import {
   type MeasurementUnavailableReason,
@@ -21,6 +22,7 @@ export interface Usage {
   completion: number | null;
   cached: number | null;
   requests: number | null;
+  promptCache?: PromptCacheUsage;
   unavailableReasons?: MeasurementUnavailableReason[];
 }
 
@@ -267,7 +269,7 @@ function graderMeasurements(grade: unknown, failed: boolean): { cost: ResultCost
                 ? judge.slice(8)
                 : metadata.model,
             ),
-            usage: usage(tokenUsage),
+            usage: { ...usage(tokenUsage), promptCache: readPromptCache(metadata) },
           },
         ];
       }
@@ -279,7 +281,10 @@ function graderMeasurements(grade: unknown, failed: boolean): { cost: ResultCost
         ? [
             {
               cost: responseCost({ cost: 0 }, undefined),
-              usage: usage({ total: 0, prompt: 0, completion: 0, cached: 0, numRequests: 0 }),
+              usage: {
+                ...usage({ total: 0, prompt: 0, completion: 0, cached: 0, numRequests: 0 }),
+                promptCache: { read: 0, write: 0 },
+              },
             },
           ]
         : [{ cost: unknownCost("not-reported"), usage: usage(undefined) }];
@@ -289,7 +294,10 @@ function graderMeasurements(grade: unknown, failed: boolean): { cost: ResultCost
   const measurements = collect(roots(value.componentResults));
   return {
     cost: sumCosts(measurements.map((item) => item.cost)),
-    usage: sumUsage(measurements.map((item) => item.usage)),
+    usage: {
+      ...sumUsage(measurements.map((item) => item.usage)),
+      promptCache: sumPromptCache(measurements.map((item) => item.usage.promptCache)),
+    },
   };
 }
 
@@ -380,7 +388,10 @@ export function summarizeEvaluation(
       score: score(row.score),
       ...(score(test.threshold) !== null ? { threshold: score(test.threshold)! } : {}),
       latencyMs: measured(row.latencyMs),
-      candidateUsage: usage(reply.tokenUsage, reply.error ? "provider-error" : "not-reported"),
+      candidateUsage: {
+        ...usage(reply.tokenUsage, reply.error ? "provider-error" : "not-reported"),
+        promptCache: readPromptCache(reply.metadata),
+      },
       graderUsage: grader.usage,
       candidateCost: responseCost(
         reply,
@@ -522,11 +533,8 @@ function renderTimings(timings: RunTimings, replayed = false): string {
 export function renderSummary(report: EvaluationReport): string {
   const { number, score, time, money, escapeMarkup, badge, usageSummary } = formats;
   const usageRow = (role: string, usage: Usage, cost: ResultCost) => {
-    const { prompt, cached } = usage;
-    const validSplit = prompt !== null && cached !== null && cached <= prompt;
-    const uncachedInput = validSplit ? prompt - cached : null;
-    const cacheRead = validSplit ? cached : null;
-    return `| ${role} | ${number(usage.total)} | ${number(uncachedInput)} | ${number(cacheRead)} | ${number(usage.completion)} | ${number(usage.requests)} | ${money(cost)} |`;
+    const { prompt, promptCache } = usage;
+    return `| ${role} | ${number(usage.total)} | ${number(prompt)} | ${number(promptCache?.read ?? null)} | ${number(promptCache?.write ?? null)} | ${number(usage.completion)} | ${number(usage.requests)} | ${money(cost)} |`;
   };
   const candidate = report.cases[0]?.candidate;
   const sharedCandidate = candidate && report.cases.every((item) => item.candidate === candidate);
@@ -610,8 +618,8 @@ export function renderSummary(report: EvaluationReport): string {
       "",
       `Score: **${score(item.score)}** · Candidate time: **${time(item.latencyMs)}**`,
       "",
-      "| Role | Total tokens | Uncached input | Cache read | Output | Requests | Cost |",
-      "| --- | ---: | ---: | ---: | ---: | ---: | ---: |",
+      "| Role | Total tokens | Input (reported) | Cache read | Cache write | Output | Requests | Cost |",
+      "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
       usageRow("Candidate", item.candidateUsage, item.candidateCost),
       usageRow("Grader", item.graderUsage, item.graderCost),
       "",
@@ -648,7 +656,7 @@ export function renderSummary(report: EvaluationReport): string {
     "",
     "Tests are numbered from 1 within each suite. Each candidate/repeat has its own result number.",
     "",
-    "Results-table tokens and cost include candidate and grader when both are reported; latency is the candidate's native latency. Uncached input excludes cache reads and can include cache writes. Unknown means unmeasured or incomplete. — means no assertion threshold was authored. ~ marks a token-price estimate. Costs are not invoices or savings. Native precision is retained in report.json.",
+    "Results-table tokens and cost include candidate and grader when both are reported; latency is the candidate's native latency. Cache reads and writes are reported separately and can overlap with the input count. Unknown means unmeasured or incomplete. — means no assertion threshold was authored. ~ marks a token-price estimate. Costs are not invoices or savings. Native precision is retained in report.json.",
   );
   if (report.issues.length)
     lines.push(
