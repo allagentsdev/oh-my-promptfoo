@@ -593,7 +593,7 @@ export function renderSummary(report: EvaluationReport): string {
       break;
     }
   }
-  add("\n### Test details\n");
+  add("\n### Test details\n\nCached input counts cache reads and is already included in Input.\n");
   for (const item of report.cases) {
     const thresholds = item.assertions.some((check) => check.threshold !== null);
     const notes = measurementNotes(item);
@@ -605,7 +605,7 @@ export function renderSummary(report: EvaluationReport): string {
       "",
       `Score: **${score(item.score)}** · Candidate time: **${time(item.latencyMs)}**`,
       "",
-      "| Role | Total tokens | Input tokens | Output tokens | Cached input (included in input) | Requests | Cost |",
+      "| Role | Total tokens | Input | Output | Cached input | Requests | Cost |",
       "| --- | ---: | ---: | ---: | ---: | ---: | ---: |",
       usageRow("Candidate", item.candidateUsage, item.candidateCost),
       usageRow("Grader", item.graderUsage, item.graderCost),

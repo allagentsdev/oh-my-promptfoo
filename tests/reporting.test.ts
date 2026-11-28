@@ -501,9 +501,10 @@ test("Markdown test details distinguish cached input, unknown counts, and explic
   );
   const details = renderSummary(report).split("### Test details")[1];
   assert.ok(
-    details.includes(
-      "| Role | Total tokens | Input tokens | Output tokens | Cached input (included in input) | Requests | Cost |",
-    ),
+    details.startsWith("\n\nCached input counts cache reads and is already included in Input."),
+  );
+  assert.ok(
+    details.includes("| Role | Total tokens | Input | Output | Cached input | Requests | Cost |"),
   );
   assert.ok(details.includes("| Candidate | 110 | 100 | 10 | 40 | 1 | $0.0020 |"));
   assert.ok(details.includes("| Grader | 0 | 0 | 0 | 0 | 0 | $0.0000 |"));

@@ -92,7 +92,8 @@ jobs:
           assert.equal(report.status, 'pass');
           const markdown = renderSummary(report);
           const details = markdown.split('### Test details')[1];
-          assert.ok(details.includes('Cached input (included in input)'));
+          assert.ok(details.includes('Cached input counts cache reads and is already included in Input.'));
+          assert.ok(details.includes('| Role | Total tokens | Input | Output | Cached input | Requests | Cost |'));
           assert.ok(details.includes('| Candidate | 1,400 | 1,200 | 200 | 800 | 2 | $0.0120 |'));
           assert.ok(details.includes('| Grader | 560 | 500 | 60 | 300 | 1 | $0.0040 |'));
           const summary = '> **Synthetic replay:** Fixture token counts and costs. No model calls.\n\n' + markdown;
