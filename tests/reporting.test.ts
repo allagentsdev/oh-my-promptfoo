@@ -509,13 +509,12 @@ test("Markdown test details distinguish cached input, unknown counts, and explic
   assert.equal(report.cases[0].candidateUsage.cached, 40);
   const details = renderSummary(report).split("### Test details")[1];
   assert.ok(
-    details.indexOf(
-      "Cache reads and writes are reported separately and can overlap with the input count.",
-    ) > details.lastIndexOf("</details>"),
+    details.indexOf("Input may include cache reads and writes, depending on the provider.") >
+      details.lastIndexOf("</details>"),
   );
   assert.ok(
     details.includes(
-      "| Role | Total tokens | Input (reported) | Cache read | Cache write | Output | Requests | Cost |",
+      "| Role | Total tokens | Input | Cache read | Cache write | Output | Requests | Cost |",
     ),
   );
   assert.ok(details.includes("| Candidate | 110 | 100 | 40 | 30 | 10 | 1 | $0.0020 |"));

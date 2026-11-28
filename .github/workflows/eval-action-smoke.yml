@@ -94,8 +94,8 @@ jobs:
           assert.equal(report.status, 'pass');
           const markdown = renderSummary(report);
           const details = markdown.split('### Test details')[1];
-          assert.ok(details.indexOf('Cache reads and writes are reported separately and can overlap with the input count.') > details.lastIndexOf('</details>'));
-          assert.ok(details.includes('| Role | Total tokens | Input (reported) | Cache read | Cache write | Output | Requests | Cost |'));
+          assert.ok(details.indexOf('Input may include cache reads and writes, depending on the provider.') > details.lastIndexOf('</details>'));
+          assert.ok(details.includes('| Role | Total tokens | Input | Cache read | Cache write | Output | Requests | Cost |'));
           assert.ok(details.includes('| Candidate | 1,400 | 1,200 | 800 | 150 | 200 | 2 | $0.0120 |'));
           assert.ok(details.includes('| Grader | 560 | 500 | 300 | 50 | 60 | 1 | $0.0040 |'));
           const summary = '> **Synthetic replay:** Fixture token counts and costs. No model calls.\n\n' + markdown;

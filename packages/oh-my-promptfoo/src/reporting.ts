@@ -620,7 +620,7 @@ export function renderSummary(report: EvaluationReport): string {
       "",
       `Score: **${score(item.score)}** · Candidate time: **${time(item.latencyMs)}**`,
       "",
-      "| Role | Total tokens | Input (reported) | Cache read | Cache write | Output | Requests | Cost |",
+      "| Role | Total tokens | Input | Cache read | Cache write | Output | Requests | Cost |",
       "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
       usageRow("Candidate", item.candidateUsage, item.candidateCost),
       usageRow("Grader", item.graderUsage, item.graderCost),
@@ -658,7 +658,7 @@ export function renderSummary(report: EvaluationReport): string {
     "",
     "Tests are numbered from 1 within each suite. Each candidate/repeat has its own result number.",
     "",
-    "Results-table tokens and cost include candidate and grader when both are reported; latency is the candidate's native latency. Cache reads and writes are reported separately and can overlap with the input count. Unknown means unmeasured or incomplete. — means no assertion threshold was authored. ~ marks a token-price estimate. Costs are not invoices or savings. Native precision is retained in report.json.",
+    "Results-table tokens and cost include candidate and grader when both are reported; latency is the candidate's native latency. Input may include cache reads and writes, depending on the provider. Unknown means unmeasured or incomplete. — means no assertion threshold was authored. ~ marks a token-price estimate.",
   );
   if (report.issues.length)
     lines.push(
@@ -710,9 +710,7 @@ export function renderConsoleSummary(report: EvaluationReport): string {
   }
   if (report.issues.length)
     lines.push("Result coverage or execution is incomplete; inspect retained private diagnostics.");
-  lines.push(
-    "Unknown means unmeasured or incomplete; ~ marks a token-price estimate. Costs are not invoices or savings.",
-  );
+  lines.push("Unknown means unmeasured or incomplete; ~ marks a token-price estimate.");
   return `${lines.join("\n")}\n`;
 }
 
