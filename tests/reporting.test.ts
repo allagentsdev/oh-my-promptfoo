@@ -501,7 +501,8 @@ test("Markdown test details distinguish cached input, unknown counts, and explic
   );
   const details = renderSummary(report).split("### Test details")[1];
   assert.ok(
-    details.startsWith("\n\nCached input counts cache reads and is already included in Input."),
+    details.indexOf("In Test details, the Input column includes cached tokens.") >
+      details.lastIndexOf("</details>"),
   );
   assert.ok(
     details.includes("| Role | Total tokens | Input | Output | Cached input | Requests | Cost |"),

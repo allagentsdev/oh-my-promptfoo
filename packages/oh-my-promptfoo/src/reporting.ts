@@ -593,7 +593,7 @@ export function renderSummary(report: EvaluationReport): string {
       break;
     }
   }
-  add("\n### Test details\n\nCached input counts cache reads and is already included in Input.\n");
+  add("\n### Test details\n");
   for (const item of report.cases) {
     const thresholds = item.assertions.some((check) => check.threshold !== null);
     const notes = measurementNotes(item);
@@ -643,7 +643,7 @@ export function renderSummary(report: EvaluationReport): string {
     "",
     "Tests are numbered from 1 within each suite. Each candidate/repeat has its own result number.",
     "",
-    "Results-table tokens and cost include candidate and grader when both are reported; latency is the candidate's native latency. Unknown means unmeasured or incomplete. — means no assertion threshold was authored. ~ marks a token-price estimate. Costs are not invoices or savings. Native precision is retained in report.json.",
+    "Results-table tokens and cost include candidate and grader when both are reported; latency is the candidate's native latency. In Test details, the Input column includes cached tokens. Unknown means unmeasured or incomplete. — means no assertion threshold was authored. ~ marks a token-price estimate. Costs are not invoices or savings. Native precision is retained in report.json.",
   );
   if (report.issues.length)
     lines.push(
