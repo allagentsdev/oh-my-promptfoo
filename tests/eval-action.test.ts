@@ -289,7 +289,16 @@ test("the authored local release suite reports zero model usage and restarts tes
     });
     assert.ok(!JSON.stringify(privateReport.report).includes("github.com"));
     assert.ok(!markdown.includes("Test 9."));
-    assert.ok(!markdown.includes("| unknown") && !markdown.includes("unknown |"));
+    const details = markdown.split("### Test details")[1]!;
+    const candidateUsageRows = details
+      .split("\n")
+      .filter((line) => line.startsWith("| Candidate |"));
+    assert.equal(candidateUsageRows.length, 4);
+    assert.ok(
+      candidateUsageRows.every(
+        (line) => line === "| Candidate | 0 | 0 | unknown | unknown | 0 | 0 | $0.0000 |",
+      ),
+    );
   } finally {
     for (const key of githubKeys) {
       if (previous[key] === undefined) delete process.env[key];

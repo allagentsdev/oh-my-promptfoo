@@ -292,11 +292,12 @@ function graderMeasurements(grade: unknown, failed: boolean): { cost: ResultCost
   // Root assertions own measurements; aggregate tokens can contain synthetic
   // zeroes and diagnostic criterion children do not own extra spend.
   const measurements = collect(roots(value.componentResults));
+  const promptCache = sumPromptCache(measurements.map((item) => item.usage.promptCache));
   return {
     cost: sumCosts(measurements.map((item) => item.cost)),
     usage: {
       ...sumUsage(measurements.map((item) => item.usage)),
-      promptCache: sumPromptCache(measurements.map((item) => item.usage.promptCache)),
+      ...(promptCache ? { promptCache } : {}),
     },
   };
 }
@@ -373,6 +374,7 @@ export function summarizeEvaluation(
     counts[status]++;
     const grader = graderMeasurements(row.gradingResult, hasError);
     const provider = record(row.provider).id;
+    const promptCache = readPromptCache(reply.metadata);
     const testLabel = label(record(test.metadata).id) ?? label(test.description);
     const candidateLabel = label(record(row.provider).label);
     const namedScores = options.publicLabels
@@ -390,7 +392,7 @@ export function summarizeEvaluation(
       latencyMs: measured(row.latencyMs),
       candidateUsage: {
         ...usage(reply.tokenUsage, reply.error ? "provider-error" : "not-reported"),
-        promptCache: readPromptCache(reply.metadata),
+        ...(promptCache ? { promptCache } : {}),
       },
       graderUsage: grader.usage,
       candidateCost: responseCost(
