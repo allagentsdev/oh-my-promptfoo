@@ -646,9 +646,11 @@ does not import Promptfoo's evaluator, server or database internals.
 
 ## Measurement notes and timing
 
-Each test's expanded details show candidate and grader total, input, output, and
-cached input tokens alongside request counts and cost. Cached input is included
-in the input count. Unknown measurements remain unknown. The details explain whether
+Each test's expanded details show total, uncached input, cache-read, and output
+tokens for the candidate and grader, alongside requests and cost. Uncached input
+is the rest of reported input and can include cache writes. If either count is
+missing or cache reads exceed input, the split is unknown. The inclusive input
+count remains in `report.json`. The details explain whether
 usage/cost was not reported, the provider or grader errored, an accounting ledger
 was incomplete, or recorded pricing could not be matched. These are fixed diagnostic
 categories; raw provider errors and judge reasons remain private. A failed grader

@@ -521,8 +521,13 @@ function renderTimings(timings: RunTimings, replayed = false): string {
 /** Render only normalized outcomes and explicitly public, redacted labels. */
 export function renderSummary(report: EvaluationReport): string {
   const { number, score, time, money, escapeMarkup, badge, usageSummary } = formats;
-  const usageRow = (role: string, usage: Usage, cost: ResultCost) =>
-    `| ${role} | ${number(usage.total)} | ${number(usage.prompt)} | ${number(usage.completion)} | ${number(usage.cached)} | ${number(usage.requests)} | ${money(cost)} |`;
+  const usageRow = (role: string, usage: Usage, cost: ResultCost) => {
+    const { prompt, cached } = usage;
+    const validSplit = prompt !== null && cached !== null && cached <= prompt;
+    const uncachedInput = validSplit ? prompt - cached : null;
+    const cacheRead = validSplit ? cached : null;
+    return `| ${role} | ${number(usage.total)} | ${number(uncachedInput)} | ${number(cacheRead)} | ${number(usage.completion)} | ${number(usage.requests)} | ${money(cost)} |`;
+  };
   const candidate = report.cases[0]?.candidate;
   const sharedCandidate = candidate && report.cases.every((item) => item.candidate === candidate);
   const title = (item: CaseReport, html = false) => {
@@ -605,7 +610,7 @@ export function renderSummary(report: EvaluationReport): string {
       "",
       `Score: **${score(item.score)}** · Candidate time: **${time(item.latencyMs)}**`,
       "",
-      "| Role | Total tokens | Input | Output | Cached input | Requests | Cost |",
+      "| Role | Total tokens | Uncached input | Cache read | Output | Requests | Cost |",
       "| --- | ---: | ---: | ---: | ---: | ---: | ---: |",
       usageRow("Candidate", item.candidateUsage, item.candidateCost),
       usageRow("Grader", item.graderUsage, item.graderCost),
@@ -643,7 +648,7 @@ export function renderSummary(report: EvaluationReport): string {
     "",
     "Tests are numbered from 1 within each suite. Each candidate/repeat has its own result number.",
     "",
-    "Results-table tokens and cost include candidate and grader when both are reported; latency is the candidate's native latency. In Test details, the Input column includes cached tokens. Unknown means unmeasured or incomplete. — means no assertion threshold was authored. ~ marks a token-price estimate. Costs are not invoices or savings. Native precision is retained in report.json.",
+    "Results-table tokens and cost include candidate and grader when both are reported; latency is the candidate's native latency. Uncached input excludes cache reads and can include cache writes. Unknown means unmeasured or incomplete. — means no assertion threshold was authored. ~ marks a token-price estimate. Costs are not invoices or savings. Native precision is retained in report.json.",
   );
   if (report.issues.length)
     lines.push(
