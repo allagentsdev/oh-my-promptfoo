@@ -519,6 +519,9 @@ async function runCopilot(frame: CallFrame, signal: AbortSignal): Promise<JsonOb
     sessionError: string | undefined;
   const mcpStatus = new CopilotMcpStatus(mcpServers);
   const usage = { prompt: 0, completion: 0, total: 0, cached: 0, numRequests: 0 };
+  // One missing event counter makes that session sum incomplete.
+  let cacheReads = 0;
+  let cacheWrites = 0;
   let premiumCost = 0;
   let premiumCostComplete = true;
   let events = 0,
@@ -725,6 +728,8 @@ async function runCopilot(frame: CallFrame, signal: AbortSignal): Promise<JsonOb
           usage.completion += completion;
           usage.total += input + completion;
           usage.cached += typeof data.cacheReadTokens === "number" ? data.cacheReadTokens : 0;
+          cacheReads += safeCount(data.cacheReadTokens) ? data.cacheReadTokens : NaN;
+          cacheWrites += safeCount(data.cacheWriteTokens) ? data.cacheWriteTokens : NaN;
           usage.numRequests++;
           if (safeMultiplier(data.cost) && safeMultiplier(premiumCost + data.cost))
             premiumCost += data.cost;
@@ -946,12 +951,27 @@ async function runCopilot(frame: CallFrame, signal: AbortSignal): Promise<JsonOb
   }
   const cost = copilotUsageValue(accounting);
   if (callFailed || error || signal.aborted) inventory.incomplete("execution-incomplete");
+  const copilotPromptCache =
+    usage.numRequests && !callFailed && !error && !signal.aborted
+      ? {
+          ...(safeCount(cacheReads) ? { read: cacheReads } : {}),
+          ...(safeCount(cacheWrites) ? { write: cacheWrites } : {}),
+        }
+      : undefined;
   return {
     ...(error ? { error } : signal.aborted ? { error: "Copilot call aborted" } : {}),
     output,
-    tokenUsage: usage,
+    tokenUsage: {
+      ...usage,
+      ...(copilotPromptCache?.write === undefined
+        ? {}
+        : { completionDetails: { cacheCreationInputTokens: copilotPromptCache.write } }),
+    },
     ...(cost === undefined ? {} : { cost }),
     metadata: {
+      ...(copilotPromptCache && Object.keys(copilotPromptCache).length
+        ? { copilotPromptCache }
+        : {}),
       copilot: {
         sdkVersion: "1.0.30",
         skillSupport: true,

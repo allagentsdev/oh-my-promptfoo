@@ -289,7 +289,16 @@ test("the authored local release suite reports zero model usage and restarts tes
     });
     assert.ok(!JSON.stringify(privateReport.report).includes("github.com"));
     assert.ok(!markdown.includes("Test 9."));
-    assert.ok(!markdown.includes("| unknown") && !markdown.includes("unknown |"));
+    const details = markdown.split("### Test details")[1]!;
+    const candidateUsageRows = details
+      .split("\n")
+      .filter((line) => line.startsWith("| Candidate |"));
+    assert.equal(candidateUsageRows.length, 4);
+    assert.ok(
+      candidateUsageRows.every(
+        (line) => line === "| Candidate | 0 | 0 | unknown | unknown | 0 | 0 | $0.0000 |",
+      ),
+    );
   } finally {
     for (const key of githubKeys) {
       if (previous[key] === undefined) delete process.env[key];
@@ -704,7 +713,9 @@ test("a rubric with no reported usage or cost stays unknown", async () => {
     assert.equal(run.report.totals.graderUsage.total, null);
     assert.equal(run.report.totals.graderUsage.requests, null);
     const summary = await readFile(run.summaryPath, "utf8");
-    assert.ok(summary.includes("| Grader | unknown | unknown | unknown |"));
+    assert.ok(
+      summary.includes("| Grader | unknown | unknown | unknown | unknown | unknown | unknown |"),
+    );
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
@@ -749,7 +760,9 @@ test("a judge failure remains an error even when Promptfoo passes the case", asy
     assert.equal(run.report.totals.graderUsage.requests, null);
     assert.ok(run.report.cases[0].assertions.some((item) => item.status === "error"));
     const summary = await readFile(run.summaryPath, "utf8");
-    assert.ok(summary.includes("| Grader | unknown | unknown | unknown |"));
+    assert.ok(
+      summary.includes("| Grader | unknown | unknown | unknown | unknown | unknown | unknown |"),
+    );
     assert.ok(!summary.includes("PRIVATE_"));
   } finally {
     await rm(directory, { recursive: true, force: true });
@@ -815,6 +828,7 @@ test("native CLI reports real workspace preparation and invocation phases before
       else assert.ok(timings.workspacePreparationMs! > 0);
       const summary = await readFile(run.summaryPath, "utf8");
       assert.ok(summary.includes("<details><summary>Run timing</summary>"));
+      assert.ok(summary.includes("| Evaluation (includes workspace setup and grading) |"));
       assert.ok(summary.includes("Durations overlap"));
       assert.ok(!(summary + JSON.stringify(timings)).includes(source));
       const native = await json(run.resultPath);

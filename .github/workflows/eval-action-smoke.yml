@@ -46,3 +46,69 @@ jobs:
           assert.equal(rows[0].response.output, 'READY');
           assert.ok(rows[0].gradingResult.reason);
           NODE
+  token-breakdown:
+    name: Render Test details with measured candidate time
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Verify and publish the token breakdown summary
+        run: |
+          node --import tsx --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import { appendFile } from 'node:fs/promises';
+          import { evaluate } from 'promptfoo';
+          import { renderSummary, summarizeEvaluation } from './packages/oh-my-promptfoo/src/reporting.ts';
+
+          const evaluation = await evaluate({
+            writeLatestResults: false,
+            prompts: ['READY'],
+            providers: ['echo'],
+            tests: [{ description: 'Token accounting fixture', assert: [{ type: 'equals', value: 'READY' }] }],
+          }, { cache: false });
+          const native = await evaluation.toEvaluateSummary();
+          assert.equal(native.results.length, 1);
+          const [row] = native.results;
+          assert.ok(Number.isFinite(row.latencyMs) && row.latencyMs >= 0);
+
+          const result = {
+            ...row,
+            response: {
+              ...row.response,
+              tokenUsage: { total: 1400, prompt: 1200, completion: 200, cached: 800, numRequests: 2, completionDetails: { cacheCreationInputTokens: 150 } },
+              metadata: { copilotPromptCache: { read: 800, write: 150 } },
+              cost: 0.012,
+            },
+            gradingResult: {
+              pass: true,
+              score: 1,
+              componentResults: [{
+                pass: true,
+                score: 1,
+                assertion: { type: 'llm-rubric' },
+                metadata: { copilotPromptCache: { read: 300, write: 50 } },
+                tokensUsed: { total: 560, prompt: 500, completion: 60, cached: 300, numRequests: 1, cost: 0.004, completionDetails: { cacheCreationInputTokens: 50 } },
+              }],
+            },
+          };
+          const results = { ...native, results: [result] };
+          const report = summarizeEvaluation({ results }, undefined, { publicLabels: true });
+          assert.equal(report.status, 'pass');
+          const markdown = renderSummary(report);
+          const details = markdown.split('### Test details')[1];
+          assert.ok(details.indexOf('Input may include cache reads and writes, depending on the provider.') > details.lastIndexOf('</details>'));
+          assert.equal(report.cases[0].latencyMs, row.latencyMs);
+          assert.match(details, /Candidate time: \*\*\d/);
+          assert.ok(details.includes('| Role | Total tokens | Input | Cache read | Cache write | Output | Requests | Cost |'));
+          assert.ok(details.includes('| Candidate | 1,400 | 1,200 | 800 | 150 | 200 | 2 | $0.0120 |'));
+          assert.ok(details.includes('| Grader | 560 | 500 | 300 | 50 | 60 | 1 | $0.0040 |'));
+          const summary = '> **Smoke eval:** Promptfoo measured the local echo provider. Token counts and costs are fixture values.\n\n' + markdown;
+          await appendFile(process.env.GITHUB_STEP_SUMMARY, summary);
+          console.log(summary);
+          NODE

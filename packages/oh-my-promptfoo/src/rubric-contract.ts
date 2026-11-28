@@ -8,6 +8,7 @@ import {
   judgeFailureMessage,
   preserveJudgeFailure,
 } from "./judge-accounting.js";
+import { type PromptCacheUsage, readPromptCache, sumPromptCache } from "./prompt-cache.js";
 
 export interface RubricComponent {
   metric: string;
@@ -235,6 +236,7 @@ export interface GraderUsage {
   numRequests?: unknown;
   cost?: unknown;
   completionDetails?: unknown;
+  promptCache?: PromptCacheUsage;
 }
 
 /** One judge reply, as the caller's request function reports it. */
@@ -357,6 +359,7 @@ export async function gradeRubric(
     // Every reply is a request unless the cache served it, whether or not it was billed.
     usages.push({
       ...reply.usage,
+      promptCache: readPromptCache(reply.metadata),
       numRequests: reply.usage?.numRequests ?? (reply.cached ? 0 : 1),
     });
     if (reply.error !== undefined) return gradingFailure(reply.error, usages, accounting, reply);
@@ -466,6 +469,7 @@ function providerMetadata(metadata: unknown): Record<string, unknown> {
   const {
     cachedResponse: _untrusted,
     judgeAccounting: _ledger,
+    copilotPromptCache: _cache,
     ...rest
   } = metadata as Record<string, unknown>;
   let copy: unknown;
@@ -516,6 +520,7 @@ function rubricResult(
   });
   const score = weightedScore / totalWeight;
   const tokensUsed = summarizeUsage(usages, accounting.cost);
+  const copilotPromptCache = sumPromptCache(usages.map(({ promptCache }) => promptCache));
   return {
     pass: allPassed,
     score,
@@ -526,6 +531,7 @@ function rubricResult(
     ...(tokensUsed ? { tokensUsed } : {}),
     metadata: {
       ...providerMetadata(reply.metadata),
+      ...(copilotPromptCache ? { copilotPromptCache } : {}),
       judgeAccounting: accounting.ledger,
       renderedGradingPrompt,
       ...(reply.cached ? { cachedResponse: true as const } : {}),

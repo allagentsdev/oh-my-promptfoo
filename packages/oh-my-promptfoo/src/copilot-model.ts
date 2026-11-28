@@ -428,20 +428,32 @@ function cacheReads(reply: ProviderReply, endpoint: CopilotModelEndpoint): Provi
 function copilotReply(response: unknown, generation: Generation): unknown {
   if (!response || typeof response !== "object") return response;
   const { cost: _listPrice, ...reply } = response as ProviderReply;
-  return cacheReads(
-    {
-      ...reply,
-      metadata: {
-        ...reply.metadata,
-        copilotEndpoint: generation.endpoint,
-        ...(generation.prices ? { copilotTokenPrices: generation.prices } : {}),
-        ...(generation.maxOutputTokens === undefined
-          ? {}
-          : { copilotMaxOutputTokens: generation.maxOutputTokens }),
-      },
+  const measured = cacheReads(reply, generation.endpoint);
+  const details = measured.tokenUsage?.completionDetails as Record<string, unknown> | undefined;
+  const read = tokenCount(details?.cacheReadInputTokens);
+  const write = tokenCount(details?.cacheCreationInputTokens);
+  // Promptfoo's Anthropic adapter supplies zero for an absent sibling counter.
+  const confirmed = (value: number | undefined) =>
+    value !== undefined && (value !== 0 || generation.endpoint !== "messages");
+  return {
+    ...measured,
+    metadata: {
+      ...measured.metadata,
+      copilotEndpoint: generation.endpoint,
+      ...(!reply.cached && !reply.error && (confirmed(read) || confirmed(write))
+        ? {
+            copilotPromptCache: {
+              ...(confirmed(read) ? { read } : {}),
+              ...(confirmed(write) ? { write } : {}),
+            },
+          }
+        : {}),
+      ...(generation.prices ? { copilotTokenPrices: generation.prices } : {}),
+      ...(generation.maxOutputTokens === undefined
+        ? {}
+        : { copilotMaxOutputTokens: generation.maxOutputTokens }),
     },
-    generation.endpoint,
-  );
+  };
 }
 
 const loadNativeProvider = async (

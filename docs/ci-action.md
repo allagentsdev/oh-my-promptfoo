@@ -646,7 +646,10 @@ does not import Promptfoo's evaluator, server or database internals.
 
 ## Measurement notes and timing
 
-Unknown measurements remain unknown. Each test's expanded details explain whether
+Each test's expanded details show total, input, cache-read, cache-write, and
+output tokens for the candidate and grader, alongside requests and cost. Input
+may include cache reads and writes, depending on the provider. Unreported counts
+stay unknown. The details explain whether
 usage/cost was not reported, the provider or grader errored, an accounting ledger
 was incomplete, or recorded pricing could not be matched. These are fixed diagnostic
 categories; raw provider errors and judge reasons remain private. A failed grader
@@ -654,10 +657,10 @@ may have incurred spend even when its result contains synthetic zero tokens.
 Known deterministic checks still establish zero grader cost.
 
 The main results table is unchanged. A collapsed **Run timing** section reports
-CLI preparation, the native evaluation and reporting. When the public workspace
+CLI preparation, evaluation, and reporting. When the public workspace
 progress channel is available, it also reports the sum of observed workspace
 preparation times, from provider case admission to workspace readiness (including
-queue waits). These phases overlap: native evaluation includes workspace
+queue waits). These phases overlap: evaluation includes workspace
 preparation and grading. Do not add them together or compare the workspace sum to
 wall time under concurrency. Missing or unfinished workspace observations remain
 unknown. Caller preparation outside the Action is not included.

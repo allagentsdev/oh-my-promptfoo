@@ -470,6 +470,60 @@ test("rubric cost estimates require a matching model and measured usage", () => 
   assert.equal(summarizeEvaluation(input, 0).totals.graderCost.usd, null);
 });
 
+test("Markdown test details distinguish cached input, unknown counts, and explicit zeros", () => {
+  const report = summarizeEvaluation(
+    document([
+      row({
+        response: {
+          tokenUsage: { ...usage, cached: 40 },
+          metadata: { copilotPromptCache: { read: 40, write: 30 } },
+          cost: 0.002,
+        },
+      }),
+      row({
+        gradingResult: {
+          pass: true,
+          score: 1,
+          componentResults: [
+            {
+              ...assertion(),
+              assertion: { type: "llm-rubric" },
+              metadata: { copilotPromptCache: { read: 20, write: 0 } },
+              tokensUsed: {
+                total: 65,
+                prompt: 50,
+                completion: 15,
+                cached: 20,
+                numRequests: 1,
+                cost: 0.003,
+              },
+            },
+          ],
+        },
+        response: { tokenUsage: usage },
+      }),
+      row({ response: { tokenUsage: { ...usage, cached: 101 }, cost: 0.005 } }),
+    ]),
+  );
+  assert.equal(report.cases[0].candidateUsage.prompt, 100);
+  assert.equal(report.cases[0].candidateUsage.cached, 40);
+  const details = renderSummary(report).split("### Test details")[1];
+  assert.ok(
+    details.indexOf("Input may include cache reads and writes, depending on the provider.") >
+      details.lastIndexOf("</details>"),
+  );
+  assert.ok(
+    details.includes(
+      "| Role | Total tokens | Input | Cache read | Cache write | Output | Requests | Cost |",
+    ),
+  );
+  assert.ok(details.includes("| Candidate | 110 | 100 | 40 | 30 | 10 | 1 | $0.0020 |"));
+  assert.ok(details.includes("| Grader | 0 | 0 | 0 | 0 | 0 | 0 | $0.0000 |"));
+  assert.ok(details.includes("| Candidate | 110 | 100 | unknown | unknown | 10 | 1 | unknown |"));
+  assert.ok(details.includes("| Candidate | 110 | 100 | unknown | unknown | 10 | 1 | $0.0050 |"));
+  assert.ok(details.includes("| Grader | 65 | 50 | 20 | 0 | 15 | 1 | $0.0030 |"));
+});
+
 test("public case IDs label numbered links while private reports omit them", () => {
   const input = document([
     row({

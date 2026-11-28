@@ -1,5 +1,6 @@
 import { safeCount, safeMultiplier } from "./copilot-accounting.js";
 import { type SourceOptions, sourceUrl } from "./eval-sources.js";
+import { type PromptCacheUsage, readPromptCache, sumPromptCache } from "./prompt-cache.js";
 import { redact, secrets } from "./redaction.js";
 import {
   type MeasurementUnavailableReason,
@@ -21,6 +22,7 @@ export interface Usage {
   completion: number | null;
   cached: number | null;
   requests: number | null;
+  promptCache?: PromptCacheUsage;
   unavailableReasons?: MeasurementUnavailableReason[];
 }
 
@@ -267,7 +269,7 @@ function graderMeasurements(grade: unknown, failed: boolean): { cost: ResultCost
                 ? judge.slice(8)
                 : metadata.model,
             ),
-            usage: usage(tokenUsage),
+            usage: { ...usage(tokenUsage), promptCache: readPromptCache(metadata) },
           },
         ];
       }
@@ -279,7 +281,10 @@ function graderMeasurements(grade: unknown, failed: boolean): { cost: ResultCost
         ? [
             {
               cost: responseCost({ cost: 0 }, undefined),
-              usage: usage({ total: 0, prompt: 0, completion: 0, cached: 0, numRequests: 0 }),
+              usage: {
+                ...usage({ total: 0, prompt: 0, completion: 0, cached: 0, numRequests: 0 }),
+                promptCache: { read: 0, write: 0 },
+              },
             },
           ]
         : [{ cost: unknownCost("not-reported"), usage: usage(undefined) }];
@@ -287,9 +292,13 @@ function graderMeasurements(grade: unknown, failed: boolean): { cost: ResultCost
   // Root assertions own measurements; aggregate tokens can contain synthetic
   // zeroes and diagnostic criterion children do not own extra spend.
   const measurements = collect(roots(value.componentResults));
+  const promptCache = sumPromptCache(measurements.map((item) => item.usage.promptCache));
   return {
     cost: sumCosts(measurements.map((item) => item.cost)),
-    usage: sumUsage(measurements.map((item) => item.usage)),
+    usage: {
+      ...sumUsage(measurements.map((item) => item.usage)),
+      ...(promptCache ? { promptCache } : {}),
+    },
   };
 }
 
@@ -365,6 +374,7 @@ export function summarizeEvaluation(
     counts[status]++;
     const grader = graderMeasurements(row.gradingResult, hasError);
     const provider = record(row.provider).id;
+    const promptCache = readPromptCache(reply.metadata);
     const testLabel = label(record(test.metadata).id) ?? label(test.description);
     const candidateLabel = label(record(row.provider).label);
     const namedScores = options.publicLabels
@@ -380,7 +390,10 @@ export function summarizeEvaluation(
       score: score(row.score),
       ...(score(test.threshold) !== null ? { threshold: score(test.threshold)! } : {}),
       latencyMs: measured(row.latencyMs),
-      candidateUsage: usage(reply.tokenUsage, reply.error ? "provider-error" : "not-reported"),
+      candidateUsage: {
+        ...usage(reply.tokenUsage, reply.error ? "provider-error" : "not-reported"),
+        ...(promptCache ? { promptCache } : {}),
+      },
       graderUsage: grader.usage,
       candidateCost: responseCost(
         reply,
@@ -505,22 +518,26 @@ function measurementNotes(item: CaseReport): string {
     .join(". ");
 }
 
-/** Durations overlap: native evaluation includes workspace preparation and grader calls. */
+/** Durations overlap: evaluation includes workspace preparation and grader calls. */
 function renderTimings(timings: RunTimings, replayed = false): string {
   const rows = [
     ["Toolchain preparation", timings.toolchainMs],
     ["CLI preparation", timings.setupMs],
-    ["Native evaluation (includes workspace and grading)", timings.nativeEvaluationMs],
+    ["Evaluation (includes workspace setup and grading)", timings.nativeEvaluationMs],
     ["Workspace preparation (sum of observed workspaces)", timings.workspacePreparationMs],
     [replayed ? "Replay rendering (this invocation)" : "Reporting", timings.reportingMs],
   ].filter(([, value]) => value !== undefined);
   if (!rows.length) return "";
-  return `<details><summary>${replayed ? "Replay timing" : "Run timing"}</summary>\n\n| Phase | Duration |\n| --- | ---: |\n${rows.map(([name, value]) => `| ${name} | ${formats.time(value as number | null)} |`).join("\n")}\n\nDurations overlap; workspace time is included in native evaluation. They must not be added together.\n\n</details>\n`;
+  return `<details><summary>${replayed ? "Replay timing" : "Run timing"}</summary>\n\n| Phase | Duration |\n| --- | ---: |\n${rows.map(([name, value]) => `| ${name} | ${formats.time(value as number | null)} |`).join("\n")}\n\nDurations overlap; workspace time is included in evaluation. They must not be added together.\n\n</details>\n`;
 }
 
 /** Render only normalized outcomes and explicitly public, redacted labels. */
 export function renderSummary(report: EvaluationReport): string {
   const { number, score, time, money, escapeMarkup, badge, usageSummary } = formats;
+  const usageRow = (role: string, usage: Usage, cost: ResultCost) => {
+    const { prompt, promptCache } = usage;
+    return `| ${role} | ${number(usage.total)} | ${number(prompt)} | ${number(promptCache?.read ?? null)} | ${number(promptCache?.write ?? null)} | ${number(usage.completion)} | ${number(usage.requests)} | ${money(cost)} |`;
+  };
   const candidate = report.cases[0]?.candidate;
   const sharedCandidate = candidate && report.cases.every((item) => item.candidate === candidate);
   const title = (item: CaseReport, html = false) => {
@@ -603,10 +620,10 @@ export function renderSummary(report: EvaluationReport): string {
       "",
       `Score: **${score(item.score)}** · Candidate time: **${time(item.latencyMs)}**`,
       "",
-      "| Role | Tokens | Requests | Cost |",
-      "| --- | ---: | ---: | ---: |",
-      `| Candidate | ${number(item.candidateUsage.total)} | ${number(item.candidateUsage.requests)} | ${money(item.candidateCost)} |`,
-      `| Grader | ${number(item.graderUsage.total)} | ${number(item.graderUsage.requests)} | ${money(item.graderCost)} |`,
+      "| Role | Total tokens | Input | Cache read | Cache write | Output | Requests | Cost |",
+      "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+      usageRow("Candidate", item.candidateUsage, item.candidateCost),
+      usageRow("Grader", item.graderUsage, item.graderCost),
       "",
       ...(notes ? [`${notes}.`, ""] : []),
       ...(item.namedScores?.length
@@ -641,7 +658,7 @@ export function renderSummary(report: EvaluationReport): string {
     "",
     "Tests are numbered from 1 within each suite. Each candidate/repeat has its own result number.",
     "",
-    "Results-table tokens and cost include candidate and grader when both are reported; latency is the candidate's native latency. Unknown means unmeasured or incomplete. — means no assertion threshold was authored. ~ marks a token-price estimate. Costs are not invoices or savings. Native precision is retained in report.json.",
+    "Results-table tokens and cost include candidate and grader when both are reported; latency is the candidate's native latency. Input may include cache reads and writes, depending on the provider. Unknown means unmeasured or incomplete. — means no assertion threshold was authored. ~ marks a token-price estimate.",
   );
   if (report.issues.length)
     lines.push(
@@ -693,9 +710,7 @@ export function renderConsoleSummary(report: EvaluationReport): string {
   }
   if (report.issues.length)
     lines.push("Result coverage or execution is incomplete; inspect retained private diagnostics.");
-  lines.push(
-    "Unknown means unmeasured or incomplete; ~ marks a token-price estimate. Costs are not invoices or savings.",
-  );
+  lines.push("Unknown means unmeasured or incomplete; ~ marks a token-price estimate.");
   return `${lines.join("\n")}\n`;
 }
 
